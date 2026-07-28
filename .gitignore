@@ -1,0 +1,9 @@
+node_modules
+dist
+.env
+.env.local
+.evv.example
+.DS_Store
+*.log
+schema.sql
+dump/

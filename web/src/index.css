@@ -1,0 +1,59 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  /* Warm cream + mustard gold palette (CFC brand) */
+  :root {
+    --bg: 40 35% 95%;          /* warm cream */
+    --fg: 25 25% 14%;          /* dark warm brown */
+    --card: 42 50% 97%;        /* slightly warmer cream for cards */
+    --muted: 40 25% 91%;       /* light beige */
+    --muted-fg: 30 12% 42%;    /* warm gray-brown */
+    --border: 35 25% 86%;      /* subtle warm beige */
+    --primary: 42 75% 50%;     /* mustard gold */
+    --primary-fg: 40 50% 98%;  /* on-primary cream */
+    --accent: 42 60% 88%;      /* light gold tint */
+    --accent-fg: 30 50% 22%;   /* dark gold-brown */
+    --ring: 42 75% 50%;
+    --success: 145 40% 38%;    /* muted forest green */
+    --warning: 28 75% 48%;     /* warm rust-orange */
+    --danger: 5 60% 48%;       /* muted brick red */
+  }
+  .dark {
+    --bg: 28 18% 9%;           /* deep warm brown */
+    --fg: 40 30% 92%;          /* warm cream */
+    --card: 28 16% 13%;        /* warm dark card */
+    --muted: 28 14% 17%;       /* slightly lighter dark */
+    --muted-fg: 35 18% 62%;    /* warm gray */
+    --border: 28 12% 22%;      /* subtle dark border */
+    --primary: 42 80% 60%;     /* brighter gold for dark */
+    --primary-fg: 28 30% 10%;  /* dark on-primary */
+    --accent: 28 25% 22%;      /* deeper gold tint */
+    --accent-fg: 42 80% 75%;   /* warm gold light */
+    --ring: 42 80% 60%;
+    --success: 145 45% 50%;
+    --warning: 28 75% 56%;
+    --danger: 5 65% 58%;
+  }
+
+  html, body, #root { height: 100%; }
+  body {
+    @apply bg-bg text-fg antialiased;
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    font-feature-settings: "cv02","cv03","cv04","cv11";
+  }
+
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { @apply bg-border rounded-full; }
+  ::-webkit-scrollbar-thumb:hover { @apply bg-muted-fg/40; }
+}
+
+@layer utilities {
+  .glass {
+    background: linear-gradient(135deg, hsl(var(--card) / 0.7), hsl(var(--card) / 0.4));
+    backdrop-filter: blur(8px);
+  }
+  .num { font-variant-numeric: tabular-nums; }
+}

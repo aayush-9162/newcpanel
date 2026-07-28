@@ -1,0 +1,22 @@
+{
+  "name": "server",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "dev": "node --watch src/index.js",
+    "start": "node src/index.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "exceljs": "^4.4.0",
+    "express": "^4.21.1",
+    "jose": "^5.9.6",
+    "morgan": "^1.10.0",
+    "mssql": "^11.0.1",
+    "mysql2": "^3.11.4",
+    "zod": "^3.23.8"
+  }
+}
