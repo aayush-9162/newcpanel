@@ -366,7 +366,12 @@ export default function Dashboard() {
 
   const companyLoading = companyDayQ.isLoading || companyMonthQ.isLoading;
 
-  // Store → BLDG mapping used by SalesItemDetail queries.
+  // Store → sale-ticket prefix used by SalesItemDetail queries.
+  // An item's store is the first digit of its SaleNo ('1' = Arden, '2' =
+  // Waynesville) — the same key SalespersonDaily uses. We deliberately do NOT
+  // filter on the BLDG column: BLDG is the item's physical building and is 999
+  // (central warehouse) for ~80% of rows, so filtering on it drops most of a
+  // store's actual sales (e.g. SIGN at Arden showed 41 instead of 276).
   const STORE_TO_BLDG = { ARDEN: 1, WAYNESVILLE: 2 };
   const selectedBldg  = STORE_TO_BLDG[store];
 
@@ -437,7 +442,10 @@ export default function Dashboard() {
         CROSS JOIN m m3
         WHERE ${spdStore}
           AND YEAR(fc.firstSale) = YEAR(m3.d) AND MONTH(fc.firstSale) = MONTH(m3.d)
-          AND YEAR(sd.SaleDate)  = YEAR(m3.d) AND MONTH(sd.SaleDate)  = MONTH(m3.d))  AS newCustomers
+          AND YEAR(sd.SaleDate)  = YEAR(m3.d) AND MONTH(sd.SaleDate)  = MONTH(m3.d))  AS newCustomers,
+      (SELECT COUNT(DISTINCT sd.CustomerId) FROM SalespersonDaily sd CROSS JOIN m m4
+        WHERE ${spdStore} AND YEAR(sd.SaleDate) = YEAR(m4.d) AND MONTH(sd.SaleDate) = MONTH(m4.d)
+          AND sd.CustomerId IS NOT NULL AND LTRIM(RTRIM(sd.CustomerId)) <> '')          AS thisMonthCustomers
   `;
   const orderCountQ = useSqlQuery(orderCountSql, []);
   const orderCount = orderCountQ.data?.rows?.[0] ?? {};
@@ -476,7 +484,7 @@ export default function Dashboard() {
            SELECT UPPER(ISNULL(Description2,'')) AS d2
            FROM SalesItemDetail CROSS JOIN m
            WHERE YEAR(SaleDate) = YEAR(m.d) AND MONTH(SaleDate) = MONTH(m.d)
-             AND BLDG = ${selectedBldg}
+             AND LEFT(CAST(SaleNo AS VARCHAR(20)), 1) = '${selectedBldg}'
          ),
          cat AS (SELECT ${roomCase} AS room FROM base)
     SELECT room, COUNT(*) AS units FROM cat GROUP BY room
@@ -497,7 +505,7 @@ export default function Dashboard() {
                  COUNT(DISTINCT ItemID) AS skus
     FROM SalesItemDetail CROSS JOIN m
     WHERE YEAR(SaleDate) = YEAR(m.d) AND MONTH(SaleDate) = MONTH(m.d)
-      AND BLDG = ${selectedBldg}
+      AND LEFT(CAST(SaleNo AS VARCHAR(20)), 1) = '${selectedBldg}'
       AND VendorID IS NOT NULL
       AND LTRIM(RTRIM(VendorID)) NOT IN ('CFC', 'USLD', 'NONE', '')
     GROUP BY LTRIM(RTRIM(VendorID))
@@ -570,6 +578,11 @@ export default function Dashboard() {
   const last7Orders      = Number(orderCount.last7Orders)      || 0;
   const thisMonthOrders  = Number(orderCount.thisMonthOrders)  || 0;
   const newCustomers     = Number(orderCount.newCustomers)     || 0;
+  // Customer mix: total distinct customers this month, split into first-time
+  // (newCustomers) and returning (bought before this month). Both derive from
+  // the same universe so returning = total − new can never go negative.
+  const totalCustomers     = Number(orderCount.thisMonthCustomers) || 0;
+  const returningCustomers = Math.max(0, totalCustomers - newCustomers);
   // Avg order value uses SalespersonDaily revenue ÷ SalespersonDaily orders —
   // both from the same query, so they can't disagree.
   const spdMonthRev      = Number(orderCount.thisMonthRev)     || 0;
@@ -1055,19 +1068,20 @@ export default function Dashboard() {
               fullReportLabel: 'Open Sales Comparison Report',
             })}
           />
-          <HeroStat
-            label="New Customers · This Month"
-            value={fmtNumber(newCustomers)}
-            icon={User}
-            accent="violet"
-            subtitle={newCustomers ? 'First-time buyers' : 'No new customers yet'}
+          <CustomerMixTile
+            label="Customers · This Month"
+            total={totalCustomers}
+            newCount={newCustomers}
+            returning={returningCustomers}
             loading={orderCountQ.isLoading}
             onClick={openDetail({
-              title: `New Customers · This Month · ${store === 'ARDEN' ? 'Arden (S1)' : 'Waynesville (S2)'}`,
-              icon: User,
+              title: `Customers · This Month · ${store === 'ARDEN' ? 'Arden (S1)' : 'Waynesville (S2)'}`,
+              icon: Users,
               accent: 'violet',
-              headline: fmtNumber(newCustomers),
-              subtitle: newCustomers ? `First-time buyers whose earliest sale is this month` : 'No new customers this month yet',
+              headline: fmtNumber(totalCustomers),
+              subtitle: totalCustomers
+                ? `${fmtNumber(newCustomers)} new · ${fmtNumber(returningCustomers)} returning this month`
+                : 'No customers this month yet',
               detailsDb: 'sql',
               detailsSql: `
                 WITH m AS (SELECT MAX(SaleDate) AS d FROM SalespersonDaily),
@@ -1080,25 +1094,34 @@ export default function Dashboard() {
                 SELECT sd.CustomerId,
                        MAX(sd.CustomerName)      AS CustomerName,
                        MIN(fc.firstSale)         AS firstSale,
+                       CASE WHEN YEAR(MIN(fc.firstSale)) = YEAR(MAX(m.d))
+                                 AND MONTH(MIN(fc.firstSale)) = MONTH(MAX(m.d))
+                            THEN 'New' ELSE 'Returning' END AS custType,
                        SUM(sd.SaleSplitAmt)      AS spent,
                        COUNT(DISTINCT sd.SalesNo) AS orders
                 FROM SalespersonDaily sd
                 INNER JOIN fc ON fc.CustomerId = sd.CustomerId
                 CROSS JOIN m
-                WHERE YEAR(fc.firstSale) = YEAR(m.d) AND MONTH(fc.firstSale) = MONTH(m.d)
-                  AND YEAR(sd.SaleDate)  = YEAR(m.d) AND MONTH(sd.SaleDate)  = MONTH(m.d)
+                WHERE YEAR(sd.SaleDate) = YEAR(m.d) AND MONTH(sd.SaleDate) = MONTH(m.d)
                   AND ${spdStore}
                 GROUP BY sd.CustomerId
-                ORDER BY MIN(fc.firstSale) DESC
+                ORDER BY SUM(sd.SaleSplitAmt) DESC
               `,
               detailsColumns: [
-                { key: 'firstSale',    label: 'First Sale', render: (r) => r.firstSale ? new Date(r.firstSale).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—' },
-                { key: 'CustomerId',   label: 'Customer ID' },
+                { key: 'custType', label: 'Type', render: (r) => (
+                  <span className={cn('inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold',
+                    r.custType === 'New'
+                      ? 'bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-200'
+                      : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-200')}>
+                    {r.custType}
+                  </span>
+                )},
                 { key: 'CustomerName', label: 'Customer' },
+                { key: 'firstSale',    label: 'First Sale', render: (r) => r.firstSale ? new Date(r.firstSale).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—' },
                 { key: 'orders',       label: 'Orders', align: 'right', render: (r) => fmtNumber(Number(r.orders) || 0) },
                 { key: 'spent',        label: 'Spent', align: 'right', render: (r) => <span className="font-semibold">{fmtCurrency(Number(r.spent) || 0)}</span> },
               ],
-              detailsEmpty: 'No first-time customers this month yet',
+              detailsEmpty: 'No customers this month yet',
               fullReportPath: '/leads',
               fullReportLabel: 'Open Prospective Buyer report',
             })}
@@ -1132,8 +1155,11 @@ export default function Dashboard() {
                   icon: room.icon,
                   accent: room.accent,
                   headline: fmtNumber(units),
-                  subtitle: `${fmtNumber(units)} item${units === 1 ? '' : 's'} sold · e.g. Sofa, Loveseat, Recliner, Chair, Sectional`,
+                  subtitle: `${fmtNumber(units)} item${units === 1 ? '' : 's'} sold · multiple pieces of the same item on one sale are grouped with a Qty`,
                   detailsDb: 'sql',
+                  // Group identical pieces on the same sale into ONE row with a
+                  // Qty count — otherwise a sale of 5 matching recliners shows
+                  // as 5 duplicate-looking rows. SUM(Qty) still equals the tile.
                   detailsSql: `
                     WITH m AS (SELECT MAX(SaleDate) AS d FROM SalesItemDetail),
                          base AS (
@@ -1144,12 +1170,18 @@ export default function Dashboard() {
                                   UPPER(ISNULL(Description2,'')) AS d2
                            FROM SalesItemDetail CROSS JOIN m
                            WHERE YEAR(SaleDate) = YEAR(m.d) AND MONTH(SaleDate) = MONTH(m.d)
-                             AND BLDG = ${selectedBldg}
+                             AND LEFT(CAST(SaleNo AS VARCHAR(20)), 1) = '${selectedBldg}'
+                         ),
+                         filt AS (
+                           SELECT SaleDate, SaleNo, ItemID, VendorID, ItemType
+                           FROM base
+                           WHERE (${roomCase}) = '${room.key}'
                          )
-                    SELECT SaleDate, SaleNo, ItemID, VendorID, ItemType
-                    FROM base
-                    WHERE (${roomCase}) = '${room.key}'
-                    ORDER BY SaleDate DESC
+                    SELECT MIN(SaleDate) AS SaleDate, SaleNo, ItemID, VendorID, ItemType,
+                           COUNT(*) AS Qty
+                    FROM filt
+                    GROUP BY SaleNo, ItemID, VendorID, ItemType
+                    ORDER BY MIN(SaleDate) DESC
                   `,
                   detailsColumns: [
                     { key: 'SaleDate', label: 'Date', render: (r) => r.SaleDate ? new Date(r.SaleDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '—' },
@@ -1157,6 +1189,12 @@ export default function Dashboard() {
                     { key: 'ItemID',   label: 'Item ID' },
                     { key: 'VendorID', label: 'Vendor' },
                     { key: 'ItemType', label: 'Item Type' },
+                    { key: 'Qty',      label: 'Qty', align: 'right', render: (r) => {
+                      const n = Number(r.Qty) || 1;
+                      return n > 1
+                        ? <span className="font-semibold text-primary">×{fmtNumber(n)}</span>
+                        : <span className="text-muted-fg">1</span>;
+                    }},
                   ],
                   detailsEmpty: `No ${room.key.toLowerCase()} items sold this month`,
                 })}
@@ -1195,11 +1233,11 @@ export default function Dashboard() {
                   icon: Truck,
                   accent,
                   headline: `${fmtNumber(units)} items`,
-                  subtitle: `By item type · split into Lineup / Star-SKU · ${fmtNumber(skus)} distinct SKUs`,
+                  subtitle: `By item type · split into Stock Item / Star-SKU · ${fmtNumber(skus)} distinct SKUs`,
                   detailsColumns: [
                     { key: 'item_type', label: 'Item Type' },
                     { key: 'units',   label: 'Total Sold', align: 'right', render: (r) => <span className="font-semibold">{fmtNumber(r.units)}</span> },
-                    { key: 'lineup',  label: 'Lineup', align: 'right', render: (r) => r.lineup > 0 ? <span className="font-semibold text-emerald-600 dark:text-emerald-300">{fmtNumber(r.lineup)}</span> : <span className="text-muted-fg">0</span> },
+                    { key: 'lineup',  label: 'Stock Item', align: 'right', render: (r) => r.lineup > 0 ? <span className="font-semibold text-emerald-600 dark:text-emerald-300">{fmtNumber(r.lineup)}</span> : <span className="text-muted-fg">0</span> },
                     { key: 'star',    label: 'Star SKU', align: 'right', render: (r) => r.star > 0 ? <span className="font-semibold text-amber-600 dark:text-amber-300">{fmtNumber(r.star)}</span> : <span className="text-muted-fg">0</span> },
                   ],
                   detailsEmpty: `No items sold for ${vendor} this month`,
@@ -1214,7 +1252,7 @@ export default function Dashboard() {
                                   UPPER(ISNULL(Description2,'')) AS d2
                            FROM SalesItemDetail CROSS JOIN m
                            WHERE YEAR(SaleDate) = YEAR(m.d) AND MONTH(SaleDate) = MONTH(m.d)
-                             AND BLDG = ${selectedBldg}
+                             AND LEFT(CAST(SaleNo AS VARCHAR(20)), 1) = '${selectedBldg}'
                              AND LTRIM(RTRIM(VendorID)) = '${vendor.replace(/'/g, "''")}'
                          ),
                          typed AS (
@@ -1257,6 +1295,72 @@ function FilterPill({ active, onClick, children, title, small }) {
       )}
     >
       {children}
+    </button>
+  );
+}
+
+// CustomerMixTile — a single stat tile showing this month's total customers
+// split into New (first-time buyers) vs Returning, with a proportion bar and a
+// legend. Styled to match HeroStat (violet accent) and clickable to drill down.
+function CustomerMixTile({ label, total, newCount, returning, loading, onClick }) {
+  const newPct = total > 0 ? Math.round((newCount / total) * 100) : 0;
+  const retPct = total > 0 ? 100 - newPct : 0;
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        'group relative overflow-hidden rounded-2xl border bg-card text-left transition-all duration-300',
+        'border-violet-500/40 shadow-[0_8px_30px_-12px_rgba(139,92,246,0.45)]',
+        onClick && 'cursor-pointer hover:-translate-y-1 hover:shadow-[0_20px_40px_-15px_rgba(0,0,0,0.25)]',
+      )}
+    >
+      <div className="absolute inset-0 bg-gradient-to-br from-violet-500/20 via-violet-500/10 to-transparent opacity-90 dark:from-violet-500/25" />
+      <div className="absolute -bottom-4 -right-4 opacity-[0.06] dark:opacity-[0.08]">
+        <Users size={120} strokeWidth={1.5} />
+      </div>
+
+      <div className="relative p-4">
+        <div className="flex items-center justify-between gap-2">
+          <span title={typeof label === 'string' ? label : undefined} className="text-[10px] font-bold uppercase tracking-wider text-muted-fg leading-tight">{label}</span>
+          <div className="grid h-8 w-8 place-items-center rounded-lg shrink-0 text-white shadow-lg ring-2 bg-gradient-to-br from-violet-500 to-purple-500 ring-violet-500/30">
+            <Users size={15} strokeWidth={2.25} />
+          </div>
+        </div>
+
+        {loading ? (
+          <div className="mt-3 h-[78px] w-full animate-pulse rounded bg-muted/50" />
+        ) : (
+          <>
+            <div className="mt-2 flex items-baseline gap-1.5">
+              <span className="text-3xl font-extrabold leading-none tabular-nums text-violet-600 dark:text-violet-300">{fmtNumber(total)}</span>
+              <span className="text-[11px] font-medium text-muted-fg">total</span>
+            </div>
+
+            {/* Proportion bar: New (violet) vs Returning (emerald) */}
+            <div className="mt-3 flex h-2 w-full overflow-hidden rounded-full bg-muted">
+              <div className="h-full bg-violet-500 transition-all" style={{ width: `${newPct}%` }} title={`New · ${newPct}%`} />
+              <div className="h-full bg-emerald-500 transition-all" style={{ width: `${retPct}%` }} title={`Returning · ${retPct}%`} />
+            </div>
+
+            {/* Legend — both counts + share of total */}
+            <div className="mt-2.5 space-y-1">
+              <div className="flex items-center gap-2">
+                <span className="h-2.5 w-2.5 shrink-0 rounded-sm bg-violet-500" />
+                <span className="text-xs text-fg/80">New</span>
+                <span className="ml-auto text-sm font-bold tabular-nums text-fg">{fmtNumber(newCount)}</span>
+                <span className="w-9 text-right text-[10px] tabular-nums text-muted-fg">{newPct}%</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="h-2.5 w-2.5 shrink-0 rounded-sm bg-emerald-500" />
+                <span className="text-xs text-fg/80">Returning</span>
+                <span className="ml-auto text-sm font-bold tabular-nums text-fg">{fmtNumber(returning)}</span>
+                <span className="w-9 text-right text-[10px] tabular-nums text-muted-fg">{retPct}%</span>
+              </div>
+            </div>
+          </>
+        )}
+      </div>
     </button>
   );
 }

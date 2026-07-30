@@ -14,6 +14,7 @@ import {
   Wrench,
   FileEdit,
   ClipboardEdit,
+  Boxes,
 } from 'lucide-react';
 
 // `home: true` → shown on the cpanel home left panel.
@@ -33,11 +34,14 @@ const ADMIN_ONLY = ['admin'];                       // owner-only reports
 export const routes = [
   // Home — Control Panel is visible to everyone. Dashboard is for
   // owners/managers (company-wide sales numbers), not salespeople.
-  { path: '/',            label: 'Control Panel', icon: Home,            group: 'Home', built: true },
+  { path: '/',            label: 'Quick Access', icon: Home,            group: 'Home', built: true },
   { path: '/dashboard',   label: 'Dashboard',     icon: LayoutDashboard, group: 'Home', built: true, home: true, roles: MGR },
 
   // Sales Comparison Report — pinned to the top of Reports (owner-only).
   { path: '/scr',               label: 'Sales Comparison Report', icon: TrendingUp, group: 'Reports', built: true, home: true, roles: ADMIN_ONLY },
+
+  // Item Sold Analysis — deep dive into what sold (managers + admin + viewer).
+  { path: '/item-sold-analysis', label: 'Item Sold Analysis', icon: Boxes, group: 'Reports', built: true, home: true, roles: MGR },
 
   // Reports that salesperson IS allowed to see — no roles restriction
   { path: '/sales/performance', label: 'SalesPerson Performance', icon: TrendingUp, group: 'Reports', built: true, home: true },
