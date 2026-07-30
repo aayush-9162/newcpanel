@@ -10,7 +10,7 @@ import { FORMS } from '@/data/forms';
 import {
   LayoutGrid, ExternalLink, ClipboardEdit, Sparkles,
   // External tool icons
-  ListChecks, FolderOpen, BarChart3, Globe2, Video, ClipboardCheck, ShoppingBag,
+  ListChecks, FolderOpen, BarChart3, Globe2, Video, ClipboardCheck,
 } from 'lucide-react';
 
 // ─── External tools (open in new tab) ────────────────────────────────────────
@@ -56,14 +56,6 @@ const TOOLS = [
     href: 'http://192.168.0.211:4500',
     icon: ClipboardCheck,
     accent: 'violet',
-  },
-  {
-    label: 'Sales Form',
-    description: 'External sales entry application',
-    href: 'http://26.95.221.233:5000',
-    icon: ShoppingBag,
-    accent: 'emerald',
-    badge: 'New',
   },
 ];
 

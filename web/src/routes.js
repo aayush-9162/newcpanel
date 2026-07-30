@@ -84,5 +84,4 @@ export const externalLinks = [
   { label: 'INTRANET', href: 'https://sites.google.com/123cfc.com/cfc-intranet/', tone: 'warning' },
   { label: 'MEETING', href: 'https://meet.google.com/xwb-mbyf-gen', tone: 'success' },
   { label: 'PO Scrubbing', href: 'http://192.168.0.211:4500', tone: 'primary' },
-  { label: 'Sales Form', href: 'http://26.95.221.233:5000', tone: 'success', badge: 'New' },
 ];
