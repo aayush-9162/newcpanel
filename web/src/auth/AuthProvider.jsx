@@ -1,109 +1,92 @@
-// AuthProvider — initializes Keycloak once, blocks the app behind login,
-// and exposes the parsed user via the useAuth() hook.
+// AuthProvider — Google Sign-In + our own app session token.
 //
-// Usage (main.jsx):
-//   <AuthProvider>
-//     <App />
-//   </AuthProvider>
+// - On load, if we have a stored token, validate it against /api/auth/me and
+//   pull the user's current role. Invalid/expired → show the login screen.
+// - loginWithGoogle(credential) swaps a Google ID token for our app token.
+// - The whole app renders behind login: unauthenticated users see <Login/>.
 //
-// Anywhere inside the tree:
-//   const { profile, hasRole, logout } = useAuth();
+// useAuth() exposes: { user, profile (alias), roles, hasRole, token,
+//                      loginWithGoogle, logout, status }.
 
-import { createContext, useContext, useEffect, useState } from 'react';
-import { keycloak, getProfile, getRoles, hasRole as kHasRole, login, logout } from './keycloak';
+import { createContext, useContext, useCallback, useEffect, useState } from 'react';
+import { getStoredToken, setStoredToken, clearStoredToken } from './session';
+import Login from '@/pages/Login.jsx';
 
 const AuthCtx = createContext(null);
 
 export function AuthProvider({ children }) {
-  const [state, setState] = useState({ status: 'init', profile: null });
+  const [state, setState] = useState({ status: 'init', user: null });
 
+  // Validate a stored token on first load.
   useEffect(() => {
     let cancelled = false;
+    const token = getStoredToken();
+    if (!token) { setState({ status: 'unauthenticated', user: null }); return; }
 
-    // `login-required` makes Keycloak redirect to the SSO login page if the
-    // user isn't authenticated — no in-app login screen needed.
-    // PKCE S256 is the safe default for SPAs.
-    // `checkLoginIframe: false` avoids 3rd-party cookie issues in modern browsers.
-    keycloak
-      .init({
-        onLoad: 'login-required',
-        pkceMethod: 'S256',
-        checkLoginIframe: false,
-      })
-      .then((authenticated) => {
-        if (cancelled) return;
-        if (!authenticated) {
-          setState({ status: 'unauthenticated', profile: null });
-          return;
-        }
-        setState({ status: 'authenticated', profile: getProfile() });
-      })
-      .catch((err) => {
-        if (cancelled) return;
-        console.error('[auth] keycloak init failed', err);
-        setState({ status: 'error', profile: null, error: err });
-      });
-
-    // Refresh the user profile after the token rotates (e.g. roles changed).
-    keycloak.onAuthRefreshSuccess = () => {
-      if (!cancelled) setState((s) => ({ ...s, profile: getProfile() }));
-    };
-    // If the refresh fails entirely the keycloak helper will redirect to login.
-    keycloak.onAuthLogout = () => {
-      if (!cancelled) setState({ status: 'unauthenticated', profile: null });
-    };
+    fetch('/api/auth/me', { headers: { Authorization: `Bearer ${token}` } })
+      .then((res) => (res.ok ? res.json() : Promise.reject(res)))
+      .then((data) => { if (!cancelled) setState({ status: 'authenticated', user: data.user }); })
+      .catch(() => { if (!cancelled) { clearStoredToken(); setState({ status: 'unauthenticated', user: null }); } });
 
     return () => { cancelled = true; };
   }, []);
 
-  if (state.status === 'init') {
-    return (
-      <div className="grid min-h-screen place-items-center bg-bg text-fg">
-        <div className="flex flex-col items-center gap-3 text-sm text-muted-fg">
-          <div className="h-10 w-10 animate-spin rounded-full border-2 border-primary border-t-transparent" />
-          <span>Connecting to single sign-on…</span>
-        </div>
-      </div>
-    );
-  }
+  // Exchange a Google credential for our app token. Throws with a friendly
+  // message on failure (e.g. email not on the access list) so <Login/> can
+  // surface it.
+  const loginWithGoogle = useCallback(async (credential) => {
+    const res = await fetch('/api/auth/google', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ credential }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data.reason || data.error || 'Sign-in failed. Please try again.');
+    }
+    setStoredToken(data.token);
+    setState({ status: 'authenticated', user: data.user });
+    return data.user;
+  }, []);
 
-  if (state.status === 'error') {
-    return (
-      <div className="grid min-h-screen place-items-center bg-bg p-6 text-fg">
-        <div className="max-w-md rounded-2xl border border-rose-500/30 bg-rose-500/5 p-6 text-center">
-          <h1 className="text-lg font-semibold">Sign-in unavailable</h1>
-          <p className="mt-2 text-sm text-muted-fg">
-            Couldn't reach the SSO server. Check that the Keycloak container is running
-            (<code className="rounded bg-muted px-1.5 py-0.5">docker compose ps</code> in the sso folder).
-          </p>
-          <button onClick={() => location.reload()} className="mt-4 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-fg hover:opacity-90">
-            Retry
-          </button>
-        </div>
-      </div>
-    );
-  }
+  const logout = useCallback(() => {
+    clearStoredToken();
+    try { window.google?.accounts?.id?.disableAutoSelect(); } catch { /* ignore */ }
+    setState({ status: 'unauthenticated', user: null });
+  }, []);
 
-  if (state.status === 'unauthenticated') {
-    // Should be rare with onLoad: 'login-required', but handle it anyway.
-    return (
-      <div className="grid min-h-screen place-items-center bg-bg text-fg">
-        <button onClick={login} className="rounded-lg bg-primary px-5 py-2.5 text-sm font-semibold text-primary-fg hover:opacity-90">
-          Sign in
-        </button>
-      </div>
-    );
-  }
+  const user  = state.user;
+  const roles = user?.roles || [];
+  const hasRole = useCallback((name) => roles.includes(name), [roles]);
 
   const value = {
-    profile: state.profile,
-    roles: getRoles(),
-    hasRole: kHasRole,
-    login,
+    status: state.status,
+    user,
+    profile: user,           // alias — some components read `profile`
+    roles,
+    hasRole,
+    token: getStoredToken(),
+    loginWithGoogle,
     logout,
   };
 
-  return <AuthCtx.Provider value={value}>{children}</AuthCtx.Provider>;
+  let content;
+  if (state.status === 'init') {
+    content = (
+      <div className="grid min-h-screen place-items-center bg-bg text-fg">
+        <div className="flex flex-col items-center gap-3 text-sm text-muted-fg">
+          <div className="h-10 w-10 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+          <span>Loading…</span>
+        </div>
+      </div>
+    );
+  } else if (state.status !== 'authenticated') {
+    content = <Login />;
+  } else {
+    content = children;
+  }
+
+  return <AuthCtx.Provider value={value}>{content}</AuthCtx.Provider>;
 }
 
 export function useAuth() {
@@ -112,7 +95,7 @@ export function useAuth() {
   return ctx;
 }
 
-// Optional route gate — render `fallback` (or "Not authorized") if the user
+// Route gate — render `fallback` (or a "Not authorized" panel) if the user
 // lacks `role`. Pass a string or array of strings.
 export function RequireRole({ role, fallback, children }) {
   const { hasRole } = useAuth();

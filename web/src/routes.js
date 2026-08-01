@@ -15,6 +15,7 @@ import {
   FileEdit,
   ClipboardEdit,
   Boxes,
+  UserCog,
 } from 'lucide-react';
 
 // `home: true` → shown on the cpanel home left panel.
@@ -36,6 +37,7 @@ export const routes = [
   // owners/managers (company-wide sales numbers), not salespeople.
   { path: '/',            label: 'Quick Access', icon: Home,            group: 'Home', built: true },
   { path: '/dashboard',   label: 'Dashboard',     icon: LayoutDashboard, group: 'Home', built: true, home: true, roles: MGR },
+  { path: '/admin',       label: 'User Management', icon: UserCog,       group: 'Home', built: true, roles: ADMIN_ONLY },
 
   // Sales Comparison Report — pinned to the top of Reports (owner-only).
   { path: '/scr',               label: 'Sales Comparison Report', icon: TrendingUp, group: 'Reports', built: true, home: true, roles: ADMIN_ONLY },

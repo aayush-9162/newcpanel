@@ -1,35 +1,36 @@
 import { useQuery } from '@tanstack/react-query';
-import { keycloak, getToken, login, logout } from '@/auth/keycloak';
+import { getStoredToken, clearStoredToken } from '@/auth/session';
 
-// Once a 401-driven forced logout is in flight, don't fire more of them —
-// otherwise every parallel query would trigger its own logout and thrash.
+// Once a forced logout is in flight, don't fire more — otherwise every
+// parallel query would trigger its own reload and thrash.
 let forcedLogoutInFlight = false;
 
-// authFetch — wraps fetch() with the current access token (auto-refreshed
-// if within 30s of expiry). On 401:
-//   - If we have an authenticated Keycloak session, the token was rejected
-//     (stale issuer, revoked, clock skew, etc.). Force a full logout so
-//     the SSO cookie is dropped and the next visit gets a clean login.
-//   - If we're not authenticated, kick off a fresh login.
+// authFetch — wraps fetch() with our app session token as a Bearer.
+// A dead session (401, or a 403 that means the email was removed from the
+// access list) clears the token and reloads so <AuthProvider> shows the login
+// screen. A plain 403 "forbidden" (wrong role for an admin endpoint) is passed
+// through for the caller to handle.
 async function authFetch(input, init = {}) {
-  const token = await getToken(30);
+  const token = getStoredToken();
   const res = await fetch(input, {
     ...init,
     headers: {
       ...(init.headers || {}),
-      Authorization: `Bearer ${token}`,
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
   });
-  if (res.status === 401) {
-    if (!forcedLogoutInFlight) {
-      forcedLogoutInFlight = true;
-      const body = await res.clone().json().catch(() => ({}));
-      const detail = [body.error, body.reason].filter(Boolean).join(' — ') || 'unknown';
-      console.warn(`[auth] server rejected token, forcing logout — ${detail}`);
-      if (keycloak.authenticated) logout();
-      else login();
+  if (res.status === 401 || res.status === 403) {
+    const body = await res.clone().json().catch(() => ({}));
+    const sessionDead = res.status === 401 || body?.error === 'not authorized';
+    if (sessionDead) {
+      if (!forcedLogoutInFlight) {
+        forcedLogoutInFlight = true;
+        console.warn('[auth] session rejected, signing out');
+        clearStoredToken();
+        window.location.reload();
+      }
+      throw new Error('session expired');
     }
-    throw new Error('session expired');
   }
   return res;
 }
@@ -90,4 +91,34 @@ export function useMysqlQuery(qry, values = [], options = {}) {
     queryFn: () => runMysql(qry, values),
     ...options,
   });
+}
+
+// ─── Admin: manage the email → role access list (admin only) ────────────────
+export async function adminListUsers() {
+  const res = await authFetch('/api/admin/users');
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(json.reason || json.error || 'Failed to load users');
+  return json; // { roles: [...], users: [{ email, name, role }] }
+}
+
+export async function adminSaveUser({ email, name, role }) {
+  const res = await authFetch('/api/admin/users', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, name, role }),
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(json.reason || json.error || 'Save failed');
+  return json.user;
+}
+
+export async function adminDeleteUser(email) {
+  const res = await authFetch('/api/admin/users', {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email }),
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(json.error || 'Delete failed');
+  return json;
 }

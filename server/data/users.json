@@ -1,0 +1,14 @@
+{
+  "users": [
+    {
+      "email": "sunilgupta@123cfc.com",
+      "name": "Sunil Gupta",
+      "role": "admin"
+    },
+    {
+      "email": "aayushdubey@123cfc.com",
+      "name": "Aayush Dubey",
+      "role": "admin"
+    }
+  ]
+}

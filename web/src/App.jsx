@@ -2,6 +2,7 @@ import { Routes, Route } from 'react-router-dom';
 import { Layout } from '@/components/Layout.jsx';
 import CPanel from '@/pages/CPanel.jsx';
 import Dashboard from '@/pages/Dashboard.jsx';
+import Admin from '@/pages/Admin.jsx';
 import StubPage from '@/pages/StubPage.jsx';
 import { routes } from '@/routes';
 import { RequireRole } from '@/auth/AuthProvider';
@@ -33,6 +34,7 @@ import InventoryRequestForm from '@/pages/forms/InventoryRequestForm.jsx';
 const built = {
   '/': <CPanel />,
   '/dashboard': <Dashboard />,
+  '/admin': <Admin />,
 
   // Reports
   '/scr': <SCR />,

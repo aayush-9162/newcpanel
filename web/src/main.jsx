@@ -18,7 +18,8 @@ if (saved === 'dark') document.documentElement.classList.add('dark');
 else document.documentElement.classList.remove('dark');
 
 // StrictMode is intentionally OFF: it double-invokes effects in dev, which
-// breaks keycloak-js's "init can only run once per instance" guarantee.
+// would double-initialize the Google Sign-In button and fire duplicate
+// session/init requests. Not needed in production builds either way.
 ReactDOM.createRoot(document.getElementById('root')).render(
   <AuthProvider>
     <QueryClientProvider client={qc}>
