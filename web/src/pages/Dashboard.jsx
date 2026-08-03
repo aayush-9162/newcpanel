@@ -50,6 +50,15 @@ function daysInMonth(month, year) {
   return new Date(year, month, 0).getDate();
 }
 
+// Parse a 'YYYY-MM-DD' calendar date as LOCAL midnight. A MS SQL DATE comes
+// back as UTC midnight, and `new Date(utcMidnight)` renders as the previous
+// evening in any timezone west of UTC — which silently shifts the day (and
+// even the month, e.g. Aug 1 → Jul 31). Appending 'T00:00:00' (no Z) keeps it
+// on the intended calendar day.
+function localDate(s) {
+  return new Date(String(s).slice(0, 10) + 'T00:00:00');
+}
+
 export default function Dashboard() {
   const navigate = useNavigate();
   const deepDiveRef = useRef(null);
@@ -394,7 +403,7 @@ export default function Dashboard() {
            CROSS JOIN m
            WHERE ProfitCenter = '${store}'
          )
-    SELECT a.dt AS day, SUM(a.rev) AS revenue
+    SELECT CONVERT(char(10), a.dt, 23) AS day, SUM(a.rev) AS revenue
     FROM a
     WHERE a.dt IS NOT NULL
       AND a.dt BETWEEN DATEADD(day, -30, a.maxDate) AND a.maxDate
@@ -545,33 +554,32 @@ export default function Dashboard() {
   // can't be skewed by an outlier day from the prior month.
   const recency = useMemo(() => {
     if (!recencyRows.length) return null;
-    const sorted = [...recencyRows].sort((a, b) => new Date(a.day) - new Date(b.day));
-    const latestDateObj = new Date(sorted[sorted.length - 1].day);
-    const latestMs = latestDateObj.getTime();
-    const latestYear  = latestDateObj.getFullYear();
-    const latestMonth = latestDateObj.getMonth();
+    // row.day is a 'YYYY-MM-DD' calendar-date string. Compare by string / local
+    // date so nothing shifts across the UTC boundary (see localDate()).
+    const sorted = [...recencyRows].sort((a, b) => String(a.day).localeCompare(String(b.day)));
+    const latest    = String(sorted[sorted.length - 1].day).slice(0, 10);
+    const latestMs  = localDate(latest).getTime();
+    const latestYM  = latest.slice(0, 7);                    // 'YYYY-MM'
     const dayMs = 86_400_000;
     let yestRev = 0, last7Rev = 0, prev7Rev = 0, thisMonthRev = 0;
     let bestDay = null, lowestDay = null;
     for (const row of sorted) {
-      const d = new Date(row.day);
-      const t = d.getTime();
-      const daysAgo = Math.round((latestMs - t) / dayMs);
+      const dayStr  = String(row.day).slice(0, 10);
+      const daysAgo = Math.round((latestMs - localDate(dayStr).getTime()) / dayMs);
       const rev = Number(row.revenue) || 0;
       if (daysAgo === 0) yestRev += rev;
       if (daysAgo <= 6  && daysAgo >= 0) last7Rev += rev;
       if (daysAgo >= 7  && daysAgo <= 13) prev7Rev += rev;
       // Within the same calendar month as the latest data row.
-      if (d.getFullYear() === latestYear && d.getMonth() === latestMonth) {
+      if (dayStr.slice(0, 7) === latestYM) {
         thisMonthRev += rev;
-        if (!bestDay   || rev > bestDay.rev)   bestDay   = { date: row.day, rev };
-        if (!lowestDay || rev < lowestDay.rev) lowestDay = { date: row.day, rev };
+        if (!bestDay   || rev > bestDay.rev)   bestDay   = { date: dayStr, rev };
+        if (!lowestDay || rev < lowestDay.rev) lowestDay = { date: dayStr, rev };
       }
     }
     const last7vsPrev = prev7Rev > 0 ? ((last7Rev - prev7Rev) / prev7Rev) * 100 : null;
     const sparkline   = sorted.slice(-14).map((r) => ({ value: Number(r.revenue) || 0 }));
-    const latestDate  = sorted[sorted.length - 1].day;
-    return { latestDate, yestRev, last7Rev, thisMonthRev, prev7Rev, bestDay, lowestDay, last7vsPrev, sparkline };
+    return { latestDate: latest, yestRev, last7Rev, thisMonthRev, prev7Rev, bestDay, lowestDay, last7vsPrev, sparkline };
   }, [recencyRows]);
 
   const yestOrders       = Number(orderCount.yestOrders)       || 0;
@@ -588,7 +596,7 @@ export default function Dashboard() {
   const spdMonthRev      = Number(orderCount.thisMonthRev)     || 0;
   const avgOrder         = thisMonthOrders > 0 ? spdMonthRev / thisMonthOrders : null;
   const latestDateLabel = recency?.latestDate
-    ? new Date(recency.latestDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+    ? localDate(recency.latestDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
     : 'Yesterday';
 
   return (
@@ -956,7 +964,7 @@ export default function Dashboard() {
             icon={Trophy}
             accent="emerald"
             subtitle={recency?.bestDay
-              ? new Date(recency.bestDay.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+              ? localDate(recency.bestDay.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
               : 'No data yet'}
             loading={recencyQ.isLoading}
             onClick={openDetail({
@@ -965,7 +973,7 @@ export default function Dashboard() {
               accent: 'emerald',
               headline: recency?.bestDay ? fmtCurrency(recency.bestDay.rev) : '—',
               subtitle: recency?.bestDay
-                ? `Every ticket rung up on ${new Date(recency.bestDay.date).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}`
+                ? `Every ticket rung up on ${localDate(recency.bestDay.date).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}`
                 : 'No data yet',
               detailsDb: recency?.bestDay ? 'sql' : undefined,
               detailsSql: recency?.bestDay ? `
@@ -974,7 +982,7 @@ export default function Dashboard() {
                        MAX(sd.SalesPerson)  AS SalesPerson,
                        SUM(ISNULL(sd.SaleSplitAmt, 0)) AS amount
                 FROM SalespersonDaily sd
-                WHERE sd.SaleDate = '${new Date(recency.bestDay.date).toISOString().slice(0,10)}'
+                WHERE sd.SaleDate = '${recency.bestDay.date}'
                   AND ${spdStore}
                 GROUP BY sd.SalesNo
                 ORDER BY amount DESC
@@ -996,7 +1004,7 @@ export default function Dashboard() {
             icon={TrendingDown}
             accent="amber"
             subtitle={recency?.lowestDay
-              ? new Date(recency.lowestDay.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+              ? localDate(recency.lowestDay.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
               : 'No data yet'}
             loading={recencyQ.isLoading}
             onClick={openDetail({
@@ -1005,7 +1013,7 @@ export default function Dashboard() {
               accent: 'amber',
               headline: recency?.lowestDay ? fmtCurrency(recency.lowestDay.rev) : '—',
               subtitle: recency?.lowestDay
-                ? `Every ticket rung up on ${new Date(recency.lowestDay.date).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}`
+                ? `Every ticket rung up on ${localDate(recency.lowestDay.date).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}`
                 : 'No data yet',
               detailsDb: recency?.lowestDay ? 'sql' : undefined,
               detailsSql: recency?.lowestDay ? `
@@ -1014,7 +1022,7 @@ export default function Dashboard() {
                        MAX(sd.SalesPerson)  AS SalesPerson,
                        SUM(ISNULL(sd.SaleSplitAmt, 0)) AS amount
                 FROM SalespersonDaily sd
-                WHERE sd.SaleDate = '${new Date(recency.lowestDay.date).toISOString().slice(0,10)}'
+                WHERE sd.SaleDate = '${recency.lowestDay.date}'
                   AND ${spdStore}
                 GROUP BY sd.SalesNo
                 ORDER BY amount DESC
