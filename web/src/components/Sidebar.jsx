@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom';
-import { routes, isRouteAllowed } from '@/routes';
+import { routes } from '@/routes';
 import { useAuth } from '@/auth/AuthProvider';
 import { cn } from '@/lib/cn';
 import { LayoutGrid } from 'lucide-react';
@@ -10,10 +10,10 @@ import { LayoutGrid } from 'lucide-react';
 const ORDER = ['Home', 'Reports'];
 
 export function Sidebar() {
-  const { roles } = useAuth();
-  // Only show routes the current user's realm roles permit.
+  const { canAccess } = useAuth();
+  // Only show routes the current user's role is permitted to open.
   const grouped = routes
-    .filter((r) => isRouteAllowed(r, roles))
+    .filter((r) => canAccess(r.path))
     .reduce((acc, r) => {
       (acc[r.group] ||= []).push(r);
       return acc;

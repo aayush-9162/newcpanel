@@ -16,6 +16,7 @@
 
 import { createRemoteJWKSet, jwtVerify, SignJWT } from 'jose';
 import { resolveUser } from './users.js';
+import { allowedRoutesFor } from './roles.js';
 
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
 const APP_JWT_SECRET   = new TextEncoder().encode(
@@ -81,6 +82,7 @@ export async function requireAuth(req, res, next) {
     picture: payload.picture || '',
     role:    record.role,
     roles:   [record.role],
+    allowedRoutes: allowedRoutesFor(record.role),  // '*' or string[]
   };
   next();
 }

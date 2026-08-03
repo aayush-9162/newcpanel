@@ -5,7 +5,7 @@ import Dashboard from '@/pages/Dashboard.jsx';
 import Admin from '@/pages/Admin.jsx';
 import StubPage from '@/pages/StubPage.jsx';
 import { routes } from '@/routes';
-import { RequireRole } from '@/auth/AuthProvider';
+import { RequireRoute } from '@/auth/AuthProvider';
 
 // --- Reports ---
 import SCR from '@/pages/SCR.jsx';
@@ -66,12 +66,15 @@ export default function App() {
       <Route element={<Layout />}>
         {routes.map((r) => {
           const page = built[r.path] ?? <StubPage title={r.label} path={r.path} />;
-          // If the route declares a role allow-list, wrap with RequireRole so
-          // direct URL access by a forbidden user shows "Not authorized".
-          const element = r.roles && r.roles.length > 0
-            ? <RequireRole role={r.roles}>{page}</RequireRole>
-            : page;
-          return <Route key={r.path} path={r.path} element={element} />;
+          // Every route is guarded by path — direct-URL access by a role that
+          // isn't permitted shows "Not authorized" (permissions are server-driven).
+          return (
+            <Route
+              key={r.path}
+              path={r.path}
+              element={<RequireRoute path={r.path}>{page}</RequireRoute>}
+            />
+          );
         })}
         <Route
           path="*"

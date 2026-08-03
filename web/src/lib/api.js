@@ -122,3 +122,33 @@ export async function adminDeleteUser(email) {
   if (!res.ok) throw new Error(json.error || 'Delete failed');
   return json;
 }
+
+// ─── Admin: manage roles + their page permissions (admin only) ──────────────
+export async function adminListRoles() {
+  const res = await authFetch('/api/admin/roles');
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(json.reason || json.error || 'Failed to load roles');
+  return json.roles || [];
+}
+
+export async function adminSaveRole({ id, label, routes, allowAll }) {
+  const res = await authFetch('/api/admin/roles', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id, label, routes, allowAll }),
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(json.reason || json.error || 'Save failed');
+  return json.role;
+}
+
+export async function adminDeleteRole(id) {
+  const res = await authFetch('/api/admin/roles', {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id }),
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(json.error || 'Delete failed');
+  return json;
+}

@@ -33,14 +33,14 @@ const MGR        = ['admin', 'manager', 'viewer']; // everything except salesper
 const ADMIN_ONLY = ['admin'];                       // owner-only reports
 
 export const routes = [
-  // Home — Control Panel is visible to everyone. Dashboard is for
-  // owners/managers (company-wide sales numbers), not salespeople.
+  // Home — Control Panel is visible to everyone. Dashboard is for the owner
+  // (admin) + viewer — NOT managers or salespeople.
   { path: '/',            label: 'Quick Access', icon: Home,            group: 'Home', built: true },
-  { path: '/dashboard',   label: 'Dashboard',     icon: LayoutDashboard, group: 'Home', built: true, home: true, roles: MGR },
+  { path: '/dashboard',   label: 'Dashboard',     icon: LayoutDashboard, group: 'Home', built: true, home: true, roles: ['admin', 'viewer'] },
   { path: '/admin',       label: 'User Management', icon: UserCog,       group: 'Home', built: true, roles: ADMIN_ONLY },
 
-  // Sales Comparison Report — pinned to the top of Reports (owner-only).
-  { path: '/scr',               label: 'Sales Comparison Report', icon: TrendingUp, group: 'Reports', built: true, home: true, roles: ADMIN_ONLY },
+  // Sales Comparison Report — pinned to the top of Reports (admin + manager).
+  { path: '/scr',               label: 'Sales Comparison Report', icon: TrendingUp, group: 'Reports', built: true, home: true, roles: ['admin', 'manager'] },
 
   // Item Sold Analysis — deep dive into what sold (managers + admin + viewer).
   { path: '/item-sold-analysis', label: 'Item Sold Analysis', icon: Boxes, group: 'Reports', built: true, home: true, roles: MGR },
@@ -71,19 +71,24 @@ export const routes = [
   { path: '/mrf', label: 'Inventory Request Form', icon: ClipboardEdit, group: 'Forms', built: true },
 ];
 
-// Returns true if the given route is visible/accessible to a user with these roles.
-// A route with no `roles` field is open to everyone authenticated.
-export function isRouteAllowed(route, userRoles) {
-  if (!route.roles || route.roles.length === 0) return true;
-  return route.roles.some((r) => userRoles.includes(r));
+// Access is now driven by the SERVER (server/data/roles.json), delivered per
+// user as `allowedRoutes` on /api/auth/me. The per-route `roles` fields above
+// are only the original seed reference — they are NOT used for enforcement.
+//
+// A route is accessible if the user's allowedRoutes cover its path. Quick
+// Access ('/') is always allowed so no one is ever locked out of the landing.
+export function isRouteAllowed(routePath, allowedRoutes) {
+  if (routePath === '/') return true;
+  if (allowedRoutes === '*' || allowedRoutes === true) return true;
+  return Array.isArray(allowedRoutes) && allowedRoutes.includes(routePath);
 }
 
-// External links shown in the topbar on every page.
-export const externalLinks = [
-  { label: 'TMS', href: 'http://192.168.0.211:5500/', tone: 'primary' },
-  { label: 'File Share', href: 'http://26.14.50.15:3300', tone: 'primary' },
-  { label: 'INFOTRACK', href: 'https://sites.google.com/123cfc.com/cfc-analytics/home', tone: 'primary' },
-  { label: 'INTRANET', href: 'https://sites.google.com/123cfc.com/cfc-intranet/', tone: 'warning' },
-  { label: 'MEETING', href: 'https://meet.google.com/xwb-mbyf-gen', tone: 'success' },
-  { label: 'PO Scrubbing', href: 'http://192.168.0.211:4500', tone: 'primary' },
-];
+// Routes an admin may toggle per role in the /admin permissions matrix.
+// Excludes '/' (always on) and '/admin' (always admin-only).
+export const PERMISSIONABLE_ROUTES = routes.filter(
+  (r) => r.path !== '/' && r.path !== '/admin',
+);
+
+// External links shown in the topbar on every page. (Cleared — these tools are
+// launched from the Quick Access portal instead.)
+export const externalLinks = [];

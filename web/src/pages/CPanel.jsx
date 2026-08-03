@@ -10,7 +10,7 @@ import { FORMS } from '@/data/forms';
 import {
   LayoutGrid, ExternalLink, ClipboardEdit, Sparkles,
   // External tool icons
-  ListChecks, FolderOpen, BarChart3, Globe2, Video, ClipboardCheck, Store,
+  ListChecks, BarChart3, Globe2, Video, Store,
 } from 'lucide-react';
 
 // ─── External tools (open in new tab) ────────────────────────────────────────
@@ -21,13 +21,6 @@ const TOOLS = [
     href: 'http://192.168.0.211:5500/',
     icon: ListChecks,
     accent: 'primary',
-  },
-  {
-    label: 'File Share',
-    description: 'Shared drive for company documents and files',
-    href: 'http://26.14.50.15:3300',
-    icon: FolderOpen,
-    accent: 'sky',
   },
   {
     label: 'INFOTRACK',
@@ -49,13 +42,6 @@ const TOOLS = [
     href: 'https://meet.google.com/xwb-mbyf-gen',
     icon: Video,
     accent: 'sky',
-  },
-  {
-    label: 'PO Scrubbing',
-    description: 'Purchase order review and cleanup tool',
-    href: 'http://192.168.0.211:4500',
-    icon: ClipboardCheck,
-    accent: 'violet',
   },
   {
     label: 'StoreForms',

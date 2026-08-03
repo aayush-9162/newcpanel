@@ -9,7 +9,8 @@ import { queries } from './queries/index.js';
 import { runSql, runMysql } from './upstream.js';
 import { checkSelectOnly } from './sqlGuard.js';
 import { requireAuth, requireRole, verifyGoogleCredential, issueAppToken } from './auth.js';
-import { ensureUser, readUsers, upsertUser, removeUser, ROLES } from './users.js';
+import { ensureUser, readUsers, upsertUser, removeUser } from './users.js';
+import { readRoles, upsertRole, deleteRole, allowedRoutesFor } from './roles.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // Built React app (produced by `npm --workspace web run build` → server/public).
@@ -50,6 +51,7 @@ app.post('/api/auth/google', async (req, res) => {
       picture: identity.picture,
       role:    record.role,
       roles:   [record.role],
+      allowedRoutes: allowedRoutesFor(record.role),
     },
   });
 });
@@ -65,7 +67,7 @@ app.get('/api/auth/me', (req, res) => {
 
 // ─── Admin: manage the email → role allow-list (admin only) ─────────────────
 app.get('/api/admin/users', requireRole('admin'), (_req, res) => {
-  res.json({ roles: ROLES, users: readUsers() });
+  res.json({ roles: readRoles(), users: readUsers() });
 });
 
 app.post('/api/admin/users', requireRole('admin'), (req, res) => {
@@ -86,6 +88,34 @@ app.delete('/api/admin/users', requireRole('admin'), (req, res) => {
   }
   const removed = removeUser(email);
   res.json({ ok: removed, removed });
+});
+
+// ─── Admin: manage roles + their page permissions (admin only) ──────────────
+app.get('/api/admin/roles', requireRole('admin'), (_req, res) => {
+  res.json({ roles: readRoles() });
+});
+
+// Create or update a role: { id, label, routes:[...], allowAll? }
+app.post('/api/admin/roles', requireRole('admin'), (req, res) => {
+  const { id, label, routes, allowAll } = req.body ?? {};
+  try {
+    const saved = upsertRole({ id, label, routes, allowAll });
+    res.json({ ok: true, role: saved });
+  } catch (err) {
+    res.status(400).json({ error: 'invalid', reason: err.message });
+  }
+});
+
+// Delete a non-system role. Users on it drop to the default role.
+app.delete('/api/admin/roles', requireRole('admin'), (req, res) => {
+  const id = String(req.body?.id || req.query?.id || '').trim().toLowerCase();
+  if (!id) return res.status(400).json({ error: 'role id required' });
+  if (id === req.user.role) {
+    return res.status(400).json({ error: 'you cannot delete the role you are signed in with' });
+  }
+  const removed = deleteRole(id);
+  if (!removed) return res.status(400).json({ error: 'role not found or is a system role' });
+  res.json({ ok: true });
 });
 
 app.get('/api/queries', (_req, res) => {

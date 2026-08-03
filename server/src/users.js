@@ -11,20 +11,16 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
+import { roleIds } from './roles.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = join(__dirname, '..', 'data');
 const FILE     = join(DATA_DIR, 'users.json');
 
-// The roles the app understands. Kept in sync with web/src/routes.js.
-export const ROLES = ['admin', 'manager', 'salesperson', 'viewer'];
-
 // The role a signed-in user gets when their email is NOT explicitly listed.
 // Anyone who can sign in but hasn't been assigned a role lands here.
-// Override with DEFAULT_ROLE in server/.env (must be one of ROLES).
-export const DEFAULT_ROLE = ROLES.includes(process.env.DEFAULT_ROLE)
-  ? process.env.DEFAULT_ROLE
-  : 'salesperson';
+// Override with DEFAULT_ROLE in server/.env (must be a role id in roles.json).
+export const DEFAULT_ROLE = (process.env.DEFAULT_ROLE || 'salesperson').trim().toLowerCase();
 
 const norm = (e) => String(e || '').trim().toLowerCase();
 
@@ -41,7 +37,7 @@ export function readUsers() {
     const list = Array.isArray(raw?.users) ? raw.users : [];
     return list
       .filter((u) => u && u.email)
-      .map((u) => ({ email: norm(u.email), name: u.name || '', role: ROLES.includes(u.role) ? u.role : 'viewer' }));
+      .map((u) => ({ email: norm(u.email), name: u.name || '', role: norm(u.role) || DEFAULT_ROLE }));
   } catch {
     return [];
   }
@@ -66,7 +62,11 @@ export function findUser(email) {
 // caller whether the role came from the store or the fallback.
 export function resolveUser(email, fallbackName = '') {
   const rec = findUser(email);
-  if (rec) return { ...rec, assigned: true };
+  if (rec) {
+    // If the assigned role was since deleted, fall back to the default.
+    const role = roleIds().includes(rec.role) ? rec.role : DEFAULT_ROLE;
+    return { ...rec, role, assigned: true };
+  }
   return { email: norm(email), name: fallbackName || '', role: DEFAULT_ROLE, assigned: false };
 }
 
@@ -83,8 +83,10 @@ export function ensureUser(email, name = '') {
 // Add or update a user. Returns the saved record. Throws on bad input.
 export function upsertUser({ email, name, role }) {
   const e = norm(email);
+  const r = norm(role);
   if (!e || !e.includes('@')) throw new Error('a valid email is required');
-  if (!ROLES.includes(role)) throw new Error(`role must be one of: ${ROLES.join(', ')}`);
+  if (!roleIds().includes(r)) throw new Error(`role must be one of: ${roleIds().join(', ')}`);
+  role = r;
   const list = readUsers();
   const existing = list.find((u) => u.email === e);
   if (existing) {

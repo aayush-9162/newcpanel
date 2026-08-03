@@ -10,6 +10,7 @@
 
 import { createContext, useContext, useCallback, useEffect, useState } from 'react';
 import { getStoredToken, setStoredToken, clearStoredToken } from './session';
+import { isRouteAllowed } from '@/routes';
 import Login from '@/pages/Login.jsx';
 
 const AuthCtx = createContext(null);
@@ -57,14 +58,18 @@ export function AuthProvider({ children }) {
 
   const user  = state.user;
   const roles = user?.roles || [];
+  const allowedRoutes = user?.allowedRoutes ?? [];   // '*' or string[]
   const hasRole = useCallback((name) => roles.includes(name), [roles]);
+  const canAccess = useCallback((path) => isRouteAllowed(path, allowedRoutes), [allowedRoutes]);
 
   const value = {
     status: state.status,
     user,
     profile: user,           // alias — some components read `profile`
     roles,
+    allowedRoutes,
     hasRole,
+    canAccess,
     token: getStoredToken(),
     loginWithGoogle,
     logout,
@@ -95,7 +100,26 @@ export function useAuth() {
   return ctx;
 }
 
-// Route gate — render `fallback` (or a "Not authorized" panel) if the user
+// Path gate — render a "Not authorized" panel if the user's role isn't
+// permitted to open `path` (per the server-driven permissions).
+export function RequireRoute({ path, children }) {
+  const { canAccess } = useAuth();
+  if (!canAccess(path)) {
+    return (
+      <div className="grid min-h-[40vh] place-items-center p-6 text-center">
+        <div className="max-w-md">
+          <h1 className="text-xl font-semibold">Not authorized</h1>
+          <p className="mt-2 text-sm text-muted-fg">
+            Your role doesn't have access to this page. Ask an admin to grant it in User Management.
+          </p>
+        </div>
+      </div>
+    );
+  }
+  return children;
+}
+
+// Role gate — render `fallback` (or a "Not authorized" panel) if the user
 // lacks `role`. Pass a string or array of strings.
 export function RequireRole({ role, fallback, children }) {
   const { hasRole } = useAuth();
