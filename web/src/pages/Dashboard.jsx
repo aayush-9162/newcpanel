@@ -817,7 +817,7 @@ export default function Dashboard() {
                 ORDER BY Age DESC
               `,
               detailsColumns: [
-                { key: 'SaleDate',       label: 'Sale Date', render: (r) => r.SaleDate ? new Date(r.SaleDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—' },
+                { key: 'SaleDate',       label: 'Sale Date', render: (r) => r.SaleDate ? new Date(r.SaleDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' }) : '—' },
                 { key: 'SalesNo',        label: 'Sale #' },
                 { key: 'CustomerName',   label: 'Customer' },
                 { key: 'Age',            label: 'Age (days)', align: 'right', render: (r) => {
@@ -1066,7 +1066,7 @@ export default function Dashboard() {
                 ORDER BY MIN(sd.SaleDate) DESC
               `,
               detailsColumns: [
-                { key: 'SaleDate',     label: 'Date', render: (r) => r.SaleDate ? new Date(r.SaleDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '—' },
+                { key: 'SaleDate',     label: 'Date', render: (r) => r.SaleDate ? new Date(r.SaleDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' }) : '—' },
                 { key: 'SalesNo',      label: 'Sale #' },
                 { key: 'CustomerName', label: 'Customer' },
                 { key: 'SalesPerson',  label: 'Salesperson' },
@@ -1125,7 +1125,7 @@ export default function Dashboard() {
                   </span>
                 )},
                 { key: 'CustomerName', label: 'Customer' },
-                { key: 'firstSale',    label: 'First Sale', render: (r) => r.firstSale ? new Date(r.firstSale).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—' },
+                { key: 'firstSale',    label: 'First Sale', render: (r) => r.firstSale ? new Date(r.firstSale).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' }) : '—' },
                 { key: 'orders',       label: 'Orders', align: 'right', render: (r) => fmtNumber(Number(r.orders) || 0) },
                 { key: 'spent',        label: 'Spent', align: 'right', render: (r) => <span className="font-semibold">{fmtCurrency(Number(r.spent) || 0)}</span> },
               ],
@@ -1192,7 +1192,7 @@ export default function Dashboard() {
                     ORDER BY MIN(SaleDate) DESC
                   `,
                   detailsColumns: [
-                    { key: 'SaleDate', label: 'Date', render: (r) => r.SaleDate ? new Date(r.SaleDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '—' },
+                    { key: 'SaleDate', label: 'Date', render: (r) => r.SaleDate ? new Date(r.SaleDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' }) : '—' },
                     { key: 'SaleNo',   label: 'Sale #' },
                     { key: 'ItemID',   label: 'Item ID' },
                     { key: 'VendorID', label: 'Vendor' },

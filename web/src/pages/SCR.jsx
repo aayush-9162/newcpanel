@@ -265,7 +265,9 @@ export default function SCR() {
       if (!raw) return '';
       const d = new Date(raw);
       if (isNaN(d)) return String(raw);
-      return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+      // Render in UTC — SQL dates arrive as UTC midnight, so local rendering
+      // would shift the day back (Aug 1 → "Jul 31") for viewers west of UTC.
+      return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
     };
     let bestThis = { revenue: 0, week: null, start: null };
     let bestLast = { revenue: 0, week: null, start: null };

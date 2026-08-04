@@ -480,7 +480,8 @@ export default function ZipAnalysis() {
       if (!raw) return '';
       const d = new Date(raw);
       if (isNaN(d)) return String(raw);
-      return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+      // Render in UTC so SQL dates (UTC midnight) don't shift a day back.
+      return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
     };
 
     // For each city: best single week + best month (sum of weeks within month).
