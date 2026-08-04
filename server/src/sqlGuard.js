@@ -14,7 +14,7 @@ const ALLOWED_START = /^(\s|--[^\n]*\n|\/\*[\s\S]*?\*\/)*(SELECT|WITH)\b/i;
 export function checkSelectOnly(qry) {
   if (typeof qry !== 'string') return 'qry must be a string';
   if (qry.length === 0) return 'qry is empty';
-  if (qry.length > 4000) return 'qry too long (max 4000 chars)';
+  if (qry.length > 8000) return 'qry too long (max 8000 chars)';
 
   // Strip a single trailing semicolon, then disallow any other semicolons
   const stripped = qry.replace(/;\s*$/, '');

@@ -27,7 +27,7 @@
 //      instead of the details* trio.
 
 import { useEffect, useMemo, useState } from 'react';
-import { X, TrendingUp, ExternalLink, Search } from 'lucide-react';
+import { X, TrendingUp, ExternalLink, Search, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useSqlQuery, useMysqlQuery } from '@/lib/api';
 import { cn } from '@/lib/cn';
@@ -60,6 +60,12 @@ export function MetricDrilldown({ drilldown, onClose }) {
 function Panel({ drilldown, onClose }) {
   const navigate = useNavigate();
   const [search, setSearch]     = useState('');
+  // Navigation stack — a config whose row defines `onRowClick` can push a
+  // deeper view (e.g. Room → by-type summary → items of one type). Back pops it.
+  const [stack, setStack] = useState([drilldown]);
+  const current  = stack[stack.length - 1];
+  const canBack  = stack.length > 1;
+  const goBack   = () => { setSearch(''); setStack((s) => s.slice(0, -1)); };
 
   useEffect(() => {
     const onEsc = (e) => { if (e.key === 'Escape') onClose(); };
@@ -76,9 +82,15 @@ function Panel({ drilldown, onClose }) {
     headline, fullHeadline, subtitle,
     breakdown,
     detailsDb, detailsSql, detailsValues = [], detailsColumns, detailsEmpty,
-    loadRows,
+    loadRows, onRowClick,
     fullReportPath, fullReportLabel,
-  } = drilldown;
+  } = current;
+
+  // Push a deeper view when a row is clicked (if this config supports it).
+  const drillInto = (row) => {
+    const sub = onRowClick?.(row);
+    if (sub) { setSearch(''); setStack((s) => [...s, sub]); }
+  };
 
   // Only one of the two hooks actually fires (the other is disabled), but both
   // must be called every render for the hook rules. When `loadRows` is given,
@@ -136,6 +148,16 @@ function Panel({ drilldown, onClose }) {
         {/* Header */}
         <div className="flex items-start justify-between gap-3 border-b border-border px-5 py-4">
           <div className="flex items-center gap-3 min-w-0">
+            {canBack && (
+              <button
+                type="button"
+                onClick={goBack}
+                title="Back"
+                className="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-border text-muted-fg hover:bg-muted transition"
+              >
+                <ChevronLeft size={18} />
+              </button>
+            )}
             {Icon && (
               <div className={cn('grid h-11 w-11 place-items-center rounded-xl text-white shadow-lg shrink-0 bg-gradient-to-br', grad)}>
                 <Icon size={20} strokeWidth={2.25} />
@@ -193,6 +215,7 @@ function Panel({ drilldown, onClose }) {
               totalRows={rows.length}
               columns={detailsColumns}
               emptyMessage={detailsEmpty || 'No records to show'}
+              onRowClick={onRowClick ? drillInto : undefined}
             />
           )}
 
@@ -260,7 +283,8 @@ function Panel({ drilldown, onClose }) {
 }
 
 // Table that renders the detail records, with loading/error/empty states.
-function DetailsTable({ loading, error, rows, totalRows, columns, emptyMessage }) {
+// When `onRowClick` is given, rows become clickable (drill deeper).
+function DetailsTable({ loading, error, rows, totalRows, columns, emptyMessage, onRowClick }) {
   if (loading) {
     return (
       <div className="grid place-items-center py-16 text-sm text-muted-fg">
@@ -298,13 +322,21 @@ function DetailsTable({ loading, error, rows, totalRows, columns, emptyMessage }
                   c.align === 'right' ? 'text-right' : 'text-left',
                 )}>{c.label}</th>
               ))}
+              {onRowClick && <th className="w-8 px-3 py-2" />}
             </tr>
           </thead>
           <tbody>
             {rows.length === 0 ? (
-              <tr><td colSpan={columns.length + 1} className="px-4 py-6 text-center text-xs text-muted-fg">No matches for that filter.</td></tr>
+              <tr><td colSpan={columns.length + (onRowClick ? 2 : 1)} className="px-4 py-6 text-center text-xs text-muted-fg">No matches for that filter.</td></tr>
             ) : rows.map((row, i) => (
-              <tr key={i} className="border-b border-border last:border-0 hover:bg-muted/30">
+              <tr
+                key={i}
+                onClick={onRowClick ? () => onRowClick(row) : undefined}
+                className={cn(
+                  'group border-b border-border last:border-0 hover:bg-muted/30',
+                  onRowClick && 'cursor-pointer',
+                )}
+              >
                 <td className="px-3 py-2 text-xs font-bold tabular-nums text-muted-fg">{i + 1}</td>
                 {columns.map((c) => (
                   <td key={c.key} className={cn(
@@ -314,6 +346,11 @@ function DetailsTable({ loading, error, rows, totalRows, columns, emptyMessage }
                     {c.render ? c.render(row) : (row[c.key] ?? '—')}
                   </td>
                 ))}
+                {onRowClick && (
+                  <td className="px-3 py-2 text-right">
+                    <ChevronRight size={14} className="text-muted-fg opacity-0 transition group-hover:opacity-100" />
+                  </td>
+                )}
               </tr>
             ))}
           </tbody>

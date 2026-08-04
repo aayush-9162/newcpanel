@@ -1159,52 +1159,80 @@ export default function Dashboard() {
                 subtitle={units ? `${fmtNumber(units)} item${units === 1 ? '' : 's'} sold this month` : 'None sold this month'}
                 loading={itemCatQ.isLoading}
                 onClick={openDetail({
+                  // LEVEL 1 — summary by item type within this room. Click a
+                  // type row to drill into its individual items (level 2).
                   title: `${room.key} · Items Sold This Month · ${store === 'ARDEN' ? 'Arden (S1)' : 'Waynesville (S2)'}`,
                   icon: room.icon,
                   accent: room.accent,
                   headline: fmtNumber(units),
-                  subtitle: `${fmtNumber(units)} item${units === 1 ? '' : 's'} sold · multiple pieces of the same item on one sale are grouped with a Qty`,
+                  subtitle: `${fmtNumber(units)} item${units === 1 ? '' : 's'} sold · by item type · click a type to see the items`,
                   detailsDb: 'sql',
-                  // Group identical pieces on the same sale into ONE row with a
-                  // Qty count — otherwise a sale of 5 matching recliners shows
-                  // as 5 duplicate-looking rows. SUM(Qty) still equals the tile.
                   detailsSql: `
                     WITH m AS (SELECT MAX(SaleDate) AS d FROM SalesItemDetail),
                          base AS (
-                           SELECT SaleDate, SaleNo,
-                                  LTRIM(RTRIM(ItemID)) AS ItemID,
-                                  LTRIM(RTRIM(VendorID)) AS VendorID,
-                                  LTRIM(RTRIM(ISNULL(Description2,''))) AS ItemType,
-                                  UPPER(ISNULL(Description2,'')) AS d2
+                           SELECT UPPER(ISNULL(Description2,'')) AS d2
                            FROM SalesItemDetail CROSS JOIN m
                            WHERE YEAR(SaleDate) = YEAR(m.d) AND MONTH(SaleDate) = MONTH(m.d)
                              AND LEFT(CAST(SaleNo AS VARCHAR(20)), 1) = '${selectedBldg}'
                          ),
-                         filt AS (
-                           SELECT SaleDate, SaleNo, ItemID, VendorID, ItemType
+                         roomed AS (
+                           SELECT ${itemTypeCase} AS item_type
                            FROM base
                            WHERE (${roomCase}) = '${room.key}'
                          )
-                    SELECT MIN(SaleDate) AS SaleDate, SaleNo, ItemID, VendorID, ItemType,
-                           COUNT(*) AS Qty
-                    FROM filt
-                    GROUP BY SaleNo, ItemID, VendorID, ItemType
-                    ORDER BY MIN(SaleDate) DESC
+                    SELECT item_type, COUNT(*) AS units
+                    FROM roomed GROUP BY item_type ORDER BY units DESC
                   `,
                   detailsColumns: [
-                    { key: 'SaleDate', label: 'Date', render: (r) => r.SaleDate ? new Date(r.SaleDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' }) : '—' },
-                    { key: 'SaleNo',   label: 'Sale #' },
-                    { key: 'ItemID',   label: 'Item ID' },
-                    { key: 'VendorID', label: 'Vendor' },
-                    { key: 'ItemType', label: 'Item Type' },
-                    { key: 'Qty',      label: 'Qty', align: 'right', render: (r) => {
-                      const n = Number(r.Qty) || 1;
-                      return n > 1
-                        ? <span className="font-semibold text-primary">×{fmtNumber(n)}</span>
-                        : <span className="text-muted-fg">1</span>;
-                    }},
+                    { key: 'item_type', label: 'Item Type' },
+                    { key: 'units', label: 'Total Sold', align: 'right', render: (r) => <span className="font-semibold">{fmtNumber(Number(r.units) || 0)}</span> },
                   ],
                   detailsEmpty: `No ${room.key.toLowerCase()} items sold this month`,
+                  // LEVEL 2 — clicking a type row opens its individual items,
+                  // with duplicate pieces on one sale grouped into a Qty.
+                  onRowClick: (row) => ({
+                    title: `${room.key} · ${row.item_type} · ${store === 'ARDEN' ? 'Arden (S1)' : 'Waynesville (S2)'}`,
+                    icon: room.icon,
+                    accent: room.accent,
+                    headline: `${fmtNumber(Number(row.units) || 0)} ${row.item_type}`,
+                    subtitle: `Individual ${row.item_type} pieces sold this month · same item on one sale is grouped with a Qty`,
+                    detailsDb: 'sql',
+                    detailsSql: `
+                      WITH m AS (SELECT MAX(SaleDate) AS d FROM SalesItemDetail),
+                           base AS (
+                             SELECT SaleDate, SaleNo,
+                                    LTRIM(RTRIM(ItemID)) AS ItemID,
+                                    LTRIM(RTRIM(VendorID)) AS VendorID,
+                                    LTRIM(RTRIM(ISNULL(Description2,''))) AS ItemType,
+                                    UPPER(ISNULL(Description2,'')) AS d2
+                             FROM SalesItemDetail CROSS JOIN m
+                             WHERE YEAR(SaleDate) = YEAR(m.d) AND MONTH(SaleDate) = MONTH(m.d)
+                               AND LEFT(CAST(SaleNo AS VARCHAR(20)), 1) = '${selectedBldg}'
+                           ),
+                           filt AS (
+                             SELECT SaleDate, SaleNo, ItemID, VendorID, ItemType
+                             FROM base
+                             WHERE (${roomCase}) = '${room.key}'
+                               AND (${itemTypeCase}) = '${String(row.item_type).replace(/'/g, "''")}'
+                           )
+                      SELECT MIN(SaleDate) AS SaleDate, SaleNo, ItemID, VendorID, ItemType, COUNT(*) AS Qty
+                      FROM filt GROUP BY SaleNo, ItemID, VendorID, ItemType ORDER BY MIN(SaleDate) DESC
+                    `,
+                    detailsColumns: [
+                      { key: 'SaleDate', label: 'Date', render: (r) => r.SaleDate ? new Date(r.SaleDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' }) : '—' },
+                      { key: 'SaleNo',   label: 'Sale #' },
+                      { key: 'ItemID',   label: 'Item ID' },
+                      { key: 'VendorID', label: 'Vendor' },
+                      { key: 'ItemType', label: 'Description' },
+                      { key: 'Qty',      label: 'Qty', align: 'right', render: (r) => {
+                        const n = Number(r.Qty) || 1;
+                        return n > 1
+                          ? <span className="font-semibold text-primary">×{fmtNumber(n)}</span>
+                          : <span className="text-muted-fg">1</span>;
+                      }},
+                    ],
+                    detailsEmpty: `No ${row.item_type} sold this month`,
+                  }),
                 })}
               />
             );
