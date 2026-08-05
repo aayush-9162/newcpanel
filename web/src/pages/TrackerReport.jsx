@@ -4,16 +4,13 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { Topbar } from '@/components/Topbar';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/Card';
-import { HeroStat } from '@/components/HeroStat';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { getTrackerReport } from '@/lib/api';
 import { fmtNumber } from '@/lib/format';
-import { cn } from '@/lib/cn';
 import {
-  ShieldAlert, Ban, MonitorSmartphone, Clock, Search, RefreshCw, ExternalLink,
-  Globe, User, Loader2, AlertTriangle,
+  Ban, Search, RefreshCw, ExternalLink, Globe, User, Loader2, AlertTriangle,
 } from 'lucide-react';
 
 // ── date helpers (local calendar day, never UTC-shifted) ────────────────────
@@ -77,35 +74,6 @@ export default function TrackerReport() {
     );
   }, [sorted, filter]);
 
-  // KPIs
-  const kpi = useMemo(() => {
-    const machines = new Set(), blocked = [];
-    let totalSec = 0, totalVisits = 0;
-    for (const v of visits) {
-      machines.add(v.machine_uuid || v.hostname);
-      totalSec += Number(v.total_sec) || 0;
-      totalVisits += Number(v.visits) || 0;
-      if (v.blocked) blocked.push(v);
-    }
-    return { rows: visits.length, machines: machines.size, blocked: blocked.length, totalSec, totalVisits };
-  }, [visits]);
-
-  // Per-machine rollup (top time-wasters)
-  const byMachine = useMemo(() => {
-    const m = new Map();
-    for (const v of visits) {
-      const key = v.machine_uuid || v.hostname;
-      const e = m.get(key) || { hostname: v.hostname, label: v.label, os_user: v.os_user, sec: 0, visits: 0, domains: new Set() };
-      e.sec += Number(v.total_sec) || 0;
-      e.visits += Number(v.visits) || 0;
-      e.domains.add(prettyDomain(v.domain));
-      m.set(key, e);
-    }
-    const list = [...m.values()].map((e) => ({ ...e, domains: e.domains.size })).sort((a, b) => b.sec - a.sec);
-    const max = list.reduce((mx, e) => Math.max(mx, e.sec), 0);
-    return { list, max };
-  }, [visits]);
-
   return (
     <>
       <Topbar title="Tracker Report" subtitle={`Suspicious web activity · ${date}`} />
@@ -143,49 +111,6 @@ export default function TrackerReport() {
           </div>
         ) : (
           <>
-            {/* KPI strip */}
-            <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-              <HeroStat label="Suspicious Visits" value={fmtNumber(kpi.rows)} icon={ShieldAlert} accent="rose"
-                subtitle={`${fmtNumber(kpi.totalVisits)} page hits`} />
-              <HeroStat label="Blocked" value={fmtNumber(kpi.blocked)} icon={Ban} accent={kpi.blocked ? 'amber' : 'emerald'}
-                subtitle={kpi.blocked ? 'Auto-blocked entries' : 'None blocked'} />
-              <HeroStat label="Machines" value={fmtNumber(kpi.machines)} icon={MonitorSmartphone} accent="sky"
-                subtitle="Workstations with hits" />
-              <HeroStat label="Time on Sites" value={fmtDuration(kpi.totalSec)} icon={Clock} accent="violet"
-                subtitle="Total across all machines" />
-            </div>
-
-            {/* Top machines */}
-            {byMachine.list.length > 0 && (
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2"><MonitorSmartphone size={16} className="text-primary" /> Top Machines by Time</CardTitle>
-                  <CardDescription>Which workstations spent the most time on suspicious sites</CardDescription>
-                </CardHeader>
-                <CardContent className="flex flex-col gap-1.5">
-                  {byMachine.list.slice(0, 6).map((e, i) => {
-                    const pct = byMachine.max > 0 ? (e.sec / byMachine.max) * 100 : 0;
-                    return (
-                      <div key={i} className="grid grid-cols-[minmax(150px,220px)_1fr_auto] items-center gap-3 rounded-lg px-2 py-1.5">
-                        <span className="flex items-center gap-2 truncate text-sm">
-                          {e.label && <span className="rounded bg-primary/10 px-1.5 py-0.5 text-[10px] font-bold text-primary">{e.label}</span>}
-                          <span className="truncate font-medium">{e.hostname}</span>
-                          <span className="truncate text-[11px] text-muted-fg">{e.os_user}</span>
-                        </span>
-                        <span className="relative h-5 overflow-hidden rounded bg-muted/50">
-                          <span className="absolute inset-y-0 left-0 rounded bg-gradient-to-r from-rose-500 to-orange-500" style={{ width: `${Math.max(pct, 2)}%` }} />
-                        </span>
-                        <span className="flex items-center gap-3 tabular-nums">
-                          <span className="text-sm font-bold">{fmtDuration(e.sec)}</span>
-                          <span className="w-16 text-right text-[11px] text-muted-fg">{fmtNumber(e.domains)} sites</span>
-                        </span>
-                      </div>
-                    );
-                  })}
-                </CardContent>
-              </Card>
-            )}
-
             {/* Visits table */}
             <Card>
               <CardHeader className="flex-row items-center justify-between gap-3 space-y-0">
@@ -215,10 +140,7 @@ export default function TrackerReport() {
                           <tr key={i} className="border-b border-border last:border-0 hover:bg-muted/30">
                             <td className="px-3 py-2.5 text-xs font-bold tabular-nums text-muted-fg">{i + 1}</td>
                             <td className="px-3 py-2.5">
-                              <div className="flex items-center gap-1.5">
-                                {v.label && <span className="rounded bg-primary/10 px-1.5 py-0.5 text-[10px] font-bold text-primary">{v.label}</span>}
-                                <span className="font-medium">{v.hostname}</span>
-                              </div>
+                              <div className="font-semibold">{v.label || v.hostname || '—'}</div>
                               <div className="mt-0.5 flex items-center gap-1 text-[11px] text-muted-fg"><User size={10} /> {v.os_user || '—'}</div>
                             </td>
                             <td className="max-w-[420px] px-3 py-2.5">
