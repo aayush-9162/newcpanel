@@ -10,6 +10,7 @@ import { RequireRoute } from '@/auth/AuthProvider';
 // --- Reports ---
 import SCR from '@/pages/SCR.jsx';
 import ItemSoldAnalysis from '@/pages/ItemSoldAnalysis.jsx';
+import TrackerReport from '@/pages/TrackerReport.jsx';
 import ManagerPerformance from '@/pages/ManagerPerformance.jsx';
 import SalesPerformance from '@/pages/SalesPerformance.jsx';
 import GrossMargin from '@/pages/GrossMargin.jsx';
@@ -39,6 +40,7 @@ const built = {
   // Reports
   '/scr': <SCR />,
   '/item-sold-analysis': <ItemSoldAnalysis />,
+  '/tracker': <TrackerReport />,
   '/mpr': <ManagerPerformance />,
   '/sales/performance': <SalesPerformance />,
   '/gmr': <GrossMargin />,

@@ -122,6 +122,36 @@ app.get('/api/queries', (_req, res) => {
   res.json({ queries: Object.keys(queries) });
 });
 
+// ─── Tracker Report — proxy the external visit-tracker API ──────────────────
+// Browsers can't reach the tracker directly (CORS + it's on another host), so
+// we forward the request server-side. Gated to roles that can open /tracker.
+const TRACKER_URL = (process.env.TRACKER_URL || 'http://192.168.0.180:2021').replace(/\/+$/, '');
+app.get('/api/tracker/suspicious', async (req, res) => {
+  const allowed = req.user?.allowedRoutes;
+  const canView = allowed === '*' || (Array.isArray(allowed) && allowed.includes('/tracker'));
+  if (!canView) return res.status(403).json({ error: 'forbidden' });
+
+  const date = String(req.query.date || '').slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: 'date must be YYYY-MM-DD' });
+
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), 20_000);
+  try {
+    const url = `${TRACKER_URL}/api/visits/report/suspicious?date=${encodeURIComponent(date)}`;
+    const r = await fetch(url, { signal: ac.signal });
+    if (!r.ok) {
+      const text = await r.text().catch(() => '');
+      return res.status(502).json({ error: `tracker ${r.status}`, message: text.slice(0, 200) });
+    }
+    res.json(await r.json());
+  } catch (err) {
+    const msg = err.name === 'AbortError' ? `tracker timeout (${TRACKER_URL})` : err.message;
+    res.status(502).json({ error: 'tracker unreachable', message: msg });
+  } finally {
+    clearTimeout(timer);
+  }
+});
+
 const cache = new Map();
 const TTL_MS = 5_000;
 

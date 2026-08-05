@@ -123,6 +123,14 @@ export async function adminDeleteUser(email) {
   return json;
 }
 
+// ─── Tracker Report — suspicious visits for a date (proxied server-side) ────
+export async function getTrackerReport(date) {
+  const res = await authFetch(`/api/tracker/suspicious?date=${encodeURIComponent(date)}`);
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(json.message || json.error || `Tracker request failed (${res.status})`);
+  return json; // { date, count, visits: [...] }
+}
+
 // ─── Admin: manage roles + their page permissions (admin only) ──────────────
 export async function adminListRoles() {
   const res = await authFetch('/api/admin/roles');

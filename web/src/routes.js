@@ -16,6 +16,7 @@ import {
   ClipboardEdit,
   Boxes,
   UserCog,
+  ShieldAlert,
 } from 'lucide-react';
 
 // `home: true` → shown on the cpanel home left panel.
@@ -62,6 +63,10 @@ export const routes = [
   { path: '/pendingReceivables', label: 'Pending Receivables',     icon: Receipt,       group: 'Reports', built: true, roles: ADMIN_ONLY },
   { path: '/zip/analysis',       label: 'Zipcode Analysis',        icon: MapPin,        group: 'Reports', built: true, roles: ADMIN_ONLY },
   { path: '/service-order',      label: 'Service Order',           icon: Wrench,        group: 'Reports', built: true, roles: ADMIN_ONLY },
+
+  // Tracker Report — suspicious web-visit monitoring (admin by default; grant
+  // to other roles from User Management → Roles & Permissions).
+  { path: '/tracker',            label: 'Tracker Report',          icon: ShieldAlert,   group: 'Reports', built: true, roles: ADMIN_ONLY },
 
   // Forms
   { path: '/mpf', label: 'Associate Manager Form', icon: FileEdit, group: 'Forms', built: true },
