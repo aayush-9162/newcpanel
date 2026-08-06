@@ -7,10 +7,11 @@ import { Topbar } from '@/components/Topbar';
 import { HeroBanner } from '@/components/HeroStat';
 import { LauncherCard } from '@/components/LauncherCard';
 import { FORMS } from '@/data/forms';
+import { useAuth } from '@/auth/AuthProvider';
 import {
   LayoutGrid, ExternalLink, ClipboardEdit, Sparkles,
   // External tool icons
-  ListChecks, BarChart3, Globe2, Video, Store,
+  ListChecks, BarChart3, Globe2, Video, Store, FileBarChart,
 } from 'lucide-react';
 
 // ─── External tools (open in new tab) ────────────────────────────────────────
@@ -50,9 +51,20 @@ const TOOLS = [
     icon: Store,
     accent: 'rose',
   },
+  {
+    label: 'Form Reports',
+    description: 'Reporting portal for submitted forms',
+    href: 'http://192.168.0.211.nip.io:1214/formreport/',
+    icon: FileBarChart,
+    accent: 'violet',
+    adminOnly: true,   // only shown to the admin role
+  },
 ];
 
 export default function CPanel() {
+  const { hasRole } = useAuth();
+  // Admin-only tools (e.g. Form Reports) are hidden from everyone else.
+  const tools = TOOLS.filter((t) => !t.adminOnly || hasRole('admin'));
   return (
     <>
       <Topbar title="Control Panel" subtitle="Quick Access · External Tools & Forms" />
@@ -76,10 +88,10 @@ export default function CPanel() {
           icon={ExternalLink}
           title="External Tools"
           hint="Opens in a new tab"
-          count={TOOLS.length}
+          count={tools.length}
         />
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6">
-          {TOOLS.map((t) => (
+          {tools.map((t) => (
             <LauncherCard key={t.label} {...t} external />
           ))}
         </div>
