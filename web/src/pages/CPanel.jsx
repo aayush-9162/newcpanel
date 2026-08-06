@@ -3,13 +3,15 @@
 //   1) External Tools (TMS, File Share, INFOTRACK, etc.) — open in a new tab
 //   2) Forms — internal routes to in-app form pages
 
+import { useMemo, useState } from 'react';
 import { Topbar } from '@/components/Topbar';
 import { HeroBanner } from '@/components/HeroStat';
 import { LauncherCard } from '@/components/LauncherCard';
 import { FORMS } from '@/data/forms';
+import { VENDOR_SITES } from '@/data/vendors';
 import { useAuth } from '@/auth/AuthProvider';
 import {
-  LayoutGrid, ExternalLink, ClipboardEdit, Sparkles,
+  LayoutGrid, ExternalLink, ClipboardEdit, Sparkles, Search,
   // External tool icons
   ListChecks, BarChart3, Globe2, Video, Store, FileBarChart,
 } from 'lucide-react';
@@ -109,8 +111,79 @@ export default function CPanel() {
           ))}
         </div>
 
+        {/* Vendor sites — many, so compact + searchable */}
+        <VendorSites />
+
       </div>
     </>
+  );
+}
+
+// ─── Vendor Sites — dense, searchable grid of vendor portals ─────────────────
+function VendorSites() {
+  const [query, setQuery] = useState('');
+  const [showAll, setShowAll] = useState(false);
+  const INITIAL = 12;
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return q ? VENDOR_SITES.filter((v) => v.name.toLowerCase().includes(q)) : VENDOR_SITES;
+  }, [query]);
+
+  const expanded = showAll || !!query.trim();
+  const visible = expanded ? filtered : filtered.slice(0, INITIAL);
+  const hidden = VENDOR_SITES.length - INITIAL;
+
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="flex flex-wrap items-end justify-between gap-3 pt-1">
+        <div className="flex items-center gap-2.5">
+          <span className="grid h-8 w-8 place-items-center rounded-lg bg-primary/10 text-primary"><Store size={16} /></span>
+          <h2 className="text-base font-bold uppercase tracking-wider text-fg">Vendor Sites</h2>
+          <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-semibold tabular-nums text-muted-fg">{VENDOR_SITES.length}</span>
+        </div>
+        <div className="relative">
+          <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-fg" />
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search vendor…"
+            className="h-9 w-56 rounded-lg border border-border bg-card pl-8 pr-3 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-primary/30"
+          />
+        </div>
+      </div>
+
+      {visible.length === 0 ? (
+        <div className="rounded-xl border border-border bg-card p-6 text-center text-sm text-muted-fg">No vendor matches “{query}”.</div>
+      ) : (
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+          {visible.map((v) => (
+            <a
+              key={v.name}
+              href={v.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              title={v.url}
+              className="group flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-2 text-sm transition hover:-translate-y-0.5 hover:border-primary/50 hover:bg-muted/40 hover:shadow-sm"
+            >
+              <Globe2 size={14} className="shrink-0 text-primary/70" />
+              <span className="truncate font-medium">{v.name}</span>
+              <ExternalLink size={12} className="ml-auto shrink-0 text-muted-fg opacity-0 transition group-hover:opacity-100" />
+            </a>
+          ))}
+        </div>
+      )}
+
+      {!query.trim() && hidden > 0 && (
+        <button
+          type="button"
+          onClick={() => setShowAll((s) => !s)}
+          className="mx-auto mt-1 rounded-lg border border-border px-3 py-1.5 text-xs font-semibold text-primary transition hover:bg-muted"
+        >
+          {showAll ? 'Show less' : `Show all ${VENDOR_SITES.length} vendors`}
+        </button>
+      )}
+    </div>
   );
 }
 
