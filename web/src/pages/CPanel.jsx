@@ -13,7 +13,7 @@ import { useAuth } from '@/auth/AuthProvider';
 import {
   LayoutGrid, ExternalLink, ClipboardEdit, Sparkles, Search,
   // External tool icons
-  ListChecks, BarChart3, Globe2, Video, Store, FileBarChart,
+  ListChecks, BarChart3, Globe2, Video, Store, FileBarChart, Clock,
 } from 'lucide-react';
 
 // ─── External tools (open in new tab) ────────────────────────────────────────
@@ -45,6 +45,13 @@ const TOOLS = [
     href: 'https://meet.google.com/xwb-mbyf-gen',
     icon: Video,
     accent: 'sky',
+  },
+  {
+    label: 'ADP Time Clock',
+    description: 'Clock in / out and timekeeping',
+    href: 'https://online.adp.com/clock/login.html?TYPE=33554433&REALMOID=06-af229e79-8b8b-1133-9f6b-85fabf340000&GUID=&SMAUTHREASON=0&METHOD=GET&SMAGENTNAME=-SM-xG%2fsjhR3LqQrl8Bluqcb5CJsPHxtAOHb%2fepFa7ec2OFx0CU5KBY7cWZ9mpuPt1Lg&TARGET=-SM-https%3a%2f%2fclock%2eadp%2ecom%2f',
+    icon: Clock,
+    accent: 'amber',
   },
   {
     label: 'StoreForms',
