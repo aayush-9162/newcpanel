@@ -26,7 +26,7 @@ export default function FormPlaceholder({ title, description, originalPath }) {
             </p>
             {originalPath && (
               <a
-                href={`http://192.168.68.8:3000${originalPath}`}
+                href={`http://192.168.0.211:3000${originalPath}`}
                 target="_blank"
                 rel="noreferrer"
                 className="mt-4 inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-fg shadow-sm transition hover:opacity-90"
