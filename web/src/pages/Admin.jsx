@@ -37,6 +37,7 @@ export default function Admin() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [filter, setFilter] = useState('');
+  const [roleFilter, setRoleFilter] = useState(null); // null = all roles
   const [savingEmail, setSavingEmail] = useState(null);
 
   const [form, setForm] = useState({ email: '', name: '', role: '' });
@@ -68,10 +69,11 @@ export default function Admin() {
   }, [users]);
 
   const filtered = useMemo(() => {
+    let list = roleFilter ? users.filter((u) => u.role === roleFilter) : users;
     const n = filter.trim().toLowerCase();
-    if (!n) return users;
-    return users.filter((u) => u.email.includes(n) || (u.name || '').toLowerCase().includes(n) || u.role.includes(n));
-  }, [users, filter]);
+    if (n) list = list.filter((u) => u.email.includes(n) || (u.name || '').toLowerCase().includes(n) || u.role.includes(n));
+    return list;
+  }, [users, filter, roleFilter]);
 
   // ── user actions ──
   const changeRole = async (email, role) => {
@@ -133,13 +135,36 @@ export default function Admin() {
       <Topbar title="User Management" subtitle={`${users.length} user${users.length === 1 ? '' : 's'} · ${roles.length} roles`} />
 
       <div className="flex flex-1 flex-col gap-5 p-5 animate-fade-in">
-        {/* Control bar */}
+        {/* Control bar — role chips double as filters for the Access List below */}
         <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setRoleFilter(null)}
+            title="Show all users"
+            className={cn(
+              'inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-semibold transition',
+              'bg-muted text-fg/80 hover:bg-muted/70',
+              roleFilter === null && 'ring-2 ring-primary ring-offset-1 ring-offset-bg text-fg',
+            )}
+          >
+            All
+            <span className="rounded bg-black/10 px-1 tabular-nums dark:bg-white/10">{users.length}</span>
+          </button>
           {roles.map((r, i) => (
-            <span key={r.id} className={cn('inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-semibold', TONE_CLASS[toneFor(r.id, i)])}>
+            <button
+              key={r.id}
+              type="button"
+              onClick={() => setRoleFilter((cur) => (cur === r.id ? null : r.id))}
+              title={roleFilter === r.id ? 'Clear filter' : `Show only ${r.label}`}
+              className={cn(
+                'inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-semibold transition',
+                TONE_CLASS[toneFor(r.id, i)],
+                roleFilter === r.id ? 'ring-2 ring-primary ring-offset-1 ring-offset-bg' : 'opacity-90 hover:opacity-100',
+              )}
+            >
               {r.allowAll && <ShieldCheck size={12} />}{r.label}
               <span className="rounded bg-black/10 px-1 tabular-nums dark:bg-white/10">{roleCounts[r.id] || 0}</span>
-            </span>
+            </button>
           ))}
           <Button variant={showRoles ? 'primary' : 'outline'} size="sm" className="ml-auto" onClick={() => setShowRoles((s) => !s)}>
             <SlidersHorizontal size={14} /> Roles &amp; Permissions
@@ -239,7 +264,16 @@ export default function Admin() {
         {/* ── Users table ── */}
         <Card>
           <CardHeader className="flex-row items-center justify-between gap-3 space-y-0">
-            <CardTitle className="flex items-center gap-2"><UserCog size={16} className="text-primary" /> Access List</CardTitle>
+            <CardTitle className="flex items-center gap-2">
+              <UserCog size={16} className="text-primary" /> Access List
+              {roleFilter && (
+                <button type="button" onClick={() => setRoleFilter(null)}
+                  title="Clear role filter"
+                  className="inline-flex items-center gap-1 rounded-md bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary hover:bg-primary/20">
+                  {roleLabel(roleFilter)} <X size={12} />
+                </button>
+              )}
+            </CardTitle>
             <div className="flex items-center gap-2">
               <div className="relative">
                 <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-fg" />
