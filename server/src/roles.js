@@ -25,6 +25,8 @@ const SEED = {
     { id: 'manager', label: 'Manager', routes: ['/scr', '/item-sold-analysis', '/sales/performance', '/fms', '/disco', '/mpr', '/dmgsummary', '/leads', '/pickup/new', '/hot-button-issues', '/mpf', '/spf', '/pbf', '/damage/create', '/mrf'] },
     { id: 'viewer', label: 'Viewer', routes: ['/dashboard', '/item-sold-analysis', '/sales/performance', '/fms', '/disco', '/mpr', '/dmgsummary', '/leads', '/pickup/new', '/hot-button-issues', '/mpf', '/spf', '/pbf', '/damage/create', '/mrf'] },
     { id: 'salesperson', label: 'Salesperson', routes: ['/sales/performance', '/fms', '/disco', '/mpf', '/spf', '/pbf', '/damage/create', '/mrf'] },
+    { id: 'warehouse', label: 'Warehouse', routes: [] },
+    { id: 'office_manager', label: 'Office Manager', routes: [] },
   ],
 };
 

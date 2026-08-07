@@ -19,7 +19,7 @@ import {
 import { cn } from '@/lib/cn';
 
 const TONE_ORDER = ['primary', 'violet', 'emerald', 'sky', 'amber', 'rose'];
-const KNOWN_TONE = { superadmin: 'rose', management: 'amber', manager: 'violet', salesperson: 'emerald', viewer: 'sky' };
+const KNOWN_TONE = { superadmin: 'rose', management: 'amber', manager: 'violet', salesperson: 'emerald', viewer: 'sky', warehouse: 'primary', office_manager: 'sky' };
 const TONE_CLASS = {
   primary: 'bg-blue-500/15 text-blue-600 dark:text-blue-300',
   violet:  'bg-violet-500/15 text-violet-600 dark:text-violet-300',

@@ -1,3 +1,9 @@
 node_modules
 .env
 .env.example
+
+# Runtime data — the server writes to these (users, roles). Not tracked so a
+# `git pull` never conflicts with live edits. Bootstrapped from seeds on a fresh
+# box: roles.js reseeds roles.json; users.js seeds users.json from SEED_SUPERADMINS.
+data/roles.json
+data/users.json

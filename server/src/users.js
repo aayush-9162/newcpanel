@@ -22,11 +22,21 @@ const FILE     = join(DATA_DIR, 'users.json');
 // Override with DEFAULT_ROLE in server/.env (must be a role id in roles.json).
 export const DEFAULT_ROLE = (process.env.DEFAULT_ROLE || 'salesperson').trim().toLowerCase();
 
+// Emails seeded as superadmin the FIRST time this runs on a fresh box (when
+// users.json doesn't exist yet), so there's always an admin to sign in with.
+// users.json is NOT tracked in git — this bootstraps it. Comma-separated in
+// server/.env:  SEED_SUPERADMINS=a@x.com,b@x.com
+const SEED_SUPERADMINS = (process.env.SEED_SUPERADMINS || '')
+  .split(',').map((e) => e.trim().toLowerCase()).filter((e) => e.includes('@'));
+
 const norm = (e) => String(e || '').trim().toLowerCase();
 
 function ensureFile() {
   if (!existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true });
-  if (!existsSync(FILE)) writeFileSync(FILE, JSON.stringify({ users: [] }, null, 2));
+  if (!existsSync(FILE)) {
+    const seeded = SEED_SUPERADMINS.map((email) => ({ email, name: '', role: 'superadmin' }));
+    writeFileSync(FILE, JSON.stringify({ users: seeded }, null, 2));
+  }
 }
 
 // Returns the full user list: [{ email, name, role }]
