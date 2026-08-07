@@ -1,11 +1,39 @@
 {
   "roles": [
     {
-      "id": "admin",
-      "label": "Admin",
+      "id": "superadmin",
+      "label": "Super Admin",
       "system": true,
       "allowAll": true,
       "routes": []
+    },
+    {
+      "id": "management",
+      "label": "Management",
+      "system": false,
+      "allowAll": false,
+      "routes": [
+        "/dashboard",
+        "/scr",
+        "/item-sold-analysis",
+        "/sales/performance",
+        "/fms",
+        "/disco",
+        "/mpr",
+        "/dmgsummary",
+        "/leads",
+        "/pickup/new",
+        "/hot-button-issues",
+        "/gmr",
+        "/pendingReceivables",
+        "/zip/analysis",
+        "/service-order",
+        "/mpf",
+        "/spf",
+        "/pbf",
+        "/damage/create",
+        "/mrf"
+      ]
     },
     {
       "id": "manager",

@@ -87,7 +87,7 @@ export async function requireAuth(req, res, next) {
   next();
 }
 
-// requireRole('admin') or requireRole(['admin','manager']). Use after requireAuth.
+// requireRole('superadmin') or requireRole(['a','b']). Use after requireAuth.
 export function requireRole(role) {
   const wanted = Array.isArray(role) ? role : [role];
   return (req, res, next) => {
@@ -95,6 +95,18 @@ export function requireRole(role) {
     if (!wanted.some((r) => have.includes(r))) {
       return res.status(403).json({ error: 'forbidden', need: wanted, have });
     }
+    next();
+  };
+}
+
+// requireRouteAccess('/admin') — allow only if the user's role may open that
+// page (allowAll, or the path is in their allowedRoutes). Ties an API to the
+// same permission as its page, so granting a page grants its endpoints too.
+export function requireRouteAccess(path) {
+  return (req, res, next) => {
+    const ar = req.user?.allowedRoutes;
+    const ok = ar === '*' || (Array.isArray(ar) && ar.includes(path));
+    if (!ok) return res.status(403).json({ error: 'forbidden', need: path });
     next();
   };
 }

@@ -70,7 +70,7 @@ export function Topbar({ title, subtitle }) {
 // UserMenu — avatar button that opens a dropdown showing the signed-in user,
 // their role, an admin shortcut, and a Sign out action.
 function UserMenu() {
-  const { user, hasRole, logout } = useAuth();
+  const { user, canAccess, logout } = useAuth();
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
@@ -124,7 +124,7 @@ function UserMenu() {
             </div>
           </div>
 
-          {hasRole('admin') && (
+          {canAccess('/admin') && (
             <button
               type="button"
               onClick={() => { setOpen(false); navigate('/admin'); }}

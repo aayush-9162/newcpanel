@@ -20,7 +20,8 @@ const FILE     = join(DATA_DIR, 'roles.json');
 // Seeded if the file is missing — mirrors the original hard-coded RBAC.
 const SEED = {
   roles: [
-    { id: 'admin', label: 'Admin', system: true, allowAll: true, routes: [] },
+    { id: 'superadmin', label: 'Super Admin', system: true, allowAll: true, routes: [] },
+    { id: 'management', label: 'Management', routes: ['/dashboard', '/scr', '/item-sold-analysis', '/sales/performance', '/fms', '/disco', '/mpr', '/dmgsummary', '/leads', '/pickup/new', '/hot-button-issues', '/gmr', '/pendingReceivables', '/zip/analysis', '/service-order', '/mpf', '/spf', '/pbf', '/damage/create', '/mrf'] },
     { id: 'manager', label: 'Manager', routes: ['/scr', '/item-sold-analysis', '/sales/performance', '/fms', '/disco', '/mpr', '/dmgsummary', '/leads', '/pickup/new', '/hot-button-issues', '/mpf', '/spf', '/pbf', '/damage/create', '/mrf'] },
     { id: 'viewer', label: 'Viewer', routes: ['/dashboard', '/item-sold-analysis', '/sales/performance', '/fms', '/disco', '/mpr', '/dmgsummary', '/leads', '/pickup/new', '/hot-button-issues', '/mpf', '/spf', '/pbf', '/damage/create', '/mrf'] },
     { id: 'salesperson', label: 'Salesperson', routes: ['/sales/performance', '/fms', '/disco', '/mpf', '/spf', '/pbf', '/damage/create', '/mrf'] },

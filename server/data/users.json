@@ -3,12 +3,12 @@
     {
       "email": "sunilgupta@123cfc.com",
       "name": "Sunil Gupta",
-      "role": "admin"
+      "role": "superadmin"
     },
     {
       "email": "aayushdubey@123cfc.com",
       "name": "Aayush Dubey",
-      "role": "admin"
+      "role": "superadmin"
     }
   ]
 }

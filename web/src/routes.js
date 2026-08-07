@@ -30,8 +30,8 @@ import {
 // Floor Sales, Discontinued Items (+ Home/Dashboard for navigation).
 // Managers are restricted from a few sensitive financial reports too —
 // those use ADMIN_ONLY instead of MGR.
-const MGR        = ['admin', 'manager', 'viewer']; // everything except salesperson
-const ADMIN_ONLY = ['admin'];                       // owner-only reports
+const MGR        = ['superadmin', 'manager', 'viewer']; // everything except salesperson
+const ADMIN_ONLY = ['superadmin'];                       // owner-only reports
 
 export const routes = [
   // Home — Control Panel is visible to everyone. Dashboard is for the owner
@@ -89,10 +89,9 @@ export function isRouteAllowed(routePath, allowedRoutes) {
 }
 
 // Routes an admin may toggle per role in the /admin permissions matrix.
-// Excludes '/' (always on) and '/admin' (always admin-only).
-export const PERMISSIONABLE_ROUTES = routes.filter(
-  (r) => r.path !== '/' && r.path !== '/admin',
-);
+// Excludes only '/' (Quick Access is always on). User Management ('/admin') and
+// Tracker Report ('/tracker') ARE listed so they can be granted when needed.
+export const PERMISSIONABLE_ROUTES = routes.filter((r) => r.path !== '/');
 
 // External links shown in the topbar on every page. (Cleared — these tools are
 // launched from the Quick Access portal instead.)

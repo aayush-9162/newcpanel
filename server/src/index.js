@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { queries } from './queries/index.js';
 import { runSql, runMysql } from './upstream.js';
 import { checkSelectOnly } from './sqlGuard.js';
-import { requireAuth, requireRole, verifyGoogleCredential, issueAppToken } from './auth.js';
+import { requireAuth, requireRouteAccess, verifyGoogleCredential, issueAppToken } from './auth.js';
 import { ensureUser, readUsers, upsertUser, removeUser } from './users.js';
 import { readRoles, upsertRole, deleteRole, allowedRoutesFor } from './roles.js';
 
@@ -66,11 +66,11 @@ app.get('/api/auth/me', (req, res) => {
 });
 
 // ─── Admin: manage the email → role allow-list (admin only) ─────────────────
-app.get('/api/admin/users', requireRole('admin'), (_req, res) => {
+app.get('/api/admin/users', requireRouteAccess('/admin'), (_req, res) => {
   res.json({ roles: readRoles(), users: readUsers() });
 });
 
-app.post('/api/admin/users', requireRole('admin'), (req, res) => {
+app.post('/api/admin/users', requireRouteAccess('/admin'), (req, res) => {
   const { email, name, role } = req.body ?? {};
   try {
     const saved = upsertUser({ email, name, role });
@@ -80,7 +80,7 @@ app.post('/api/admin/users', requireRole('admin'), (req, res) => {
   }
 });
 
-app.delete('/api/admin/users', requireRole('admin'), (req, res) => {
+app.delete('/api/admin/users', requireRouteAccess('/admin'), (req, res) => {
   const email = String(req.body?.email || req.query?.email || '').trim().toLowerCase();
   if (!email) return res.status(400).json({ error: 'email required' });
   if (email === req.user.email) {
@@ -91,12 +91,12 @@ app.delete('/api/admin/users', requireRole('admin'), (req, res) => {
 });
 
 // ─── Admin: manage roles + their page permissions (admin only) ──────────────
-app.get('/api/admin/roles', requireRole('admin'), (_req, res) => {
+app.get('/api/admin/roles', requireRouteAccess('/admin'), (_req, res) => {
   res.json({ roles: readRoles() });
 });
 
 // Create or update a role: { id, label, routes:[...], allowAll? }
-app.post('/api/admin/roles', requireRole('admin'), (req, res) => {
+app.post('/api/admin/roles', requireRouteAccess('/admin'), (req, res) => {
   const { id, label, routes, allowAll } = req.body ?? {};
   try {
     const saved = upsertRole({ id, label, routes, allowAll });
@@ -107,7 +107,7 @@ app.post('/api/admin/roles', requireRole('admin'), (req, res) => {
 });
 
 // Delete a non-system role. Users on it drop to the default role.
-app.delete('/api/admin/roles', requireRole('admin'), (req, res) => {
+app.delete('/api/admin/roles', requireRouteAccess('/admin'), (req, res) => {
   const id = String(req.body?.id || req.query?.id || '').trim().toLowerCase();
   if (!id) return res.status(400).json({ error: 'role id required' });
   if (id === req.user.role) {

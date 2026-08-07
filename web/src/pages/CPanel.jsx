@@ -72,8 +72,8 @@ const TOOLS = [
 
 export default function CPanel() {
   const { hasRole } = useAuth();
-  // Admin-only tools (e.g. Form Reports) are hidden from everyone else.
-  const tools = TOOLS.filter((t) => !t.adminOnly || hasRole('admin'));
+  // Admin-only tools (e.g. Form Reports) are shown only to the Super Admin.
+  const tools = TOOLS.filter((t) => !t.adminOnly || hasRole('superadmin'));
   return (
     <>
       <Topbar title="Control Panel" subtitle="Quick Access · External Tools & Forms" />
