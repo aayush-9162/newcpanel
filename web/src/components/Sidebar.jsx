@@ -20,13 +20,13 @@ export function Sidebar() {
 
   return (
     <aside className="hidden lg:flex w-64 shrink-0 flex-col border-r border-border bg-card/50">
-      <div className="flex h-16 flex-col justify-center gap-0.5 border-b border-border px-4">
+      <div className="flex h-16 flex-col justify-center gap-1 border-b border-border px-4">
         <img
           src="/cfc_logo.webp"
           alt="Carolina Furniture Concepts"
-          className="h-6 w-auto max-w-[210px] self-start object-contain dark:brightness-0 dark:invert"
+          className="w-[190px] max-w-full self-start object-contain dark:brightness-0 dark:invert"
         />
-        <span className="text-[10px] font-semibold uppercase tracking-[0.25em] text-muted-fg">Hub</span>
+        <span className="pl-0.5 text-[11px] font-semibold text-muted-fg">CFC Hub</span>
       </div>
 
       <nav className="flex-1 overflow-y-auto px-3 py-4">
