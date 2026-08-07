@@ -76,7 +76,7 @@ export default function CPanel() {
   const tools = TOOLS.filter((t) => !t.adminOnly || hasRole('superadmin'));
   return (
     <>
-      <Topbar title="Control Panel" subtitle="Quick Access · External Tools & Forms" />
+      <Topbar title="Quick Access" subtitle="External Tools & Company Forms" />
       <div className="flex flex-1 flex-col gap-6 p-5 animate-fade-in">
 
         {/* Welcome hero */}
