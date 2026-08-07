@@ -9,11 +9,12 @@ import { HeroBanner } from '@/components/HeroStat';
 import { LauncherCard } from '@/components/LauncherCard';
 import { FORMS } from '@/data/forms';
 import { VENDORS } from '@/data/vendors';
+import { BrandLogo } from '@/components/BrandLogo';
 import { useAuth } from '@/auth/AuthProvider';
 import {
   LayoutGrid, ExternalLink, ClipboardEdit, Sparkles, Search,
   // External tool icons
-  ListChecks, BarChart3, Globe2, Video, Store, FileBarChart, Clock, Truck, FileText,
+  ListChecks, BarChart3, Globe2, Video, Store, FileBarChart, Clock, Truck, FileText, MessagesSquare,
 } from 'lucide-react';
 
 // ─── External tools (open in new tab) ────────────────────────────────────────
@@ -44,6 +45,7 @@ const TOOLS = [
     description: 'Join the team Google Meet huddle',
     href: 'https://meet.google.com/xwb-mbyf-gen',
     icon: Video,
+    logo: 'meet.google.com',
     accent: 'sky',
   },
   {
@@ -51,13 +53,23 @@ const TOOLS = [
     description: 'Delivery routing and tracking',
     href: 'https://carolinafurnitureconcepts.dispatchtrack.com/a18/login',
     icon: Truck,
+    logo: 'dispatchtrack.com',
     accent: 'emerald',
+  },
+  {
+    label: 'Birdeye',
+    description: 'Customer reviews and messaging',
+    href: 'https://app.birdeye.com/sign-in/',
+    icon: MessagesSquare,
+    logo: 'birdeye.com',
+    accent: 'primary',
   },
   {
     label: 'ADP Time Clock',
     description: 'Clock in / out and timekeeping',
     href: 'https://online.adp.com/clock/login.html?TYPE=33554433&REALMOID=06-af229e79-8b8b-1133-9f6b-85fabf340000&GUID=&SMAUTHREASON=0&METHOD=GET&SMAGENTNAME=-SM-xG%2fsjhR3LqQrl8Bluqcb5CJsPHxtAOHb%2fepFa7ec2OFx0CU5KBY7cWZ9mpuPt1Lg&TARGET=-SM-https%3a%2f%2fclock%2eadp%2ecom%2f',
     icon: Clock,
+    logo: 'adp.com',
     accent: 'amber',
   },
   {
@@ -133,31 +145,18 @@ export default function CPanel() {
   );
 }
 
-// ─── Vendor logo — tries the brand logo, then a favicon, then initials ───────
+// ─── Vendor logo — white tile with the brand logo, initials as last resort ───
 function VendorLogo({ name, domain }) {
-  const sources = useMemo(() => (domain ? [
-    `https://logo.clearbit.com/${domain}`,
-    `https://www.google.com/s2/favicons?domain=${domain}&sz=128`,
-  ] : []), [domain]);
-  const [idx, setIdx] = useState(0);
-  const src = sources[idx];
-
-  if (!src) {
-    const initials = name.split(/[\s&/-]+/).filter(Boolean).map((s) => s[0]).slice(0, 2).join('').toUpperCase();
-    return (
-      <span className="grid h-11 w-11 shrink-0 place-items-center rounded-lg bg-primary/10 text-sm font-bold text-primary ring-1 ring-border">
-        {initials}
-      </span>
-    );
-  }
+  const initials = name.split(/[\s&/-]+/).filter(Boolean).map((s) => s[0]).slice(0, 2).join('').toUpperCase();
   return (
-    <img
-      src={src}
-      alt={name}
-      loading="lazy"
-      onError={() => setIdx((i) => i + 1)}
-      className="h-11 w-11 shrink-0 rounded-lg bg-white object-contain p-1 ring-1 ring-border"
-    />
+    <div className="grid h-12 w-12 shrink-0 place-items-center overflow-hidden rounded-lg bg-white p-1.5 ring-1 ring-border">
+      <BrandLogo
+        domain={domain}
+        name={name}
+        imgClassName="h-full w-full object-contain"
+        fallback={<span className="text-sm font-bold text-primary">{initials || '?'}</span>}
+      />
+    </div>
   );
 }
 

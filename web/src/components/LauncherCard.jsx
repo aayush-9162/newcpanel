@@ -7,6 +7,7 @@
 
 import { Link } from 'react-router-dom';
 import { STAT_PALETTE } from '@/components/HeroStat';
+import { BrandLogo } from '@/components/BrandLogo';
 import { cn } from '@/lib/cn';
 import { ExternalLink, ArrowRight } from 'lucide-react';
 
@@ -16,11 +17,31 @@ export function LauncherCard({
   href,
   to,
   icon: Icon,
+  logo,          // optional brand domain — shows the real logo on a white tile
   accent = 'primary',
   badge,
   external,
 }) {
   const p = STAT_PALETTE[accent] || STAT_PALETTE.primary;
+
+  // Logo tile (white, so brand marks read cleanly) or the accent icon tile.
+  const iconTile = logo ? (
+    <div className="grid h-9 w-9 place-items-center overflow-hidden rounded-xl bg-white p-1.5 shadow-md ring-2 ring-black/5 transition-transform duration-300 group-hover:scale-110">
+      <BrandLogo
+        domain={logo}
+        name={label}
+        imgClassName="h-full w-full object-contain"
+        fallback={<Icon size={16} strokeWidth={2.25} className="text-slate-500" />}
+      />
+    </div>
+  ) : (
+    <div className={cn(
+      'grid h-9 w-9 place-items-center rounded-xl text-white shadow-md ring-2 ring-offset-0 transition-transform duration-300 group-hover:scale-110 group-hover:rotate-3',
+      p.iconBg, p.iconRing,
+    )}>
+      <Icon size={16} strokeWidth={2.25} />
+    </div>
+  );
 
   const content = (
     <div
@@ -37,12 +58,7 @@ export function LauncherCard({
 
       <div className="relative flex h-full flex-col p-3">
         <div className="flex items-start justify-between gap-1.5">
-          <div className={cn(
-            'grid h-9 w-9 place-items-center rounded-xl text-white shadow-md ring-2 ring-offset-0 transition-transform duration-300 group-hover:scale-110 group-hover:rotate-3',
-            p.iconBg, p.iconRing,
-          )}>
-            <Icon size={16} strokeWidth={2.25} />
-          </div>
+          {iconTile}
 
           {badge && (
             <span className="rounded-full bg-gradient-to-r from-emerald-500 to-teal-500 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-white shadow">
