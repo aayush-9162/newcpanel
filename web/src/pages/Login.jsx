@@ -73,7 +73,7 @@ export default function Login() {
           <div className="grid h-14 w-14 place-items-center rounded-2xl bg-gradient-to-br from-blue-500 to-indigo-500 text-white shadow-lg">
             <LayoutGrid size={26} />
           </div>
-          <h1 className="mt-4 text-xl font-bold tracking-tight">CFC Cpanel</h1>
+          <h1 className="mt-4 text-xl font-bold tracking-tight">CFC Hub</h1>
           <p className="mt-1 text-sm text-muted-fg">Carolina Furniture Concepts</p>
           <p className="mt-4 text-sm text-muted-fg">Sign in with your company Google account to continue.</p>
         </div>

@@ -26,8 +26,8 @@ export function Sidebar() {
           <LayoutGrid size={18} />
         </div>
         <div className="flex flex-col leading-tight">
-          <span className="text-sm font-semibold">CFC Cpanel</span>
-          <span className="text-[11px] text-muted-fg">Modern</span>
+          <span className="text-sm font-semibold">CFC Hub</span>
+          <span className="text-[11px] text-muted-fg">Carolina Furniture Concepts</span>
         </div>
       </div>
 
