@@ -29,8 +29,8 @@ export function Topbar({ title, subtitle }) {
         {subtitle && <p className="text-xs text-muted-fg truncate">{subtitle}</p>}
       </div>
 
-      <div className="ml-auto flex items-center gap-1.5 overflow-x-auto">
-        <div className="hidden md:flex items-center gap-1">
+      <div className="ml-auto flex items-center gap-1.5 min-w-0">
+        <div className="hidden md:flex items-center gap-1 overflow-x-auto min-w-0">
           {externalLinks.map((l) => (
             <a
               key={l.label}
