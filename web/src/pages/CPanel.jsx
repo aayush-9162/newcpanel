@@ -8,12 +8,12 @@ import { Topbar } from '@/components/Topbar';
 import { HeroBanner } from '@/components/HeroStat';
 import { LauncherCard } from '@/components/LauncherCard';
 import { FORMS } from '@/data/forms';
-import { VENDOR_SITES } from '@/data/vendors';
+import { VENDORS } from '@/data/vendors';
 import { useAuth } from '@/auth/AuthProvider';
 import {
   LayoutGrid, ExternalLink, ClipboardEdit, Sparkles, Search,
   // External tool icons
-  ListChecks, BarChart3, Globe2, Video, Store, FileBarChart, Clock,
+  ListChecks, BarChart3, Globe2, Video, Store, FileBarChart, Clock, Truck, FileText,
 } from 'lucide-react';
 
 // ─── External tools (open in new tab) ────────────────────────────────────────
@@ -45,6 +45,13 @@ const TOOLS = [
     href: 'https://meet.google.com/xwb-mbyf-gen',
     icon: Video,
     accent: 'sky',
+  },
+  {
+    label: 'DispatchTrack',
+    description: 'Delivery routing and tracking',
+    href: 'https://carolinafurnitureconcepts.dispatchtrack.com/a18/login',
+    icon: Truck,
+    accent: 'emerald',
   },
   {
     label: 'ADP Time Clock',
@@ -126,7 +133,35 @@ export default function CPanel() {
   );
 }
 
-// ─── Vendor Sites — dense, searchable grid of vendor portals ─────────────────
+// ─── Vendor logo — tries the brand logo, then a favicon, then initials ───────
+function VendorLogo({ name, domain }) {
+  const sources = useMemo(() => (domain ? [
+    `https://logo.clearbit.com/${domain}`,
+    `https://www.google.com/s2/favicons?domain=${domain}&sz=128`,
+  ] : []), [domain]);
+  const [idx, setIdx] = useState(0);
+  const src = sources[idx];
+
+  if (!src) {
+    const initials = name.split(/[\s&/-]+/).filter(Boolean).map((s) => s[0]).slice(0, 2).join('').toUpperCase();
+    return (
+      <span className="grid h-11 w-11 shrink-0 place-items-center rounded-lg bg-primary/10 text-sm font-bold text-primary ring-1 ring-border">
+        {initials}
+      </span>
+    );
+  }
+  return (
+    <img
+      src={src}
+      alt={name}
+      loading="lazy"
+      onError={() => setIdx((i) => i + 1)}
+      className="h-11 w-11 shrink-0 rounded-lg bg-white object-contain p-1 ring-1 ring-border"
+    />
+  );
+}
+
+// ─── Vendors — logo card with Website + Price Sheet buttons ──────────────────
 function VendorSites() {
   const [query, setQuery] = useState('');
   const [showAll, setShowAll] = useState(false);
@@ -134,20 +169,20 @@ function VendorSites() {
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return q ? VENDOR_SITES.filter((v) => v.name.toLowerCase().includes(q)) : VENDOR_SITES;
+    return q ? VENDORS.filter((v) => v.name.toLowerCase().includes(q)) : VENDORS;
   }, [query]);
 
   const expanded = showAll || !!query.trim();
   const visible = expanded ? filtered : filtered.slice(0, INITIAL);
-  const hidden = VENDOR_SITES.length - INITIAL;
+  const hidden = VENDORS.length - INITIAL;
 
   return (
     <div className="flex flex-col gap-3">
       <div className="flex flex-wrap items-end justify-between gap-3 pt-1">
         <div className="flex items-center gap-2.5">
           <span className="grid h-8 w-8 place-items-center rounded-lg bg-primary/10 text-primary"><Store size={16} /></span>
-          <h2 className="text-base font-bold uppercase tracking-wider text-fg">Vendor Sites</h2>
-          <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-semibold tabular-nums text-muted-fg">{VENDOR_SITES.length}</span>
+          <h2 className="text-base font-bold uppercase tracking-wider text-fg">Vendors &amp; Price Sheets</h2>
+          <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-semibold tabular-nums text-muted-fg">{VENDORS.length}</span>
         </div>
         <div className="relative">
           <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-fg" />
@@ -163,20 +198,43 @@ function VendorSites() {
       {visible.length === 0 ? (
         <div className="rounded-xl border border-border bg-card p-6 text-center text-sm text-muted-fg">No vendor matches “{query}”.</div>
       ) : (
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {visible.map((v) => (
-            <a
+            <div
               key={v.name}
-              href={v.url}
-              target="_blank"
-              rel="noopener noreferrer"
-              title={v.url}
-              className="group flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-2 text-sm transition hover:-translate-y-0.5 hover:border-primary/50 hover:bg-muted/40 hover:shadow-sm"
+              className="flex flex-col gap-2.5 rounded-xl border border-border bg-card p-3 transition hover:border-primary/40 hover:shadow-sm"
             >
-              <Globe2 size={14} className="shrink-0 text-primary/70" />
-              <span className="truncate font-medium">{v.name}</span>
-              <ExternalLink size={12} className="ml-auto shrink-0 text-muted-fg opacity-0 transition group-hover:opacity-100" />
-            </a>
+              <div className="flex items-center gap-2.5">
+                <VendorLogo name={v.name} domain={v.domain} />
+                <span className="min-w-0 flex-1 truncate text-sm font-semibold" title={v.name}>{v.name}</span>
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {v.website && (
+                  <a
+                    href={v.website}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 rounded-lg bg-primary/10 px-2.5 py-1 text-xs font-semibold text-primary transition hover:bg-primary/20"
+                  >
+                    <Globe2 size={12} /> Website
+                  </a>
+                )}
+                {v.pricesheets.map((ps) => (
+                  <a
+                    key={ps.label}
+                    href={ps.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 rounded-lg bg-muted px-2.5 py-1 text-xs font-semibold text-fg/80 transition hover:bg-muted/70 hover:text-fg"
+                  >
+                    <FileText size={12} /> {v.pricesheets.length === 1 ? 'Price Sheet' : ps.label}
+                  </a>
+                ))}
+                {!v.website && v.pricesheets.length === 0 && (
+                  <span className="text-xs italic text-muted-fg">No links</span>
+                )}
+              </div>
+            </div>
           ))}
         </div>
       )}
@@ -187,7 +245,7 @@ function VendorSites() {
           onClick={() => setShowAll((s) => !s)}
           className="mx-auto mt-1 rounded-lg border border-border px-3 py-1.5 text-xs font-semibold text-primary transition hover:bg-muted"
         >
-          {showAll ? 'Show less' : `Show all ${VENDOR_SITES.length} vendors`}
+          {showAll ? 'Show less' : `Show all ${VENDORS.length} vendors`}
         </button>
       )}
     </div>
