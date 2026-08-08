@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Moon, Sun, RefreshCw, LogOut, User as UserIcon, Shield } from 'lucide-react';
+import { Moon, Sun, RefreshCw, LogOut, User as UserIcon, Shield, Download } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { useQueryClient } from '@tanstack/react-query';
 import { externalLinks } from '@/routes';
@@ -54,6 +54,7 @@ export function Topbar({ title, subtitle }) {
         </div>
 
         <div className="ml-2 flex items-center gap-2 shrink-0">
+          <InstallButton />
           <Button variant="outline" size="icon" title="Refresh data" onClick={() => qc.invalidateQueries()}>
             <RefreshCw size={16} />
           </Button>
@@ -64,6 +65,41 @@ export function Topbar({ title, subtitle }) {
         </div>
       </div>
     </header>
+  );
+}
+
+// InstallButton — downloads a Windows desktop shortcut (.url) that opens CFC Hub
+// in the default browser. Drop the file on the Desktop (or copy it to many
+// machines) — no PWA install needed. Temporary rollout helper.
+function InstallButton() {
+  const [done, setDone] = useState(false);
+
+  const downloadShortcut = () => {
+    const url = window.location.origin + '/';
+    // Windows .url internet-shortcut format (CRLF line endings required).
+    const content = `[InternetShortcut]\r\nURL=${url}\r\nIconIndex=0\r\n`;
+    const blob = new Blob([content], { type: 'application/octet-stream' });
+    const href = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = href;
+    a.download = 'CFC Hub.url';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(href);
+    setDone(true);
+    setTimeout(() => setDone(false), 2500);
+  };
+
+  return (
+    <button
+      type="button"
+      onClick={downloadShortcut}
+      title="Download a desktop shortcut for CFC Hub, then drop it on your Desktop"
+      className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-xs font-semibold text-primary-fg shadow-sm transition hover:opacity-90"
+    >
+      <Download size={14} /> {done ? 'Downloaded — drag to Desktop' : 'Install'}
+    </button>
   );
 }
 
