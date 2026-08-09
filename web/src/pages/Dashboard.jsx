@@ -1507,46 +1507,44 @@ function CustomerMixTile({ label, total, newCount, returning, loading, onClick }
     >
       <div className="absolute inset-0 bg-gradient-to-br from-violet-500/20 via-violet-500/10 to-transparent opacity-90 dark:from-violet-500/25" />
       <div className="absolute -bottom-4 -right-4 opacity-[0.06] dark:opacity-[0.08]">
-        <Users size={120} strokeWidth={1.5} />
+        <Users size={96} strokeWidth={1.5} />
       </div>
 
-      <div className="relative p-4">
+      <div className="relative p-3">
         <div className="flex items-center justify-between gap-2">
           <span title={typeof label === 'string' ? label : undefined} className="text-[10px] font-bold uppercase tracking-wider text-muted-fg leading-tight">{label}</span>
-          <div className="grid h-8 w-8 place-items-center rounded-lg shrink-0 text-white shadow-lg ring-2 bg-gradient-to-br from-violet-500 to-purple-500 ring-violet-500/30">
-            <Users size={15} strokeWidth={2.25} />
+          <div className="grid h-9 w-9 place-items-center rounded-lg shrink-0 text-white shadow-md ring-2 bg-gradient-to-br from-violet-500 to-purple-500 ring-violet-500/30">
+            <Users size={16} strokeWidth={2.25} />
           </div>
         </div>
 
         {loading ? (
-          <div className="mt-3 h-[78px] w-full animate-pulse rounded bg-muted/50" />
+          <div className="mt-3 h-[44px] w-full animate-pulse rounded bg-muted/50" />
         ) : (
           <>
-            <div className="mt-2 flex items-baseline gap-1.5">
+            <div className="mt-1.5 flex items-baseline gap-1.5">
               <span className="text-3xl font-extrabold leading-none tabular-nums text-violet-600 dark:text-violet-300">{fmtNumber(total)}</span>
               <span className="text-[11px] font-medium text-muted-fg">total</span>
             </div>
 
-            {/* Proportion bar: New (violet) vs Returning (emerald) */}
-            <div className="mt-3 flex h-2 w-full overflow-hidden rounded-full bg-muted">
-              <div className="h-full bg-violet-500 transition-all" style={{ width: `${newPct}%` }} title={`New · ${newPct}%`} />
-              <div className="h-full bg-emerald-500 transition-all" style={{ width: `${retPct}%` }} title={`Returning · ${retPct}%`} />
+            {/* Proportion bar + compact inline legend */}
+            <div className="mt-2 flex h-1.5 w-full overflow-hidden rounded-full bg-muted">
+              <div className="h-full bg-violet-500" style={{ width: `${newPct}%` }} title={`New · ${newPct}%`} />
+              <div className="h-full bg-emerald-500" style={{ width: `${retPct}%` }} title={`Returning · ${retPct}%`} />
             </div>
-
-            {/* Legend — both counts + share of total */}
-            <div className="mt-2.5 space-y-1">
-              <div className="flex items-center gap-2">
-                <span className="h-2.5 w-2.5 shrink-0 rounded-sm bg-violet-500" />
-                <span className="text-xs text-fg/80">New</span>
-                <span className="ml-auto text-sm font-bold tabular-nums text-fg">{fmtNumber(newCount)}</span>
-                <span className="w-9 text-right text-[10px] tabular-nums text-muted-fg">{newPct}%</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="h-2.5 w-2.5 shrink-0 rounded-sm bg-emerald-500" />
-                <span className="text-xs text-fg/80">Returning</span>
-                <span className="ml-auto text-sm font-bold tabular-nums text-fg">{fmtNumber(returning)}</span>
-                <span className="w-9 text-right text-[10px] tabular-nums text-muted-fg">{retPct}%</span>
-              </div>
+            <div className="mt-1.5 flex items-center gap-x-3 gap-y-0.5 text-[11px] flex-wrap">
+              <span className="inline-flex items-center gap-1.5">
+                <span className="h-2 w-2 shrink-0 rounded-sm bg-violet-500" />
+                <span className="text-fg/80">New</span>
+                <span className="font-bold tabular-nums text-fg">{fmtNumber(newCount)}</span>
+                <span className="tabular-nums text-muted-fg">({newPct}%)</span>
+              </span>
+              <span className="inline-flex items-center gap-1.5">
+                <span className="h-2 w-2 shrink-0 rounded-sm bg-emerald-500" />
+                <span className="text-fg/80">Ret.</span>
+                <span className="font-bold tabular-nums text-fg">{fmtNumber(returning)}</span>
+                <span className="tabular-nums text-muted-fg">({retPct}%)</span>
+              </span>
             </div>
           </>
         )}

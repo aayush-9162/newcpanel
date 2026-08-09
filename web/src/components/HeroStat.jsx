@@ -114,11 +114,11 @@ export function HeroStat({
       <div className={cn('absolute inset-0 bg-gradient-to-br opacity-90', p.surface)} />
       {Icon && (
         <div className="absolute -bottom-4 -right-4 opacity-[0.06] dark:opacity-[0.08]">
-          <Icon size={120} strokeWidth={1.5} />
+          <Icon size={96} strokeWidth={1.5} />
         </div>
       )}
 
-      <div className="relative p-4">
+      <div className="relative p-3">
         {/* Label spans the full card width so long names like
             "Outstanding Receivables" never get cut off. */}
         <div className="flex items-center gap-2">
@@ -134,13 +134,13 @@ export function HeroStat({
           )}
         </div>
 
-        <div className="mt-2 flex items-center gap-3">
+        <div className="mt-1.5 flex items-center gap-2.5">
           {Icon && (
             <div className={cn(
-              'grid h-11 w-11 place-items-center rounded-xl shrink-0 text-white shadow-lg ring-2 ring-offset-0',
+              'grid h-9 w-9 place-items-center rounded-lg shrink-0 text-white shadow-md ring-2 ring-offset-0',
               p.iconBg, p.iconRing,
             )}>
-              <Icon size={18} strokeWidth={2.25} />
+              <Icon size={16} strokeWidth={2.25} />
             </div>
           )}
           <div
@@ -157,15 +157,15 @@ export function HeroStat({
             )}
           >
             {loading
-              ? <span className="inline-block h-8 w-24 rounded bg-muted/60 animate-pulse align-middle" />
+              ? <span className="inline-block h-7 w-20 rounded bg-muted/60 animate-pulse align-middle" />
               : value}
           </div>
         </div>
 
-        {subtitle && <div title={typeof subtitle === 'string' ? subtitle : undefined} className="text-[11px] text-muted-fg mt-2 line-clamp-1">{subtitle}</div>}
+        {subtitle && <div title={typeof subtitle === 'string' ? subtitle : undefined} className="text-[11px] text-muted-fg mt-1.5 line-clamp-1">{subtitle}</div>}
         {sparkline && sparkline.length > 1 && !loading && (
-          <div className="mt-2 h-6 -mx-1">
-            <Sparkline data={sparkline} dataKey="value" color={p.spark} type="area" height={24} />
+          <div className="mt-1.5 h-5 -mx-1">
+            <Sparkline data={sparkline} dataKey="value" color={p.spark} type="area" height={20} />
           </div>
         )}
       </div>
