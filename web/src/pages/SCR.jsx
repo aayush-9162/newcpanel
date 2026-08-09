@@ -225,6 +225,14 @@ function buildWeeklySalesSql(storeKey) {
 
 const SCR_CURRENT_YEAR = new Date().getFullYear();
 
+// Weekday for a given day-of-month in a given month/year. Built from local
+// Y/M/D parts (not a SQL date) so there's no UTC off-by-one to worry about.
+const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+function weekdayFor(dayNum, monthIdx, year) {
+  const dow = new Date(year, monthIdx, dayNum).getDay();
+  return { name: WEEKDAYS[dow], weekend: dow === 0 || dow === 6 };
+}
+
 export default function SCR() {
   const today = new Date();
   const [store, setStore] = useState('ARDEN');
@@ -587,7 +595,9 @@ export default function SCR() {
               <thead className="bg-muted/60 text-[11px] uppercase tracking-wider text-muted-fg">
                 <tr>
                   <th className="px-4 py-2.5 text-left">Day</th>
+                  <th className="px-3 py-2.5 text-center">Day · LY</th>
                   <th className="px-4 py-2.5 text-right">Last Year</th>
+                  <th className="px-3 py-2.5 text-center">Day · TY</th>
                   <th className="px-4 py-2.5 text-right">This Year</th>
                   <th className="px-4 py-2.5 text-right">Δ</th>
                   <th className="px-4 py-2.5 text-right">LY Running</th>
@@ -596,17 +606,26 @@ export default function SCR() {
               </thead>
               <tbody>
                 {daily.isLoading ? (
-                  <tr><td colSpan={6} className="py-8 text-center text-muted-fg">Loading…</td></tr>
+                  <tr><td colSpan={8} className="py-8 text-center text-muted-fg">Loading…</td></tr>
                 ) : dailyRows.length === 0 ? (
-                  <tr><td colSpan={6} className="py-8 text-center text-muted-fg">No records for {monthName}.</td></tr>
+                  <tr><td colSpan={8} className="py-8 text-center text-muted-fg">No records for {monthName}.</td></tr>
                 ) : dailyRows.map((r) => {
                   const ty = Number(r.ThisYear) || 0;
                   const ly = Number(r.LastYear) || 0;
                   const diff = Number(r.Difference) || (ty - ly);
+                  const dayNum = parseInt(String(r.DayMonth).split('-')[0], 10);
+                  const dLY = weekdayFor(dayNum, monthIdx, SCR_CURRENT_YEAR - 1);
+                  const dTY = weekdayFor(dayNum, monthIdx, SCR_CURRENT_YEAR);
+                  const dayCls = (d) => cn(
+                    'px-3 py-2 text-center text-xs font-semibold',
+                    d.weekend ? 'bg-amber-500/15 text-amber-700 dark:text-amber-300' : 'text-muted-fg',
+                  );
                   return (
                     <tr key={r.DayMonth} className="border-t border-border">
                       <td className="px-4 py-2 font-medium">{r.DayMonth}</td>
+                      <td className={dayCls(dLY)}>{dLY.name}</td>
                       <td className="px-4 py-2 text-right num text-muted-fg">{fmtCurrency(ly)}</td>
+                      <td className={dayCls(dTY)}>{dTY.name}</td>
                       <td className="px-4 py-2 text-right num">{fmtCurrency(ty)}</td>
                       <td className={`px-4 py-2 text-right num ${diff > 0 ? 'text-success' : diff < 0 ? 'text-danger' : ''}`}>
                         {diff ? fmtCurrency(diff) : '—'}
