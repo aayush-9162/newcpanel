@@ -240,6 +240,8 @@ export default function DashboardDaily({ store, selectedBldg }) {
   };
 
   const top5Areas = yAreas.areas.slice(0, 5);
+  const topArea = yAreas.areas[0] || null;
+  const topAreaShare = topArea && yAreas.total ? ((topArea.revenue / yAreas.total) * 100).toFixed(1) : '0';
   const noSalesYet = !kpiQ.isLoading && orders === 0 && revenue === 0;
 
   return (
@@ -262,8 +264,8 @@ export default function DashboardDaily({ store, selectedBldg }) {
         </div>
       </HeroBanner>
 
-      {/* ═══════════════ KPI tiles ═══════════════ */}
-      <div className="grid grid-cols-1 items-stretch gap-4 sm:grid-cols-3">
+      {/* ═══════════════ KPI tiles (compact) ═══════════════ */}
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <StatCard
           label={`Orders · ${dateShort}`}
           value={fmtNumber(orders)}
@@ -295,16 +297,17 @@ export default function DashboardDaily({ store, selectedBldg }) {
         <StatCard
           label={`Items Sold · ${dateShort}`}
           value={fmtNumber(units)}
-          caption="units across all categories"
+          caption={orders ? `${(units / orders).toFixed(1)} per order` : 'units sold'}
           icon={Boxes}
           accent="primary"
           loading={unitsQ.isLoading}
         />
-        <CustomerMixTile
+        <StatCard
           label={`Customers · ${dateShort}`}
-          total={customers}
-          newCount={newC}
-          returning={returning}
+          value={fmtNumber(customers)}
+          caption={customers ? `${fmtNumber(newC)} new · ${fmtNumber(returning)} returning` : 'no customers'}
+          icon={Users}
+          accent="violet"
           loading={custQ.isLoading}
           onClick={openDetail({
             title: `Customers · ${dateShort} · ${storeLabel}`,
@@ -350,6 +353,15 @@ export default function DashboardDaily({ store, selectedBldg }) {
             ],
             detailsEmpty: 'No customers yesterday',
           })}
+        />
+        <StatCard
+          label={`Top Area · ${dateShort}`}
+          value={topArea ? fmtCompactCurrency(topArea.revenue) : '—'}
+          caption={topArea ? `${topArea.name} · ${topAreaShare}% of day` : 'no sales'}
+          icon={MapPin}
+          accent="emerald"
+          loading={areaQ.isLoading}
+          onClick={topArea ? openDetail(areaZipConfig(topArea)) : undefined}
         />
       </div>
 
@@ -622,8 +634,10 @@ function SectionHeading({ icon: Icon, title, hint }) {
 // StatCard — a headline KPI tile (big number + caption). Styled to match
 // CustomerMixTile and stretches to the row height so the KPI row reads evenly.
 const STAT_ACCENTS = {
-  sky:     { border: 'border-sky-500/40',   glow: 'shadow-[0_8px_30px_-12px_rgba(14,165,233,0.45)]', wash: 'from-sky-500/20 dark:from-sky-500/25',   grad: 'from-sky-500 to-cyan-500',    ring: 'ring-sky-500/30',   text: 'text-sky-600 dark:text-sky-300' },
-  primary: { border: 'border-blue-500/40',  glow: 'shadow-[0_8px_30px_-12px_rgba(59,130,246,0.45)]', wash: 'from-blue-500/20 dark:from-blue-500/25', grad: 'from-blue-500 to-indigo-500', ring: 'ring-blue-500/30',  text: 'text-blue-600 dark:text-blue-300' },
+  sky:     { border: 'border-sky-500/40',    grad: 'from-sky-500 to-cyan-500',      ring: 'ring-sky-500/30',    text: 'text-sky-600 dark:text-sky-300',       wash: 'from-sky-500/15 dark:from-sky-500/20' },
+  primary: { border: 'border-blue-500/40',   grad: 'from-blue-500 to-indigo-500',   ring: 'ring-blue-500/30',   text: 'text-blue-600 dark:text-blue-300',     wash: 'from-blue-500/15 dark:from-blue-500/20' },
+  violet:  { border: 'border-violet-500/40', grad: 'from-violet-500 to-purple-500', ring: 'ring-violet-500/30', text: 'text-violet-600 dark:text-violet-300', wash: 'from-violet-500/15 dark:from-violet-500/20' },
+  emerald: { border: 'border-emerald-500/40',grad: 'from-emerald-500 to-teal-500',  ring: 'ring-emerald-500/30',text: 'text-emerald-600 dark:text-emerald-300',wash: 'from-emerald-500/15 dark:from-emerald-500/20' },
 };
 function StatCard({ label, value, caption, icon: Icon, accent = 'sky', loading, onClick }) {
   const a = STAT_ACCENTS[accent] || STAT_ACCENTS.sky;
@@ -632,26 +646,28 @@ function StatCard({ label, value, caption, icon: Icon, accent = 'sky', loading, 
     <Comp
       {...(onClick ? { type: 'button', onClick } : {})}
       className={cn(
-        'group relative flex h-full flex-col overflow-hidden rounded-2xl border bg-card p-4 text-left transition-all duration-300',
-        a.border, a.glow,
-        onClick && 'cursor-pointer hover:-translate-y-1 hover:shadow-[0_20px_40px_-15px_rgba(0,0,0,0.25)]',
+        'group relative w-full overflow-hidden rounded-xl border bg-card p-3.5 text-left transition-all duration-200',
+        a.border,
+        onClick && 'cursor-pointer hover:-translate-y-0.5 hover:shadow-md',
       )}
     >
-      <div className={cn('absolute inset-0 bg-gradient-to-br via-transparent to-transparent opacity-90', a.wash)} />
-      <div className="relative flex items-center justify-between gap-2">
-        <span className="text-[10px] font-bold uppercase tracking-wider text-muted-fg leading-tight">{label}</span>
-        <div className={cn('grid h-9 w-9 shrink-0 place-items-center rounded-xl text-white shadow-lg ring-2 bg-gradient-to-br transition-transform group-hover:scale-110', a.grad, a.ring)}>
-          <Icon size={17} strokeWidth={2.25} />
+      <div className={cn('absolute inset-0 bg-gradient-to-br via-transparent to-transparent opacity-80', a.wash)} />
+      <div className="relative flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="truncate text-[10px] font-bold uppercase tracking-wider text-muted-fg">{label}</div>
+          {loading ? (
+            <div className="mt-2 h-7 w-16 animate-pulse rounded bg-muted/50" />
+          ) : (
+            <>
+              <div className={cn('mt-1 text-3xl font-extrabold leading-none tabular-nums', a.text)}>{value}</div>
+              {caption && <div className="mt-1.5 text-[11px] font-medium text-muted-fg">{caption}</div>}
+            </>
+          )}
+        </div>
+        <div className={cn('grid h-8 w-8 shrink-0 place-items-center rounded-lg text-white shadow ring-2 bg-gradient-to-br', a.grad, a.ring)}>
+          <Icon size={15} strokeWidth={2.25} />
         </div>
       </div>
-      {loading ? (
-        <div className="relative my-auto h-12 w-28 animate-pulse rounded bg-muted/50" />
-      ) : (
-        <div className="relative flex flex-1 flex-col items-center justify-center py-2 text-center">
-          <div className={cn('text-6xl font-extrabold leading-none tracking-tight tabular-nums', a.text)}>{value}</div>
-          {caption && <div className="mt-2 text-xs font-medium text-muted-fg">{caption}</div>}
-        </div>
-      )}
     </Comp>
   );
 }
