@@ -578,8 +578,65 @@ export default function SCR() {
           />
         </div>
 
-        {/* ── quick reports (weekly / monthly highlights from raw sales) ── */}
-        <QuickReports stats={quickStats} loading={weeklySales.isLoading} storeKey={store} />
+        {/* ── daily comparison (moved up) ── */}
+        <Card>
+          <CardHeader>
+            <div className="flex flex-wrap items-center gap-3">
+              <CardTitle>Daily comparison · {monthName}</CardTitle>
+              <div className="flex items-center gap-1.5 rounded-lg border border-border bg-muted/40 p-1">
+                <span className="ml-1 mr-0.5 text-[11px] font-semibold uppercase tracking-wider text-muted-fg">Compare</span>
+                <Button size="sm" variant={align === 'date' ? 'primary' : 'outline'} onClick={() => setAlign('date')}>By Date</Button>
+                <Button size="sm" variant={align === 'weekday' ? 'primary' : 'outline'} onClick={() => setAlign('weekday')}>By Weekday</Button>
+              </div>
+            </div>
+            <CardDescription>
+              {align === 'weekday'
+                ? 'By weekday — this year vs last year matched on the same day of week (Sat vs Sat).'
+                : 'By calendar date — this year vs last year on the same date.'}
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="p-0 overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-muted/60 text-[11px] uppercase tracking-wider text-muted-fg">
+                <tr>
+                  <th className="px-4 py-2.5 text-left">Day</th>
+                  <th className="px-3 py-2.5 text-center">Day · LY</th>
+                  <th className="px-4 py-2.5 text-right">Last Year</th>
+                  <th className="px-3 py-2.5 text-center">Day · TY</th>
+                  <th className="px-4 py-2.5 text-right">This Year</th>
+                  <th className="px-4 py-2.5 text-right">Δ</th>
+                  <th className="px-4 py-2.5 text-right">LY Running</th>
+                  <th className="px-4 py-2.5 text-right">TY Running</th>
+                </tr>
+              </thead>
+              <tbody>
+                {daily.isLoading ? (
+                  <tr><td colSpan={8} className="py-8 text-center text-muted-fg">Loading…</td></tr>
+                ) : dailyDisplay.length === 0 ? (
+                  <tr><td colSpan={8} className="py-8 text-center text-muted-fg">No records for {monthName}.</td></tr>
+                ) : dailyDisplay.map((r) => (
+                  <tr key={r.DayMonth} className="border-t border-border">
+                    <td className="px-4 py-2 font-medium">{r.DayMonth}</td>
+                    <td className={dayCellClass(r.dLY)}
+                        title={align === 'weekday' && r.lyExists ? `Last year: ${MONTHS[monthIdx].slice(0, 3)} ${r.alignedDay}` : undefined}>
+                      {align === 'weekday'
+                        ? (r.lyExists ? `${r.dLY.name} ${r.alignedDay}` : '—')
+                        : r.dLY.name}
+                    </td>
+                    <td className="px-4 py-2 text-right num text-muted-fg">{r.ly == null ? '—' : fmtCurrency(r.ly)}</td>
+                    <td className={dayCellClass(r.dTY)}>{r.dTY.name}</td>
+                    <td className="px-4 py-2 text-right num">{fmtCurrency(r.ty)}</td>
+                    <td className={`px-4 py-2 text-right num ${r.diff > 0 ? 'text-success' : r.diff < 0 ? 'text-danger' : ''}`}>
+                      {r.diff ? fmtCurrency(r.diff) : '—'}
+                    </td>
+                    <td className="px-4 py-2 text-right num text-muted-fg">{fmtCurrency(r.lyRun)}</td>
+                    <td className="px-4 py-2 text-right num">{fmtCurrency(r.tyRun)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </CardContent>
+        </Card>
 
         {/* ── deep analysis row ── */}
         <DeepAnalysis insights={insights} matrix={matrix} monthName={monthName} category={category} />
@@ -635,65 +692,6 @@ export default function SCR() {
         </div>
 
         <PerformanceMatrix matrix={matrix} loading={monthly.isLoading || daily.isLoading} monthName={monthName} />
-
-        <Card>
-          <CardHeader className="flex-row items-start justify-between gap-3 space-y-0">
-            <div>
-              <CardTitle>Daily comparison · {monthName}</CardTitle>
-              <CardDescription>
-                {align === 'weekday'
-                  ? 'By weekday — this year vs last year matched on the same day of week (Sat vs Sat).'
-                  : 'By calendar date — this year vs last year on the same date.'}
-              </CardDescription>
-            </div>
-            <div className="flex shrink-0 items-center gap-1">
-              <span className="mr-1 text-[11px] uppercase tracking-wider text-muted-fg">Compare</span>
-              <Button size="sm" variant={align === 'date' ? 'primary' : 'outline'} onClick={() => setAlign('date')}>By Date</Button>
-              <Button size="sm" variant={align === 'weekday' ? 'primary' : 'outline'} onClick={() => setAlign('weekday')}>By Weekday</Button>
-            </div>
-          </CardHeader>
-          <CardContent className="p-0 overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-muted/60 text-[11px] uppercase tracking-wider text-muted-fg">
-                <tr>
-                  <th className="px-4 py-2.5 text-left">Day</th>
-                  <th className="px-3 py-2.5 text-center">Day · LY</th>
-                  <th className="px-4 py-2.5 text-right">Last Year</th>
-                  <th className="px-3 py-2.5 text-center">Day · TY</th>
-                  <th className="px-4 py-2.5 text-right">This Year</th>
-                  <th className="px-4 py-2.5 text-right">Δ</th>
-                  <th className="px-4 py-2.5 text-right">LY Running</th>
-                  <th className="px-4 py-2.5 text-right">TY Running</th>
-                </tr>
-              </thead>
-              <tbody>
-                {daily.isLoading ? (
-                  <tr><td colSpan={8} className="py-8 text-center text-muted-fg">Loading…</td></tr>
-                ) : dailyDisplay.length === 0 ? (
-                  <tr><td colSpan={8} className="py-8 text-center text-muted-fg">No records for {monthName}.</td></tr>
-                ) : dailyDisplay.map((r) => (
-                  <tr key={r.DayMonth} className="border-t border-border">
-                    <td className="px-4 py-2 font-medium">{r.DayMonth}</td>
-                    <td className={dayCellClass(r.dLY)}
-                        title={align === 'weekday' && r.lyExists ? `Last year: ${MONTHS[monthIdx].slice(0, 3)} ${r.alignedDay}` : undefined}>
-                      {align === 'weekday'
-                        ? (r.lyExists ? `${r.dLY.name} ${r.alignedDay}` : '—')
-                        : r.dLY.name}
-                    </td>
-                    <td className="px-4 py-2 text-right num text-muted-fg">{r.ly == null ? '—' : fmtCurrency(r.ly)}</td>
-                    <td className={dayCellClass(r.dTY)}>{r.dTY.name}</td>
-                    <td className="px-4 py-2 text-right num">{fmtCurrency(r.ty)}</td>
-                    <td className={`px-4 py-2 text-right num ${r.diff > 0 ? 'text-success' : r.diff < 0 ? 'text-danger' : ''}`}>
-                      {r.diff ? fmtCurrency(r.diff) : '—'}
-                    </td>
-                    <td className="px-4 py-2 text-right num text-muted-fg">{fmtCurrency(r.lyRun)}</td>
-                    <td className="px-4 py-2 text-right num">{fmtCurrency(r.tyRun)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </CardContent>
-        </Card>
 
         <Card>
           <CardHeader>
