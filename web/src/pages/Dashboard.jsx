@@ -72,7 +72,7 @@ export default function Dashboard() {
 
   const [store, setStore] = useState('ARDEN');                 // ARDEN | WAYNESVILLE
   const [category, setCategory] = useState('Written');         // Written | Delivered
-  const [period, setPeriod] = useState('monthly');             // monthly | daily (yesterday)
+  const [period, setPeriod] = useState('daily');               // daily (yesterday) | monthly
   const [month, setMonth] = useState(new Date().getMonth() + 1);
 
   // Detail-panel state — non-null value opens the MetricDrilldown modal.
@@ -487,62 +487,41 @@ export default function Dashboard() {
 
   // ── Vendor Wise Analysis — top 5 vendors by units sold this month (selected
   //    store). Clicking a vendor drills into their item-type breakdown.
+  // Top 5 vendors ranked BY REVENUE (this month). SalesItemDetail has no
+  // per-line price, so each sale's revenue (SaleWRT) is split across its vendors
+  // in proportion to item count; vendors are then ranked by that revenue.
   const vendorAnalysisSql = `
-    WITH m AS (SELECT MAX(SaleDate) AS d FROM SalesItemDetail)
-    SELECT TOP 5 LTRIM(RTRIM(VendorID)) AS vendor,
-                 COUNT(*)               AS units,
-                 COUNT(DISTINCT ItemID) AS skus
-    FROM SalesItemDetail CROSS JOIN m
-    WHERE YEAR(SaleDate) = YEAR(m.d) AND MONTH(SaleDate) = MONTH(m.d)
-      AND LEFT(CAST(SaleNo AS VARCHAR(20)), 1) = '${selectedBldg}'
-      AND VendorID IS NOT NULL
-      AND LTRIM(RTRIM(VendorID)) NOT IN ('CFC', 'USLD', 'NONE', '')
-    GROUP BY LTRIM(RTRIM(VendorID))
-    ORDER BY units DESC
-  `;
-  const vendorAnalysisQ = useSqlQuery(vendorAnalysisSql, []);
-  const topVendors = vendorAnalysisQ.data?.rows ?? [];
-
-  // Vendor revenue (this month) — SalesItemDetail has no per-line price, so we
-  // attribute each sale's revenue (SalespersonDaily) across its vendors in
-  // proportion to their item count on that sale. Isolated so a miss never
-  // breaks the vendor tiles.
-  const vendorRevSql = `
     WITH m AS (SELECT MAX(SaleDate) AS d FROM SalesItemDetail),
-         items AS (
+         det AS (
            SELECT CAST(SaleNo AS VARCHAR(20)) AS SaleNo,
                   LTRIM(RTRIM(VendorID))       AS vendor,
-                  COUNT(*)                     AS items
+                  LTRIM(RTRIM(ItemID))         AS ItemID
            FROM SalesItemDetail CROSS JOIN m
            WHERE YEAR(SaleDate) = YEAR(m.d) AND MONTH(SaleDate) = MONTH(m.d)
              AND LEFT(CAST(SaleNo AS VARCHAR(20)), 1) = '${selectedBldg}'
              AND VendorID IS NOT NULL AND LTRIM(RTRIM(VendorID)) NOT IN ('CFC', 'USLD', 'NONE', '')
-           GROUP BY CAST(SaleNo AS VARCHAR(20)), LTRIM(RTRIM(VendorID))
          ),
-         tot AS (SELECT SaleNo, SUM(items) AS totItems FROM items GROUP BY SaleNo),
-         rev AS (
+         vitems AS (SELECT SaleNo, vendor, COUNT(*) AS items FROM det GROUP BY SaleNo, vendor),
+         saleTot AS (SELECT SaleNo, SUM(items) AS totItems FROM vitems GROUP BY SaleNo),
+         saleRev AS (
            SELECT CAST(wrt_so_no AS VARCHAR(20)) AS SaleNo, SUM(wrt_sls) AS amt
-           FROM SaleWRT
-           WHERE wrt_pft_ctr = ${selectedBldg}
+           FROM SaleWRT WHERE wrt_pft_ctr = ${selectedBldg}
            GROUP BY CAST(wrt_so_no AS VARCHAR(20))
-         )
-    SELECT i.vendor AS vendor,
-           SUM(ISNULL(rev.amt, 0) * i.items * 1.0 / NULLIF(tot.totItems, 0)) AS revenue
-    FROM items i
-    JOIN tot ON tot.SaleNo = i.SaleNo
-    LEFT JOIN rev ON rev.SaleNo = i.SaleNo
-    GROUP BY i.vendor
+         ),
+         vrev AS (
+           SELECT vi.vendor, SUM(ISNULL(sr.amt, 0) * vi.items * 1.0 / NULLIF(st.totItems, 0)) AS revenue
+           FROM vitems vi JOIN saleTot st ON st.SaleNo = vi.SaleNo
+           LEFT JOIN saleRev sr ON sr.SaleNo = vi.SaleNo
+           GROUP BY vi.vendor
+         ),
+         vagg AS (SELECT vendor, COUNT(*) AS units, COUNT(DISTINCT ItemID) AS skus FROM det GROUP BY vendor)
+    SELECT TOP 5 vagg.vendor AS vendor, vagg.units AS units, vagg.skus AS skus, ISNULL(vrev.revenue, 0) AS revenue
+    FROM vagg LEFT JOIN vrev ON vrev.vendor = vagg.vendor
+    ORDER BY revenue DESC
   `;
-  const vendorRevQ = useSqlQuery(vendorRevSql, []);
-  const vendorRevByName = useMemo(() => {
-    const map = {};
-    for (const r of (vendorRevQ.data?.rows ?? [])) map[String(r.vendor || '').trim()] = Number(r.revenue) || 0;
-    return map;
-  }, [vendorRevQ.data]);
-  const topVendorsRevTotal = useMemo(
-    () => topVendors.reduce((s, v) => s + (vendorRevByName[String(v.vendor || '').trim()] || 0), 0),
-    [topVendors, vendorRevByName],
-  );
+  const vendorAnalysisQ = useSqlQuery(vendorAnalysisSql, []);
+  const topVendors = vendorAnalysisQ.data?.rows ?? [];
+  const topVendorsRevTotal = topVendors.reduce((s, v) => s + (Number(v.revenue) || 0), 0);
 
   // ── Area-wise sales for the selected month + store (SaleWRT + SaleRV),
   //    grouped by delivery zip and rolled up to the area (city).
@@ -668,8 +647,8 @@ export default function Dashboard() {
             </div>
             <div className="h-6 w-px bg-border" />
             <div className="flex gap-1 rounded-lg border border-border bg-muted/30 p-0.5">
-              <FilterPill active={period === 'monthly'} onClick={() => setPeriod('monthly')} title="This-month view">Monthly</FilterPill>
               <FilterPill active={period === 'daily'}   onClick={() => setPeriod('daily')}   title="Yesterday view">Daily</FilterPill>
+              <FilterPill active={period === 'monthly'} onClick={() => setPeriod('monthly')} title="This-month view">Monthly</FilterPill>
             </div>
             {period === 'monthly' && (
               <div className="ml-auto flex flex-wrap gap-1">
@@ -763,84 +742,54 @@ export default function Dashboard() {
             ? `${fmtNumber(monthAreas.areas.length)} areas · ${fmtCurrency(monthAreas.total)} · click an area for its zip codes`
             : 'Top 5 areas by revenue · click an area for its zip codes'}
         />
-        <div className="overflow-hidden rounded-2xl border border-border bg-card">
+        <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
           {monthAreaQ.isLoading ? (
-            <div className="py-8 text-center text-sm text-muted-fg">Loading…</div>
+            <div className="col-span-2 lg:col-span-5 py-6 text-center text-xs text-muted-fg">Loading…</div>
           ) : monthAreas.areas.length === 0 ? (
-            <div className="py-8 text-center text-sm text-muted-fg">No sales for {monthName}.</div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="bg-muted/50 text-xs uppercase tracking-wider text-muted-fg">
-                  <tr>
-                    <th className="px-3 py-2.5 text-left font-semibold">#</th>
-                    <th className="px-3 py-2.5 text-left font-semibold">Area</th>
-                    <th className="px-3 py-2.5 text-right font-semibold">Zips</th>
-                    <th className="px-3 py-2.5 text-right font-semibold">Orders</th>
-                    <th className="px-3 py-2.5 text-right font-semibold">Revenue</th>
-                    <th className="px-4 py-2.5 text-left font-semibold">Share of month</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {monthAreas.areas.slice(0, 5).map((a, i) => {
-                    const share  = monthAreas.total ? (a.revenue / monthAreas.total) * 100 : 0;
-                    const top    = monthAreas.areas[0].revenue;
-                    const barPct = top ? Math.max(3, (a.revenue / top) * 100) : 0;
-                    const grad = ['from-blue-500 to-indigo-500', 'from-emerald-500 to-teal-500', 'from-amber-500 to-orange-500', 'from-violet-500 to-purple-500', 'from-sky-500 to-cyan-500'][i % 5];
-                    return (
-                      <tr
-                        key={a.name}
-                        onClick={openDetail(monthAreaZipConfig(a))}
-                        className="group cursor-pointer border-t border-border hover:bg-muted/30"
-                      >
-                        <td className="px-3 py-2.5"><span className={cn('grid h-6 w-6 place-items-center rounded-md bg-gradient-to-br text-xs font-bold text-white', grad)}>{i + 1}</span></td>
-                        <td className="px-3 py-2.5 font-semibold">{a.name}</td>
-                        <td className="px-3 py-2.5 text-right tabular-nums text-muted-fg">{fmtNumber(a.zipCount)}</td>
-                        <td className="px-3 py-2.5 text-right tabular-nums text-muted-fg">{fmtNumber(a.orders)}</td>
-                        <td className="px-3 py-2.5 text-right font-bold tabular-nums">{fmtCurrency(a.revenue)}</td>
-                        <td className="px-4 py-2.5">
-                          <div className="flex items-center gap-2">
-                            <div className="h-2 w-24 overflow-hidden rounded-full bg-muted sm:w-32">
-                              <div className={cn('h-full rounded-full bg-gradient-to-r', grad)} style={{ width: `${barPct}%` }} />
-                            </div>
-                            <span className="w-11 text-right text-xs font-semibold tabular-nums text-muted-fg">{share.toFixed(1)}%</span>
-                            <ChevronRight size={14} className="text-muted-fg opacity-0 transition group-hover:opacity-100" />
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-              {monthAreas.areas.length > 5 && (
-                <div className="border-t border-border p-2 text-center">
-                  <button
-                    type="button"
-                    onClick={openDetail({
-                      title: `All Areas · ${monthName} · ${store === 'ARDEN' ? 'Arden (S1)' : 'Waynesville (S2)'}`,
-                      icon: MapPin,
-                      accent: 'primary',
-                      headline: fmtCurrency(monthAreas.total),
-                      subtitle: `${fmtNumber(monthAreas.areas.length)} areas · click an area to see its zip codes`,
-                      loadRows: () => monthAreas.areas.map((a) => ({ name: a.name, zips: a.zipCount, orders: a.orders, revenue: a.revenue, _area: a })),
-                      detailsColumns: [
-                        { key: 'name', label: 'Area' },
-                        { key: 'zips', label: 'Zip Codes', align: 'right', render: (r) => fmtNumber(r.zips) },
-                        { key: 'orders', label: 'Orders', align: 'right', render: (r) => fmtNumber(r.orders) },
-                        { key: 'revenue', label: 'Revenue', align: 'right', render: (r) => <span className="font-semibold">{fmtCurrency(r.revenue)}</span> },
-                      ],
-                      onRowClick: (row) => monthAreaZipConfig(row._area),
-                      detailsEmpty: 'No sales this month',
-                    })}
-                    className="rounded-lg px-3 py-1.5 text-sm font-semibold text-primary transition hover:bg-muted"
-                  >
-                    See all {fmtNumber(monthAreas.areas.length)} areas →
-                  </button>
-                </div>
-              )}
-            </div>
-          )}
+            <div className="col-span-2 lg:col-span-5 py-6 text-center text-xs text-muted-fg">No sales for {monthName}.</div>
+          ) : monthAreas.areas.slice(0, 5).map((a, i) => {
+            const share = monthAreas.total ? ((a.revenue / monthAreas.total) * 100).toFixed(1) : '0';
+            return (
+              <HeroStat
+                key={a.name}
+                label={a.name}
+                value={fmtCompactCurrency(a.revenue)}
+                fullValue={fmtCurrency(a.revenue)}
+                icon={MapPin}
+                accent={['primary', 'emerald', 'amber', 'violet', 'sky'][i % 5]}
+                subtitle={`${fmtNumber(a.zipCount)} zip${a.zipCount === 1 ? '' : 's'} · ${fmtNumber(a.orders)} ord · ${share}%`}
+                loading={monthAreaQ.isLoading}
+                onClick={openDetail(monthAreaZipConfig(a))}
+              />
+            );
+          })}
         </div>
+        {monthAreas.areas.length > 5 && (
+          <div className="text-center">
+            <button
+              type="button"
+              onClick={openDetail({
+                title: `All Areas · ${monthName} · ${store === 'ARDEN' ? 'Arden (S1)' : 'Waynesville (S2)'}`,
+                icon: MapPin,
+                accent: 'primary',
+                headline: fmtCurrency(monthAreas.total),
+                subtitle: `${fmtNumber(monthAreas.areas.length)} areas · click an area to see its zip codes`,
+                loadRows: () => monthAreas.areas.map((a) => ({ name: a.name, zips: a.zipCount, orders: a.orders, revenue: a.revenue, _area: a })),
+                detailsColumns: [
+                  { key: 'name', label: 'Area' },
+                  { key: 'zips', label: 'Zip Codes', align: 'right', render: (r) => fmtNumber(r.zips) },
+                  { key: 'orders', label: 'Orders', align: 'right', render: (r) => fmtNumber(r.orders) },
+                  { key: 'revenue', label: 'Revenue', align: 'right', render: (r) => <span className="font-semibold">{fmtCurrency(r.revenue)}</span> },
+                ],
+                onRowClick: (row) => monthAreaZipConfig(row._area),
+                detailsEmpty: 'No sales this month',
+              })}
+              className="rounded-lg border border-border px-3 py-1.5 text-xs font-semibold text-primary transition hover:bg-muted"
+            >
+              See all {fmtNumber(monthAreas.areas.length)} areas →
+            </button>
+          </div>
+        )}
 
         {/* ─── Company Snapshot ─── */}
         <SectionHeading icon={Sparkles} title="Company Snapshot" hint="Click any tile to see the details" />
@@ -1404,7 +1353,7 @@ export default function Dashboard() {
             const vendor = String(v.vendor || '').trim();
             const units  = Number(v.units) || 0;
             const skus   = Number(v.skus) || 0;
-            const vrev   = vendorRevByName[vendor] || 0;
+            const vrev   = Number(v.revenue) || 0;
             const accent = ['primary', 'emerald', 'amber', 'violet', 'sky'][i % 5];
             return (
               <HeroStat
