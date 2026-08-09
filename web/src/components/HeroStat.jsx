@@ -14,6 +14,7 @@
 // Pass `onClick` to make the tile clickable (used for jumping to drill-down
 // tabs from a summary page).
 import { Sparkline } from './Sparkline.jsx';
+import { BrandLogo } from './BrandLogo';
 import { cn } from '@/lib/cn';
 
 export const STAT_PALETTE = {
@@ -90,6 +91,7 @@ export function HeroStat({
   value,
   fullValue,
   icon: Icon,
+  logo,          // optional brand domain — shows the real logo on a white tile
   accent = 'sky',
   subtitle,
   urgent,
@@ -135,14 +137,23 @@ export function HeroStat({
         </div>
 
         <div className="mt-1.5 flex items-center gap-2.5">
-          {Icon && (
+          {logo ? (
+            <div className="grid h-9 w-9 shrink-0 place-items-center overflow-hidden rounded-lg bg-white p-1 shadow-md ring-2 ring-black/5">
+              <BrandLogo
+                domain={logo}
+                name={typeof label === 'string' ? label : ''}
+                imgClassName="h-full w-full object-contain"
+                fallback={Icon ? <Icon size={16} strokeWidth={2.25} className="text-slate-500" /> : null}
+              />
+            </div>
+          ) : Icon ? (
             <div className={cn(
               'grid h-9 w-9 place-items-center rounded-lg shrink-0 text-white shadow-md ring-2 ring-offset-0',
               p.iconBg, p.iconRing,
             )}>
               <Icon size={16} strokeWidth={2.25} />
             </div>
-          )}
+          ) : null}
           <div
             title={fullValue || undefined}
             className={cn(

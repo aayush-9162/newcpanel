@@ -29,6 +29,7 @@ import {
 import { cn } from '@/lib/cn';
 import { MetricDrilldown } from '@/components/MetricDrilldown';
 import { ROOM_RULES, ITEM_TYPE_RULES, roomCase, itemTypeCase } from '@/lib/salesRules';
+import { vendorDomain } from '@/data/vendorLogos';
 import DashboardDaily from '@/pages/DashboardDaily';
 
 // Months — matches the original radio strip
@@ -1362,6 +1363,7 @@ export default function Dashboard() {
                 value={vrev > 0 ? fmtCompactCurrency(vrev) : fmtNumber(units)}
                 fullValue={vrev > 0 ? fmtCurrency(vrev) : null}
                 icon={Truck}
+                logo={vendorDomain(vendor)}
                 accent={accent}
                 subtitle={`${fmtNumber(units)} item${units === 1 ? '' : 's'} · ${fmtNumber(skus)} SKU${skus === 1 ? '' : 's'}`}
                 loading={vendorAnalysisQ.isLoading}

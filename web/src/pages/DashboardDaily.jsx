@@ -14,6 +14,7 @@ import { MetricDrilldown } from '@/components/MetricDrilldown';
 import { useSqlQuery, useMysqlQuery } from '@/lib/api';
 import { fmtCurrency, fmtNumber, fmtCompactCurrency } from '@/lib/format';
 import { ROOM_RULES, roomCase, itemTypeCase } from '@/lib/salesRules';
+import { vendorDomain } from '@/data/vendorLogos';
 import {
   Calendar, ShoppingCart, Users, Truck, Package, MapPin, Boxes, Activity, ChevronRight, Award,
 } from 'lucide-react';
@@ -524,6 +525,7 @@ export default function DashboardDaily({ store, selectedBldg }) {
               value={vrev > 0 ? fmtCompactCurrency(vrev) : fmtNumber(vunits)}
               fullValue={vrev > 0 ? fmtCurrency(vrev) : null}
               icon={Truck}
+              logo={vendorDomain(vendor)}
               accent={accent}
               subtitle={`${fmtNumber(vunits)} item${vunits === 1 ? '' : 's'} · ${fmtNumber(skus)} SKU${skus === 1 ? '' : 's'}`}
               loading={vendorQ.isLoading}
