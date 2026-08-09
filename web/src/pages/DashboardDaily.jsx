@@ -108,7 +108,11 @@ export default function DashboardDaily({ store, selectedBldg }) {
   }, [empQ.data]);
   const resolveSp = (raw) => String(raw || '')
     .split('/')
-    .map((part) => { const c = part.trim(); return empMap[c.toUpperCase()] || c; })
+    .map((part) => {
+      const c = part.trim();
+      const full = empMap[c.toUpperCase()];
+      return full ? (full.trim().split(/\s+/)[0] || full) : c; // first name only
+    })
     .filter(Boolean)
     .join(' / ') || String(raw || '—');
 
