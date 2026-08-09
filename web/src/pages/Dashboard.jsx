@@ -725,7 +725,7 @@ export default function Dashboard() {
             loading={monthTotQ.isLoading}
           />
           <HeroStat
-            label="Target (LY × 1.10)"
+            label="Target"
             value={fmtCompactCurrency(target)}
             fullValue={fmtCurrency(target)}
             icon={Target}

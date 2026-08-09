@@ -539,7 +539,7 @@ export default function SCR() {
             loading={monthly.isLoading}
           />
           <HeroStat
-            label="Target (LY × 1.10)"
+            label="Target"
             value={fmtCompactCurrency(matrix?.target ?? 0)}
             fullValue={fmtCurrency(matrix?.target ?? 0)}
             icon={Target}
