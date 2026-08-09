@@ -11,7 +11,7 @@
 import { useMemo, useState } from 'react';
 import { HeroStat, HeroBanner } from '@/components/HeroStat';
 import { MetricDrilldown } from '@/components/MetricDrilldown';
-import { useSqlQuery } from '@/lib/api';
+import { useSqlQuery, useMysqlQuery } from '@/lib/api';
 import { fmtCurrency, fmtNumber, fmtCompactCurrency } from '@/lib/format';
 import { ROOM_RULES, roomCase, itemTypeCase } from '@/lib/salesRules';
 import {
@@ -94,6 +94,23 @@ export default function DashboardDaily({ store, selectedBldg }) {
   ` : 'SELECT 1';
   const spQ = useSqlQuery(spSql, [], { enabled: !!dayStr });
   const topSalespeople = dayStr ? (spQ.data?.rows ?? []) : [];
+
+  // Salesperson codes → full names (MySQL employees.rv_code → name). A code like
+  // "BJT / CAT / JEC" is a split sale — resolve each part and rejoin.
+  const empQ = useMysqlQuery('SELECT rv_code, name FROM employees', []);
+  const empMap = useMemo(() => {
+    const m = {};
+    for (const r of (empQ.data?.rows ?? [])) {
+      const c = String(r.rv_code || '').trim().toUpperCase();
+      if (c) m[c] = String(r.name || '').trim();
+    }
+    return m;
+  }, [empQ.data]);
+  const resolveSp = (raw) => String(raw || '')
+    .split('/')
+    .map((part) => { const c = part.trim(); return empMap[c.toUpperCase()] || c; })
+    .filter(Boolean)
+    .join(' / ') || String(raw || '—');
 
   // ── Units sold (SalesItemDetail latest day).
   const unitsSql = `
@@ -392,7 +409,8 @@ export default function DashboardDaily({ store, selectedBldg }) {
         ) : topSalespeople.length === 0 ? (
           <div className="col-span-1 py-6 text-center text-xs text-muted-fg sm:col-span-3">No salesperson sales on file for this day.</div>
         ) : topSalespeople.map((s, i) => {
-          const name = String(s.salesperson || '—').trim();
+          const code = String(s.salesperson || '—').trim();
+          const name = resolveSp(code);
           const spOrders = Number(s.orders) || 0;
           const spRev    = Number(s.revenue) || 0;
           const medal = [
@@ -402,7 +420,7 @@ export default function DashboardDaily({ store, selectedBldg }) {
           ][i] || { grad: 'from-slate-300 to-slate-400', ring: 'ring-slate-400/30' };
           return (
             <button
-              key={name}
+              key={code}
               type="button"
               onClick={openDetail({
                 title: `${name} · ${dateShort} · ${storeLabel}`,
@@ -417,7 +435,7 @@ export default function DashboardDaily({ store, selectedBldg }) {
                          SUM(ISNULL(sd.SaleSplitAmt, 0)) AS amount
                   FROM SalespersonDaily sd
                   WHERE CAST(sd.SaleDate AS DATE) = '${dayStr}' AND ${spdStore}
-                    AND LTRIM(RTRIM(sd.SalesPerson)) = '${name.replace(/'/g, "''")}'
+                    AND LTRIM(RTRIM(sd.SalesPerson)) = '${code.replace(/'/g, "''")}'
                   GROUP BY sd.SalesNo
                   ORDER BY amount DESC
                 ` : undefined,
@@ -435,7 +453,9 @@ export default function DashboardDaily({ store, selectedBldg }) {
               </span>
               <div className="min-w-0 flex-1">
                 <div className="truncate text-sm font-bold text-fg" title={name}>{name}</div>
-                <div className="text-xs text-muted-fg">{fmtNumber(spOrders)} sale{spOrders === 1 ? '' : 's'}</div>
+                <div className="truncate text-xs text-muted-fg">
+                  {fmtNumber(spOrders)} sale{spOrders === 1 ? '' : 's'}{name !== code ? ` · ${code}` : ''}
+                </div>
               </div>
               <div className="text-right">
                 <div className="text-lg font-extrabold tabular-nums text-fg">{fmtCurrency(spRev)}</div>
