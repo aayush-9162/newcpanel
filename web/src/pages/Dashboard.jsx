@@ -24,7 +24,7 @@ import {
   Target, TrendingUp, TrendingDown, Calendar, DollarSign, Activity, Trophy,
   Building2, Receipt, Wrench, Flame, Users, PackageX, Truck,
   ArrowUpRight, ArrowDownRight, AlertTriangle, ShoppingCart, User, Tag, Heart,
-  Sparkles, ChevronRight, Sofa, BedDouble, Utensils, Lamp, Package,
+  Sparkles, ChevronRight, Sofa, BedDouble, Utensils, Lamp, Package, MapPin,
 } from 'lucide-react';
 import { cn } from '@/lib/cn';
 import { MetricDrilldown } from '@/components/MetricDrilldown';
@@ -522,6 +522,53 @@ export default function Dashboard() {
   `;
   const vendorAnalysisQ = useSqlQuery(vendorAnalysisSql, []);
   const topVendors = vendorAnalysisQ.data?.rows ?? [];
+
+  // ── Yesterday · Area-wise zip analysis — yesterday's sales (selected store)
+  //    grouped by delivery zip, then rolled up to the area (city). Uses raw
+  //    SaleWRT (daily revenue) joined to SaleRV (customer address). City/zip
+  //    fall back to the billing address, then 'Unknown'.
+  const areaCityExpr = `LTRIM(RTRIM(COALESCE(NULLIF(LTRIM(RTRIM(SR.DeliveryCity)),''), NULLIF(LTRIM(RTRIM(SR.BillingCity)),''), 'Unknown')))`;
+  const areaZipExpr  = `LTRIM(RTRIM(COALESCE(NULLIF(LTRIM(RTRIM(SR.DeliveryZip)),''),  NULLIF(LTRIM(RTRIM(SR.BillingZip)),''),  'Unknown')))`;
+  const yZipSql = `
+    SELECT ${areaCityExpr} AS City,
+           ${areaZipExpr}  AS Zip,
+           SUM(S.wrt_sls)              AS Revenue,
+           COUNT(DISTINCT S.wrt_so_no) AS Orders
+    FROM SaleWRT S
+    LEFT JOIN SaleRV SR ON S.wrt_so_no = SR.sales_no
+    WHERE CAST(S.wrt_cng_bdat AS DATE) = CAST(DATEADD(DAY, -1, GETDATE()) AS DATE)
+      AND S.wrt_pft_ctr = ${selectedBldg}
+    GROUP BY ${areaCityExpr}, ${areaZipExpr}
+    HAVING SUM(S.wrt_sls) <> 0
+    ORDER BY Revenue DESC
+  `;
+  const yZipQ = useSqlQuery(yZipSql, []);
+
+  // Roll yesterday's zip rows up into areas (by city). Each area carries its
+  // zip list so the drill-down can show the breakdown.
+  const yAreas = useMemo(() => {
+    const rows = yZipQ.data?.rows ?? [];
+    const map = new Map();
+    let total = 0, totalOrders = 0, totalZips = 0;
+    for (const r of rows) {
+      const name = String(r.City || 'Unknown').trim() || 'Unknown';
+      const zip  = String(r.Zip || '').trim() || '—';
+      const rev  = Number(r.Revenue) || 0;
+      const ord  = Number(r.Orders) || 0;
+      total += rev; totalOrders += ord; totalZips += 1;
+      if (!map.has(name)) map.set(name, { name, revenue: 0, orders: 0, zips: [] });
+      const a = map.get(name);
+      a.revenue += rev; a.orders += ord;
+      a.zips.push({ zip, revenue: rev, orders: ord });
+    }
+    const areas = [...map.values()]
+      .map((a) => ({ ...a, zipCount: a.zips.length, zips: a.zips.sort((x, y) => y.revenue - x.revenue) }))
+      .sort((a, b) => b.revenue - a.revenue);
+    return { areas, total, totalOrders, totalZips };
+  }, [yZipQ.data]);
+
+  const yesterdayLabel = new Date(Date.now() - 86_400_000)
+    .toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
 
   // Item-type classification (finer than room) — used for the per-vendor
   // breakdown. Priority order (first match wins): loveseat before sofa,
@@ -1308,6 +1355,69 @@ export default function Dashboard() {
             );
           })}
         </div>
+
+        {/* ─── Yesterday · Area-wise Zipcode Analysis ─── */}
+        <SectionHeading
+          icon={MapPin}
+          title={`Area Wise Sales · Yesterday (${yesterdayLabel})`}
+          hint="Delivery zip codes grouped by area · click an area to see its zip breakdown"
+        />
+        <Card>
+          <CardContent className="p-0 overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-muted/60 text-[11px] uppercase tracking-wider text-muted-fg">
+                <tr>
+                  <th className="px-4 py-2.5 text-left">Area</th>
+                  <th className="px-4 py-2.5 text-right">Zip Codes</th>
+                  <th className="px-4 py-2.5 text-right">Orders</th>
+                  <th className="px-4 py-2.5 text-right">Revenue</th>
+                  <th className="px-4 py-2.5 text-right">Share</th>
+                </tr>
+              </thead>
+              <tbody>
+                {yZipQ.isLoading ? (
+                  <tr><td colSpan={5} className="py-8 text-center text-muted-fg">Loading…</td></tr>
+                ) : yAreas.areas.length === 0 ? (
+                  <tr><td colSpan={5} className="py-8 text-center text-muted-fg">No sales yesterday for {store === 'ARDEN' ? 'Arden (S1)' : 'Waynesville (S2)'}.</td></tr>
+                ) : yAreas.areas.map((a) => (
+                  <tr
+                    key={a.name}
+                    className="cursor-pointer border-t border-border hover:bg-muted/30"
+                    onClick={openDetail({
+                      title: `${a.name} · Zip Codes · Yesterday`,
+                      icon: MapPin,
+                      accent: 'primary',
+                      headline: fmtCurrency(a.revenue),
+                      subtitle: `${fmtNumber(a.zipCount)} zip code${a.zipCount === 1 ? '' : 's'} · ${fmtNumber(a.orders)} order${a.orders === 1 ? '' : 's'} · ${a.name}`,
+                      loadRows: () => a.zips.map((z) => ({ zip: z.zip, orders: z.orders, revenue: z.revenue })),
+                      detailsColumns: [
+                        { key: 'zip', label: 'Zip Code', render: (r) => <span className="font-mono font-semibold">{r.zip}</span> },
+                        { key: 'orders', label: 'Orders', align: 'right', render: (r) => fmtNumber(r.orders) },
+                        { key: 'revenue', label: 'Revenue', align: 'right', render: (r) => <span className="font-semibold">{fmtCurrency(r.revenue)}</span> },
+                      ],
+                      detailsEmpty: 'No zip codes',
+                    })}
+                  >
+                    <td className="px-4 py-2 font-medium">{a.name}</td>
+                    <td className="px-4 py-2 text-right num text-muted-fg">{fmtNumber(a.zipCount)}</td>
+                    <td className="px-4 py-2 text-right num text-muted-fg">{fmtNumber(a.orders)}</td>
+                    <td className="px-4 py-2 text-right num font-semibold">{fmtCurrency(a.revenue)}</td>
+                    <td className="px-4 py-2 text-right num text-muted-fg">{yAreas.total ? ((a.revenue / yAreas.total) * 100).toFixed(1) : '0.0'}%</td>
+                  </tr>
+                ))}
+                {!yZipQ.isLoading && yAreas.areas.length > 0 && (
+                  <tr className="border-t-2 border-border bg-muted/30 font-semibold">
+                    <td className="px-4 py-2">Total · {fmtNumber(yAreas.areas.length)} area{yAreas.areas.length === 1 ? '' : 's'}</td>
+                    <td className="px-4 py-2 text-right num">{fmtNumber(yAreas.totalZips)}</td>
+                    <td className="px-4 py-2 text-right num">{fmtNumber(yAreas.totalOrders)}</td>
+                    <td className="px-4 py-2 text-right num">{fmtCurrency(yAreas.total)}</td>
+                    <td className="px-4 py-2 text-right num">100%</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </CardContent>
+        </Card>
       </div>
 
       {/* Metric details modal — click any HeroStat tile to open */}
