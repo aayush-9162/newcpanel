@@ -37,13 +37,13 @@ export default function DashboardDaily({ store, selectedBldg }) {
   // uses, and which reliably has the store's latest sales day). The day is the
   // store's most recent SaleWRT date.
   const kpiSql = `
-    WITH m AS (SELECT MAX(CAST(wrt_cng_bdat AS DATE)) AS d FROM SaleWRT WHERE wrt_pft_ctr = ${selectedBldg} AND CAST(wrt_cng_bdat AS DATE) < CAST(GETDATE() AS DATE))
+    WITH m AS (SELECT CAST(MAX(wrt_cng_bdat) AS DATE) AS d FROM SaleWRT WHERE wrt_pft_ctr = ${selectedBldg} AND wrt_cng_bdat < CAST(GETDATE() AS DATE))
     SELECT
       (SELECT CONVERT(char(10), d, 23) FROM m) AS day,
       (SELECT COUNT(DISTINCT S.wrt_so_no) FROM SaleWRT S CROSS JOIN m
-         WHERE CAST(S.wrt_cng_bdat AS DATE) = m.d AND S.wrt_pft_ctr = ${selectedBldg}) AS orders,
+         WHERE S.wrt_cng_bdat >= m.d AND S.wrt_cng_bdat < DATEADD(DAY, 1, m.d) AND S.wrt_pft_ctr = ${selectedBldg}) AS orders,
       (SELECT SUM(S.wrt_sls) FROM SaleWRT S CROSS JOIN m
-         WHERE CAST(S.wrt_cng_bdat AS DATE) = m.d AND S.wrt_pft_ctr = ${selectedBldg}) AS revenue
+         WHERE S.wrt_cng_bdat >= m.d AND S.wrt_cng_bdat < DATEADD(DAY, 1, m.d) AND S.wrt_pft_ctr = ${selectedBldg}) AS revenue
   `;
   const kpiQ = useSqlQuery(kpiSql, []);
   const k = kpiQ.data?.rows?.[0] ?? {};
@@ -62,11 +62,11 @@ export default function DashboardDaily({ store, selectedBldg }) {
   // Only the day's customers are checked for prior history (fast anti-join),
   // instead of computing a first-sale date for every customer in the table.
   const custSql = `
-    WITH w AS (SELECT MAX(CAST(wrt_cng_bdat AS DATE)) AS d FROM SaleWRT WHERE wrt_pft_ctr = ${selectedBldg} AND CAST(wrt_cng_bdat AS DATE) < CAST(GETDATE() AS DATE)),
+    WITH w AS (SELECT CAST(MAX(wrt_cng_bdat) AS DATE) AS d FROM SaleWRT WHERE wrt_pft_ctr = ${selectedBldg} AND wrt_cng_bdat < CAST(GETDATE() AS DATE)),
          dayc AS (
            SELECT DISTINCT sd.CustomerId
            FROM SalespersonDaily sd CROSS JOIN w
-           WHERE ${spdStore} AND CAST(sd.SaleDate AS DATE) = w.d
+           WHERE ${spdStore} AND sd.SaleDate >= w.d AND sd.SaleDate < DATEADD(DAY, 1, w.d)
              AND sd.CustomerId IS NOT NULL AND LTRIM(RTRIM(sd.CustomerId)) <> ''
          )
     SELECT
@@ -74,7 +74,7 @@ export default function DashboardDaily({ store, selectedBldg }) {
       (SELECT COUNT(*) FROM dayc c CROSS JOIN w
          WHERE NOT EXISTS (
            SELECT 1 FROM SalespersonDaily s2
-           WHERE s2.CustomerId = c.CustomerId AND CAST(s2.SaleDate AS DATE) < w.d
+           WHERE s2.CustomerId = c.CustomerId AND s2.SaleDate < w.d
          )) AS newCustomers
   `;
   const custQ = useSqlQuery(custSql, []);
@@ -90,7 +90,7 @@ export default function DashboardDaily({ store, selectedBldg }) {
            COUNT(DISTINCT sd.SalesNo)         AS orders,
            SUM(ISNULL(sd.SaleSplitAmt, 0))    AS revenue
     FROM SalespersonDaily sd
-    WHERE CAST(sd.SaleDate AS DATE) = '${dayStr}' AND ${spdStore}
+    WHERE sd.SaleDate >= '${dayStr}' AND sd.SaleDate < DATEADD(DAY, 1, '${dayStr}') AND ${spdStore}
       AND sd.SalesPerson IS NOT NULL AND LTRIM(RTRIM(sd.SalesPerson)) <> ''
     GROUP BY LTRIM(RTRIM(sd.SalesPerson))
     ORDER BY revenue DESC
@@ -139,7 +139,7 @@ export default function DashboardDaily({ store, selectedBldg }) {
   const areaCityExpr = `LTRIM(RTRIM(COALESCE(NULLIF(LTRIM(RTRIM(SR.DeliveryCity)),''), NULLIF(LTRIM(RTRIM(SR.BillingCity)),''), 'Unknown')))`;
   const areaZipExpr  = `LTRIM(RTRIM(COALESCE(NULLIF(LTRIM(RTRIM(SR.DeliveryZip)),''),  NULLIF(LTRIM(RTRIM(SR.BillingZip)),''),  'Unknown')))`;
   const areaSql = `
-    WITH m AS (SELECT MAX(CAST(wrt_cng_bdat AS DATE)) AS d FROM SaleWRT WHERE wrt_pft_ctr = ${selectedBldg} AND CAST(wrt_cng_bdat AS DATE) < CAST(GETDATE() AS DATE))
+    WITH m AS (SELECT CAST(MAX(wrt_cng_bdat) AS DATE) AS d FROM SaleWRT WHERE wrt_pft_ctr = ${selectedBldg} AND wrt_cng_bdat < CAST(GETDATE() AS DATE))
     SELECT ${areaCityExpr} AS City,
            ${areaZipExpr}  AS Zip,
            SUM(S.wrt_sls)              AS Revenue,
@@ -147,7 +147,8 @@ export default function DashboardDaily({ store, selectedBldg }) {
     FROM SaleWRT S
     CROSS JOIN m
     LEFT JOIN SaleRV SR ON S.wrt_so_no = SR.sales_no
-    WHERE CAST(S.wrt_cng_bdat AS DATE) = m.d AND S.wrt_pft_ctr = ${selectedBldg}
+    WHERE S.wrt_pft_ctr = ${selectedBldg}
+      AND S.wrt_cng_bdat >= m.d AND S.wrt_cng_bdat < DATEADD(DAY, 1, m.d)
     GROUP BY ${areaCityExpr}, ${areaZipExpr}
     HAVING SUM(S.wrt_sls) <> 0
     ORDER BY Revenue DESC
@@ -192,7 +193,7 @@ export default function DashboardDaily({ store, selectedBldg }) {
          saleRev AS (
            SELECT CAST(S.wrt_so_no AS VARCHAR(20)) AS SaleNo, SUM(S.wrt_sls) AS amt
            FROM SaleWRT S CROSS JOIN m
-           WHERE S.wrt_pft_ctr = ${selectedBldg} AND CAST(S.wrt_cng_bdat AS DATE) = m.d
+           WHERE S.wrt_pft_ctr = ${selectedBldg} AND S.wrt_cng_bdat >= m.d AND S.wrt_cng_bdat < DATEADD(DAY, 1, m.d)
            GROUP BY CAST(S.wrt_so_no AS VARCHAR(20))
          ),
          vrev AS (
@@ -306,7 +307,7 @@ export default function DashboardDaily({ store, selectedBldg }) {
             detailsSql: dayStr ? `
               SELECT CAST(S.wrt_so_no AS VARCHAR(20)) AS SaleNo, SUM(S.wrt_sls) AS amount
               FROM SaleWRT S
-              WHERE CAST(S.wrt_cng_bdat AS DATE) = '${dayStr}' AND S.wrt_pft_ctr = ${selectedBldg}
+              WHERE S.wrt_cng_bdat >= '${dayStr}' AND S.wrt_cng_bdat < DATEADD(DAY, 1, '${dayStr}') AND S.wrt_pft_ctr = ${selectedBldg}
               GROUP BY CAST(S.wrt_so_no AS VARCHAR(20))
               ORDER BY amount DESC
             ` : undefined,
@@ -356,7 +357,7 @@ export default function DashboardDaily({ store, selectedBldg }) {
                      COUNT(DISTINCT sd.SalesNo) AS orders
               FROM SalespersonDaily sd
               INNER JOIN fc ON fc.CustomerId = sd.CustomerId
-              WHERE CAST(sd.SaleDate AS DATE) = '${dayStr}' AND ${spdStore}
+              WHERE sd.SaleDate >= '${dayStr}' AND sd.SaleDate < DATEADD(DAY, 1, '${dayStr}') AND ${spdStore}
               GROUP BY sd.CustomerId
               ORDER BY SUM(sd.SaleSplitAmt) DESC
             ` : undefined,
@@ -468,7 +469,7 @@ export default function DashboardDaily({ store, selectedBldg }) {
                          MAX(sd.CustomerName) AS CustomerName,
                          SUM(ISNULL(sd.SaleSplitAmt, 0)) AS amount
                   FROM SalespersonDaily sd
-                  WHERE CAST(sd.SaleDate AS DATE) = '${dayStr}' AND ${spdStore}
+                  WHERE sd.SaleDate >= '${dayStr}' AND sd.SaleDate < DATEADD(DAY, 1, '${dayStr}') AND ${spdStore}
                     AND LTRIM(RTRIM(sd.SalesPerson)) = '${code.replace(/'/g, "''")}'
                   GROUP BY sd.SalesNo
                   ORDER BY amount DESC
