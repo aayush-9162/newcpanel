@@ -28,6 +28,8 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/cn';
 import { MetricDrilldown } from '@/components/MetricDrilldown';
+import { ROOM_RULES, ITEM_TYPE_RULES, roomCase, itemTypeCase } from '@/lib/salesRules';
+import DashboardDaily from '@/pages/DashboardDaily';
 
 // Months — matches the original radio strip
 const MONTHS = [
@@ -70,6 +72,7 @@ export default function Dashboard() {
 
   const [store, setStore] = useState('ARDEN');                 // ARDEN | WAYNESVILLE
   const [category, setCategory] = useState('Written');         // Written | Delivered
+  const [period, setPeriod] = useState('monthly');             // monthly | daily (yesterday)
   const [month, setMonth] = useState(new Date().getMonth() + 1);
 
   // Detail-panel state — non-null value opens the MetricDrilldown modal.
@@ -464,29 +467,6 @@ export default function Dashboard() {
   //    item's Description2 text. Rules are checked in priority order (first
   //    match wins) so, e.g., a "dining side chair" lands in Dining before the
   //    generic "chair" rule sends it to Living Room.
-  const ROOM_RULES = [
-    { key: 'Dining Room', icon: Utensils, accent: 'amber',
-      // NOTE: avoid the word "DROP" (SQL-guard blocks it) — "LEAF" still
-      // catches drop-leaf tables.
-      kw: ['DINING','DINETTE','BUFFET','SERVER','CHINA','BARSTOOL','BAR STOOL','COUNTER STOOL',
-           'COUNTER HEIGHT','SIDEBOARD','PUB ','SIDE CHAIR','DINING CHAIR','LEAF','PEDESTAL','DRM'] },
-    { key: 'Bedroom', icon: BedDouble, accent: 'violet',
-      kw: ['DRESSER','NIGHTSTAND','NIGHT STAND','CHEST','HEADBOARD','FOOTBOARD','ARMOIRE','MATTRESS',
-           'MATT ','CHIFFEROBE',' BED','DAYBED','TRUNDLE','BUNK','LOFT','STORAGE STEP','RAILS','SLATS',
-           'FOUNDATION',' FND','BOX SPRING','PANEL'] },
-    { key: 'Accessories', icon: Lamp, accent: 'emerald',
-      kw: ['MIRROR','LAMP','RUG','PILLOW','THROW','DECOR','CLOCK','CUSHION','ACCESSOR','BATTERY','PROTECTOR'] },
-    { key: 'Living Room', icon: Sofa, accent: 'primary',
-      kw: ['SOFA','LOVESEAT','LOVE SEAT','RECLIN',' REC ','REC W','PWR REC','REC LS','SECTIONAL','WEDGE',
-           'CHAISE','OTTOMAN','CONSOLE','COCKTAIL','END TABLE','SOFA TABLE','ACCENT','GLIDER','GLDR',
-           'SLEEPER','SETTEE','SWIVEL','SWVL','UPHOLSTERY',' LS ','CHAIR','CORNER'] },
-  ];
-  // Build the SQL CASE that assigns each row a room. Matches against a short
-  // `d2` alias (= UPPER(Description2)) so the whole expression stays compact
-  // and appears only once per query (keeps us under the SQL-guard length cap).
-  const likeClause = (kw) => kw.map((k) => `d2 LIKE '%${k}%'`).join(' OR ');
-  const roomCase = `CASE ${ROOM_RULES.map((r) => `WHEN ${likeClause(r.kw)} THEN '${r.key}'`).join(' ')} ELSE 'Other' END`;
-
   const itemCatSql = `
     WITH m AS (SELECT MAX(SaleDate) AS d FROM SalesItemDetail),
          base AS (
@@ -522,79 +502,6 @@ export default function Dashboard() {
   `;
   const vendorAnalysisQ = useSqlQuery(vendorAnalysisSql, []);
   const topVendors = vendorAnalysisQ.data?.rows ?? [];
-
-  // ── Yesterday · Area-wise zip analysis — yesterday's sales (selected store)
-  //    grouped by delivery zip, then rolled up to the area (city). Uses raw
-  //    SaleWRT (daily revenue) joined to SaleRV (customer address). City/zip
-  //    fall back to the billing address, then 'Unknown'.
-  const areaCityExpr = `LTRIM(RTRIM(COALESCE(NULLIF(LTRIM(RTRIM(SR.DeliveryCity)),''), NULLIF(LTRIM(RTRIM(SR.BillingCity)),''), 'Unknown')))`;
-  const areaZipExpr  = `LTRIM(RTRIM(COALESCE(NULLIF(LTRIM(RTRIM(SR.DeliveryZip)),''),  NULLIF(LTRIM(RTRIM(SR.BillingZip)),''),  'Unknown')))`;
-  const yZipSql = `
-    SELECT ${areaCityExpr} AS City,
-           ${areaZipExpr}  AS Zip,
-           SUM(S.wrt_sls)              AS Revenue,
-           COUNT(DISTINCT S.wrt_so_no) AS Orders
-    FROM SaleWRT S
-    LEFT JOIN SaleRV SR ON S.wrt_so_no = SR.sales_no
-    WHERE CAST(S.wrt_cng_bdat AS DATE) = CAST(DATEADD(DAY, -1, GETDATE()) AS DATE)
-      AND S.wrt_pft_ctr = ${selectedBldg}
-    GROUP BY ${areaCityExpr}, ${areaZipExpr}
-    HAVING SUM(S.wrt_sls) <> 0
-    ORDER BY Revenue DESC
-  `;
-  const yZipQ = useSqlQuery(yZipSql, []);
-
-  // Roll yesterday's zip rows up into areas (by city). Each area carries its
-  // zip list so the drill-down can show the breakdown.
-  const yAreas = useMemo(() => {
-    const rows = yZipQ.data?.rows ?? [];
-    const map = new Map();
-    let total = 0, totalOrders = 0, totalZips = 0;
-    for (const r of rows) {
-      const name = String(r.City || 'Unknown').trim() || 'Unknown';
-      const zip  = String(r.Zip || '').trim() || '—';
-      const rev  = Number(r.Revenue) || 0;
-      const ord  = Number(r.Orders) || 0;
-      total += rev; totalOrders += ord; totalZips += 1;
-      if (!map.has(name)) map.set(name, { name, revenue: 0, orders: 0, zips: [] });
-      const a = map.get(name);
-      a.revenue += rev; a.orders += ord;
-      a.zips.push({ zip, revenue: rev, orders: ord });
-    }
-    const areas = [...map.values()]
-      .map((a) => ({ ...a, zipCount: a.zips.length, zips: a.zips.sort((x, y) => y.revenue - x.revenue) }))
-      .sort((a, b) => b.revenue - a.revenue);
-    return { areas, total, totalOrders, totalZips };
-  }, [yZipQ.data]);
-
-  const yesterdayLabel = new Date(Date.now() - 86_400_000)
-    .toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
-
-  // Item-type classification (finer than room) — used for the per-vendor
-  // breakdown. Priority order (first match wins): loveseat before sofa,
-  // reclining loveseat stays a loveseat, etc. Avoid the word "DROP" (guard).
-  const ITEM_TYPE_RULES = [
-    { key: 'Loveseat',      kw: ['LOVESEAT','LOVE SEAT',' LS '] },
-    { key: 'Sectional',     kw: ['SECTIONAL','WEDGE',' LAF',' RAF','ARMLESS','CORNER'] },
-    { key: 'Chaise',        kw: ['CHAISE'] },
-    { key: 'Sofa',          kw: ['SOFA'] },
-    { key: 'Recliner',      kw: ['RECLIN',' REC ','PWR REC','REC W','GLIDER','GLDR','ROCKER'] },
-    { key: 'Ottoman',       kw: ['OTTOMAN'] },
-    { key: 'Stool',         kw: ['STOOL','BARSTOOL'] },
-    { key: 'Chair',         kw: ['CHAIR'] },
-    { key: 'Table',         kw: ['COCKTAIL','END TABLE','SOFA TABLE','CONSOLE','PEDESTAL','LEAF','TABLE'] },
-    { key: 'Dresser',       kw: ['DRESSER'] },
-    { key: 'Nightstand',    kw: ['NIGHTSTAND','NIGHT STAND'] },
-    { key: 'Chest',         kw: ['CHEST'] },
-    { key: 'Bed',           kw: ['HEADBOARD','FOOTBOARD',' BED','RAILS','PANEL','DAYBED','BUNK','TRUNDLE'] },
-    { key: 'Mattress',      kw: ['MATTRESS','MATT ','FOUNDATION','BOX SPRING','SLATS',' FND'] },
-    { key: 'Mirror',        kw: ['MIRROR'] },
-    { key: 'Buffet/Server', kw: ['BUFFET','SERVER','SIDEBOARD','CHINA'] },
-    { key: 'Lamp',          kw: ['LAMP'] },
-    { key: 'Rug',           kw: ['RUG'] },
-    { key: 'Accessory',     kw: ['PILLOW','THROW','DECOR','CLOCK','CUSHION','ACCESSOR','PROTECTOR','BATTERY'] },
-  ];
-  const itemTypeCase = `CASE ${ITEM_TYPE_RULES.map((r) => `WHEN ${r.kw.map((k) => `d2 LIKE '%${k}%'`).join(' OR ')} THEN '${r.key}'`).join(' ')} ELSE 'Other' END`;
 
   // ── derive: recency KPIs (yesterday / 7d) + this-month rollups.
   // Best/lowest day are calculated within the current calendar month so they
@@ -663,16 +570,27 @@ export default function Dashboard() {
               <FilterPill active={category === 'Written'}   onClick={() => setCategory('Written')}  title="Written sales">W</FilterPill>
               <FilterPill active={category === 'Delivered'} onClick={() => setCategory('Delivered')}title="Delivered sales">D</FilterPill>
             </div>
-            <div className="ml-auto flex flex-wrap gap-1">
-              {MONTHS.map((m) => (
-                <FilterPill key={m.num} active={month === m.num} onClick={() => setMonth(m.num)} title={m.name} small>
-                  {m.short}
-                </FilterPill>
-              ))}
+            <div className="h-6 w-px bg-border" />
+            <div className="flex gap-1 rounded-lg border border-border bg-muted/30 p-0.5">
+              <FilterPill active={period === 'monthly'} onClick={() => setPeriod('monthly')} title="This-month view">Monthly</FilterPill>
+              <FilterPill active={period === 'daily'}   onClick={() => setPeriod('daily')}   title="Yesterday view">Daily</FilterPill>
             </div>
+            {period === 'monthly' && (
+              <div className="ml-auto flex flex-wrap gap-1">
+                {MONTHS.map((m) => (
+                  <FilterPill key={m.num} active={month === m.num} onClick={() => setMonth(m.num)} title={m.name} small>
+                    {m.short}
+                  </FilterPill>
+                ))}
+              </div>
+            )}
           </CardContent>
         </Card>
 
+        {period === 'daily' ? (
+          <DashboardDaily store={store} selectedBldg={selectedBldg} />
+        ) : (
+        <>
         {/* ═══════════════ YESTERDAY (headline) ═══════════════ */}
         <HeroBanner
           icon={Calendar}
@@ -1355,69 +1273,8 @@ export default function Dashboard() {
             );
           })}
         </div>
-
-        {/* ─── Yesterday · Area-wise Zipcode Analysis ─── */}
-        <SectionHeading
-          icon={MapPin}
-          title={`Area Wise Sales · Yesterday (${yesterdayLabel})`}
-          hint="Delivery zip codes grouped by area · click an area to see its zip breakdown"
-        />
-        <Card>
-          <CardContent className="p-0 overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-muted/60 text-[11px] uppercase tracking-wider text-muted-fg">
-                <tr>
-                  <th className="px-4 py-2.5 text-left">Area</th>
-                  <th className="px-4 py-2.5 text-right">Zip Codes</th>
-                  <th className="px-4 py-2.5 text-right">Orders</th>
-                  <th className="px-4 py-2.5 text-right">Revenue</th>
-                  <th className="px-4 py-2.5 text-right">Share</th>
-                </tr>
-              </thead>
-              <tbody>
-                {yZipQ.isLoading ? (
-                  <tr><td colSpan={5} className="py-8 text-center text-muted-fg">Loading…</td></tr>
-                ) : yAreas.areas.length === 0 ? (
-                  <tr><td colSpan={5} className="py-8 text-center text-muted-fg">No sales yesterday for {store === 'ARDEN' ? 'Arden (S1)' : 'Waynesville (S2)'}.</td></tr>
-                ) : yAreas.areas.map((a) => (
-                  <tr
-                    key={a.name}
-                    className="cursor-pointer border-t border-border hover:bg-muted/30"
-                    onClick={openDetail({
-                      title: `${a.name} · Zip Codes · Yesterday`,
-                      icon: MapPin,
-                      accent: 'primary',
-                      headline: fmtCurrency(a.revenue),
-                      subtitle: `${fmtNumber(a.zipCount)} zip code${a.zipCount === 1 ? '' : 's'} · ${fmtNumber(a.orders)} order${a.orders === 1 ? '' : 's'} · ${a.name}`,
-                      loadRows: () => a.zips.map((z) => ({ zip: z.zip, orders: z.orders, revenue: z.revenue })),
-                      detailsColumns: [
-                        { key: 'zip', label: 'Zip Code', render: (r) => <span className="font-mono font-semibold">{r.zip}</span> },
-                        { key: 'orders', label: 'Orders', align: 'right', render: (r) => fmtNumber(r.orders) },
-                        { key: 'revenue', label: 'Revenue', align: 'right', render: (r) => <span className="font-semibold">{fmtCurrency(r.revenue)}</span> },
-                      ],
-                      detailsEmpty: 'No zip codes',
-                    })}
-                  >
-                    <td className="px-4 py-2 font-medium">{a.name}</td>
-                    <td className="px-4 py-2 text-right num text-muted-fg">{fmtNumber(a.zipCount)}</td>
-                    <td className="px-4 py-2 text-right num text-muted-fg">{fmtNumber(a.orders)}</td>
-                    <td className="px-4 py-2 text-right num font-semibold">{fmtCurrency(a.revenue)}</td>
-                    <td className="px-4 py-2 text-right num text-muted-fg">{yAreas.total ? ((a.revenue / yAreas.total) * 100).toFixed(1) : '0.0'}%</td>
-                  </tr>
-                ))}
-                {!yZipQ.isLoading && yAreas.areas.length > 0 && (
-                  <tr className="border-t-2 border-border bg-muted/30 font-semibold">
-                    <td className="px-4 py-2">Total · {fmtNumber(yAreas.areas.length)} area{yAreas.areas.length === 1 ? '' : 's'}</td>
-                    <td className="px-4 py-2 text-right num">{fmtNumber(yAreas.totalZips)}</td>
-                    <td className="px-4 py-2 text-right num">{fmtNumber(yAreas.totalOrders)}</td>
-                    <td className="px-4 py-2 text-right num">{fmtCurrency(yAreas.total)}</td>
-                    <td className="px-4 py-2 text-right num">100%</td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </CardContent>
-        </Card>
+        </>
+        )}
       </div>
 
       {/* Metric details modal — click any HeroStat tile to open */}

@@ -1,0 +1,608 @@
+// DashboardDaily — the "Daily" (yesterday) view of the Dashboard, shown when
+// the Monthly/Daily toggle is set to Daily. Everything here is scoped to the
+// most recent business day on file (MAX SaleDate) for the selected store, which
+// is what the rest of the app calls "yesterday".
+//
+// Sections: yesterday headline · KPI tiles (orders / units / avg / customers) ·
+// Area-wise sales (top 5 + see-all popup) · Top 5 vendors · Item Sold Analysis.
+// Self-contained: its own drill-down modal, so it composes cleanly inside the
+// parent Dashboard.
+
+import { useMemo, useState } from 'react';
+import { HeroStat, HeroBanner } from '@/components/HeroStat';
+import { MetricDrilldown } from '@/components/MetricDrilldown';
+import { useSqlQuery } from '@/lib/api';
+import { fmtCurrency, fmtNumber, fmtCompactCurrency } from '@/lib/format';
+import { ROOM_RULES, roomCase, itemTypeCase } from '@/lib/salesRules';
+import {
+  Calendar, ShoppingCart, Users, Truck, Package, MapPin, Boxes, Activity, ChevronRight,
+} from 'lucide-react';
+import { cn } from '@/lib/cn';
+
+// Parse a 'YYYY-MM-DD' as LOCAL midnight (SQL DATE arrives as UTC midnight,
+// which renders a day earlier west of UTC). See Dashboard.localDate.
+const localDate = (s) => new Date(String(s).slice(0, 10) + 'T00:00:00');
+
+export default function DashboardDaily({ store, selectedBldg }) {
+  const storeLabel = store === 'ARDEN' ? 'Arden (S1)' : 'Waynesville (S2)';
+  const spdStore = `LEFT(CAST(sd.SalesNo AS VARCHAR(20)), 1) = '${selectedBldg}'`;
+
+  const [drilldown, setDrilldown] = useState(null);
+  const openDetail = (config) => () => setDrilldown(config);
+
+  // ── KPI query — orders / revenue / customers (new vs returning) for the
+  //    latest day on file. Correlated sub-selects all key off the same m.d.
+  const kpiSql = `
+    WITH m AS (SELECT MAX(SaleDate) AS d FROM SalespersonDaily),
+         fc AS (
+           SELECT sd.CustomerId, MIN(sd.SaleDate) AS firstSale
+           FROM SalespersonDaily sd
+           WHERE sd.CustomerId IS NOT NULL AND LTRIM(RTRIM(sd.CustomerId)) <> ''
+           GROUP BY sd.CustomerId
+         )
+    SELECT
+      CONVERT(char(10), m.d, 23) AS day,
+      (SELECT COUNT(DISTINCT sd.SalesNo) FROM SalespersonDaily sd
+         WHERE ${spdStore} AND sd.SaleDate = m.d)                                    AS orders,
+      (SELECT SUM(ISNULL(sd.SaleSplitAmt, 0)) FROM SalespersonDaily sd
+         WHERE ${spdStore} AND sd.SaleDate = m.d)                                    AS revenue,
+      (SELECT COUNT(DISTINCT sd.CustomerId) FROM SalespersonDaily sd
+         WHERE ${spdStore} AND sd.SaleDate = m.d
+           AND sd.CustomerId IS NOT NULL AND LTRIM(RTRIM(sd.CustomerId)) <> '')      AS customers,
+      (SELECT COUNT(DISTINCT sd.CustomerId) FROM SalespersonDaily sd
+         INNER JOIN fc ON fc.CustomerId = sd.CustomerId
+         WHERE ${spdStore} AND fc.firstSale = m.d AND sd.SaleDate = m.d)             AS newCustomers
+    FROM m
+  `;
+  const kpiQ = useSqlQuery(kpiSql, []);
+  const k = kpiQ.data?.rows?.[0] ?? {};
+  const orders    = Number(k.orders) || 0;
+  const revenue   = Number(k.revenue) || 0;
+  const customers = Number(k.customers) || 0;
+  const newC      = Number(k.newCustomers) || 0;
+  const returning = Math.max(0, customers - newC);
+  const dayStr    = k.day || null;
+  const dayLabel  = dayStr ? localDate(dayStr).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) : '';
+  const avgOrder  = orders ? revenue / orders : 0;
+
+  // ── Units sold (SalesItemDetail latest day).
+  const unitsSql = `
+    WITH m AS (SELECT MAX(SaleDate) AS d FROM SalesItemDetail)
+    SELECT (SELECT COUNT(*) FROM SalesItemDetail s
+              WHERE s.SaleDate = m.d AND LEFT(CAST(s.SaleNo AS VARCHAR(20)), 1) = '${selectedBldg}') AS units
+    FROM m
+  `;
+  const unitsQ = useSqlQuery(unitsSql, []);
+  const units = Number(unitsQ.data?.rows?.[0]?.units) || 0;
+
+  // ── Area-wise: latest day's sales grouped by delivery zip → city (area).
+  const areaCityExpr = `LTRIM(RTRIM(COALESCE(NULLIF(LTRIM(RTRIM(SR.DeliveryCity)),''), NULLIF(LTRIM(RTRIM(SR.BillingCity)),''), 'Unknown')))`;
+  const areaZipExpr  = `LTRIM(RTRIM(COALESCE(NULLIF(LTRIM(RTRIM(SR.DeliveryZip)),''),  NULLIF(LTRIM(RTRIM(SR.BillingZip)),''),  'Unknown')))`;
+  const areaSql = `
+    WITH m AS (SELECT MAX(CAST(wrt_cng_bdat AS DATE)) AS d FROM SaleWRT WHERE wrt_pft_ctr = ${selectedBldg})
+    SELECT ${areaCityExpr} AS City,
+           ${areaZipExpr}  AS Zip,
+           SUM(S.wrt_sls)              AS Revenue,
+           COUNT(DISTINCT S.wrt_so_no) AS Orders
+    FROM SaleWRT S
+    CROSS JOIN m
+    LEFT JOIN SaleRV SR ON S.wrt_so_no = SR.sales_no
+    WHERE CAST(S.wrt_cng_bdat AS DATE) = m.d AND S.wrt_pft_ctr = ${selectedBldg}
+    GROUP BY ${areaCityExpr}, ${areaZipExpr}
+    HAVING SUM(S.wrt_sls) <> 0
+    ORDER BY Revenue DESC
+  `;
+  const areaQ = useSqlQuery(areaSql, []);
+  const yAreas = useMemo(() => {
+    const rows = areaQ.data?.rows ?? [];
+    const map = new Map();
+    let total = 0;
+    for (const r of rows) {
+      const name = String(r.City || 'Unknown').trim() || 'Unknown';
+      const zip  = String(r.Zip || '').trim() || '—';
+      const rev  = Number(r.Revenue) || 0;
+      const ord  = Number(r.Orders) || 0;
+      total += rev;
+      if (!map.has(name)) map.set(name, { name, revenue: 0, orders: 0, zips: [] });
+      const a = map.get(name);
+      a.revenue += rev; a.orders += ord;
+      a.zips.push({ zip, revenue: rev, orders: ord });
+    }
+    const areas = [...map.values()]
+      .map((a) => ({ ...a, zipCount: a.zips.length, zips: a.zips.sort((x, y) => y.revenue - x.revenue) }))
+      .sort((a, b) => b.revenue - a.revenue);
+    return { areas, total };
+  }, [areaQ.data]);
+
+  // ── Top 5 vendors (units sold, latest day).
+  const vendorSql = `
+    WITH m AS (SELECT MAX(SaleDate) AS d FROM SalesItemDetail)
+    SELECT TOP 5 LTRIM(RTRIM(VendorID)) AS vendor,
+                 COUNT(*)               AS units,
+                 COUNT(DISTINCT ItemID) AS skus
+    FROM SalesItemDetail CROSS JOIN m
+    WHERE SaleDate = m.d
+      AND LEFT(CAST(SaleNo AS VARCHAR(20)), 1) = '${selectedBldg}'
+      AND VendorID IS NOT NULL
+      AND LTRIM(RTRIM(VendorID)) NOT IN ('CFC', 'USLD', 'NONE', '')
+    GROUP BY LTRIM(RTRIM(VendorID))
+    ORDER BY units DESC
+  `;
+  const vendorQ = useSqlQuery(vendorSql, []);
+  const topVendors = vendorQ.data?.rows ?? [];
+
+  // ── Item Sold by room (latest day).
+  const itemCatSql = `
+    WITH m AS (SELECT MAX(SaleDate) AS d FROM SalesItemDetail),
+         base AS (
+           SELECT UPPER(ISNULL(Description2,'')) AS d2
+           FROM SalesItemDetail CROSS JOIN m
+           WHERE SaleDate = m.d AND LEFT(CAST(SaleNo AS VARCHAR(20)), 1) = '${selectedBldg}'
+         ),
+         cat AS (SELECT ${roomCase} AS room FROM base)
+    SELECT room, COUNT(*) AS units FROM cat GROUP BY room
+  `;
+  const itemCatQ = useSqlQuery(itemCatSql, []);
+  const itemCatByRoom = useMemo(() => {
+    const map = {};
+    for (const r of (itemCatQ.data?.rows ?? [])) map[r.room] = Number(r.units) || 0;
+    return map;
+  }, [itemCatQ.data]);
+
+  // Zip breakdown config for one area (drill target).
+  const areaZipConfig = (a) => ({
+    title: `${a.name} · Zip Codes · ${dayLabel}`,
+    icon: MapPin,
+    accent: 'primary',
+    headline: fmtCurrency(a.revenue),
+    subtitle: `${fmtNumber(a.zipCount)} zip code${a.zipCount === 1 ? '' : 's'} · ${fmtNumber(a.orders)} order${a.orders === 1 ? '' : 's'}`,
+    loadRows: () => a.zips.map((z) => ({ zip: z.zip, orders: z.orders, revenue: z.revenue })),
+    detailsColumns: [
+      { key: 'zip', label: 'Zip Code', render: (r) => <span className="font-mono font-semibold">{r.zip}</span> },
+      { key: 'orders', label: 'Orders', align: 'right', render: (r) => fmtNumber(r.orders) },
+      { key: 'revenue', label: 'Revenue', align: 'right', render: (r) => <span className="font-semibold">{fmtCurrency(r.revenue)}</span> },
+    ],
+    detailsEmpty: 'No zip codes',
+  });
+
+  // "See all areas" popup — every area, click one to drill into its zips.
+  const allAreasConfig = {
+    title: `All Areas · Yesterday${dayLabel ? ` (${dayLabel})` : ''}`,
+    icon: MapPin,
+    accent: 'primary',
+    headline: fmtCurrency(yAreas.total),
+    subtitle: `${fmtNumber(yAreas.areas.length)} area${yAreas.areas.length === 1 ? '' : 's'} · click an area to see its zip codes`,
+    loadRows: () => yAreas.areas.map((a) => ({ name: a.name, zips: a.zipCount, orders: a.orders, revenue: a.revenue, _area: a })),
+    detailsColumns: [
+      { key: 'name', label: 'Area' },
+      { key: 'zips', label: 'Zip Codes', align: 'right', render: (r) => fmtNumber(r.zips) },
+      { key: 'orders', label: 'Orders', align: 'right', render: (r) => fmtNumber(r.orders) },
+      { key: 'revenue', label: 'Revenue', align: 'right', render: (r) => <span className="font-semibold">{fmtCurrency(r.revenue)}</span> },
+    ],
+    onRowClick: (row) => areaZipConfig(row._area),
+    detailsEmpty: 'No sales yesterday',
+  };
+
+  const top5Areas = yAreas.areas.slice(0, 5);
+  const noSalesYet = !kpiQ.isLoading && orders === 0 && revenue === 0;
+
+  return (
+    <>
+      {/* ═══════════════ YESTERDAY headline ═══════════════ */}
+      <HeroBanner icon={Calendar} decorIcon={Calendar} accent="emerald">
+        <div className="text-[11px] font-bold uppercase tracking-widest text-emerald-700 dark:text-emerald-300">
+          {storeLabel} · Yesterday{dayLabel ? ` · ${dayLabel}` : ''}
+        </div>
+        <div className="mt-1 flex items-baseline gap-3 flex-wrap">
+          <span
+            title={fmtCurrency(revenue, true)}
+            className="text-5xl font-extrabold tabular-nums tracking-tight bg-gradient-to-br from-emerald-600 to-teal-500 bg-clip-text text-transparent"
+          >
+            {fmtCurrency(revenue)}
+          </span>
+          <span className="text-sm font-medium text-muted-fg">
+            {noSalesYet ? 'no sales on file for the latest day' : `${fmtNumber(orders)} order${orders === 1 ? '' : 's'} · ${fmtNumber(units)} item${units === 1 ? '' : 's'} sold`}
+          </span>
+        </div>
+      </HeroBanner>
+
+      {/* ═══════════════ KPI tiles ═══════════════ */}
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+        <HeroStat
+          label="Orders · Yesterday"
+          value={fmtNumber(orders)}
+          icon={ShoppingCart}
+          accent="sky"
+          subtitle={dayLabel || 'Latest day'}
+          loading={kpiQ.isLoading}
+          onClick={openDetail({
+            title: `Orders · Yesterday · ${storeLabel}`,
+            icon: ShoppingCart,
+            accent: 'sky',
+            headline: fmtNumber(orders),
+            subtitle: `Every distinct sale ticket rung up on ${dayLabel || 'the latest day'}`,
+            detailsDb: 'sql',
+            detailsSql: `
+              WITH m AS (SELECT MAX(SaleDate) AS d FROM SalespersonDaily)
+              SELECT sd.SalesNo,
+                     MAX(sd.CustomerName) AS CustomerName,
+                     MAX(sd.SalesPerson)  AS SalesPerson,
+                     SUM(ISNULL(sd.SaleSplitAmt, 0)) AS amount
+              FROM SalespersonDaily sd CROSS JOIN m
+              WHERE sd.SaleDate = m.d AND ${spdStore}
+              GROUP BY sd.SalesNo
+              ORDER BY amount DESC
+            `,
+            detailsColumns: [
+              { key: 'SalesNo',      label: 'Sale #' },
+              { key: 'CustomerName', label: 'Customer' },
+              { key: 'SalesPerson',  label: 'Salesperson' },
+              { key: 'amount',       label: 'Amount', align: 'right', render: (r) => <span className="font-semibold">{fmtCurrency(Number(r.amount) || 0)}</span> },
+            ],
+            detailsEmpty: 'No orders yesterday',
+          })}
+        />
+        <HeroStat
+          label="Items Sold · Yesterday"
+          value={fmtNumber(units)}
+          icon={Boxes}
+          accent="primary"
+          subtitle={units ? 'Units across all categories' : 'None sold'}
+          loading={unitsQ.isLoading}
+        />
+        <HeroStat
+          label="Avg Order Value"
+          value={fmtCompactCurrency(avgOrder)}
+          fullValue={fmtCurrency(avgOrder)}
+          icon={Activity}
+          accent="amber"
+          subtitle={orders ? `${fmtNumber(orders)} order${orders === 1 ? '' : 's'}` : 'No orders'}
+          loading={kpiQ.isLoading}
+        />
+        <CustomerMixTile
+          label="Customers · Yesterday"
+          total={customers}
+          newCount={newC}
+          returning={returning}
+          loading={kpiQ.isLoading}
+          onClick={openDetail({
+            title: `Customers · Yesterday · ${storeLabel}`,
+            icon: Users,
+            accent: 'violet',
+            headline: fmtNumber(customers),
+            subtitle: customers
+              ? `${fmtNumber(newC)} new · ${fmtNumber(returning)} returning on ${dayLabel || 'the latest day'}`
+              : 'No customers yesterday',
+            detailsDb: 'sql',
+            detailsSql: `
+              WITH m AS (SELECT MAX(SaleDate) AS d FROM SalespersonDaily),
+                   fc AS (
+                     SELECT sd.CustomerId, MIN(sd.SaleDate) AS firstSale
+                     FROM SalespersonDaily sd
+                     WHERE sd.CustomerId IS NOT NULL AND LTRIM(RTRIM(sd.CustomerId)) <> ''
+                     GROUP BY sd.CustomerId
+                   )
+              SELECT sd.CustomerId,
+                     MAX(sd.CustomerName) AS CustomerName,
+                     MIN(fc.firstSale)    AS firstSale,
+                     CASE WHEN MIN(fc.firstSale) = MAX(m.d) THEN 'New' ELSE 'Returning' END AS custType,
+                     SUM(sd.SaleSplitAmt)      AS spent,
+                     COUNT(DISTINCT sd.SalesNo) AS orders
+              FROM SalespersonDaily sd
+              INNER JOIN fc ON fc.CustomerId = sd.CustomerId
+              CROSS JOIN m
+              WHERE sd.SaleDate = m.d AND ${spdStore}
+              GROUP BY sd.CustomerId
+              ORDER BY SUM(sd.SaleSplitAmt) DESC
+            `,
+            detailsColumns: [
+              { key: 'custType', label: 'Type', render: (r) => (
+                <span className={cn('inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold',
+                  r.custType === 'New'
+                    ? 'bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-200'
+                    : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-200')}>
+                  {r.custType}
+                </span>
+              )},
+              { key: 'CustomerName', label: 'Customer' },
+              { key: 'firstSale',    label: 'First Sale', render: (r) => r.firstSale ? new Date(r.firstSale).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' }) : '—' },
+              { key: 'orders',       label: 'Orders', align: 'right', render: (r) => fmtNumber(Number(r.orders) || 0) },
+              { key: 'spent',        label: 'Spent', align: 'right', render: (r) => <span className="font-semibold">{fmtCurrency(Number(r.spent) || 0)}</span> },
+            ],
+            detailsEmpty: 'No customers yesterday',
+          })}
+        />
+      </div>
+
+      {/* ═══════════════ Area-wise sales (top 5 + see all) ═══════════════ */}
+      <SectionHeading
+        icon={MapPin}
+        title={`Area Wise Sales · Yesterday · ${storeLabel}`}
+        hint="Top 5 areas by revenue · click an area for its zip codes"
+      />
+      <div className="overflow-hidden rounded-2xl border border-border bg-card">
+        <table className="w-full text-sm">
+          <thead className="bg-muted/60 text-[11px] uppercase tracking-wider text-muted-fg">
+            <tr>
+              <th className="px-4 py-2.5 text-left">Area</th>
+              <th className="px-4 py-2.5 text-right">Zip Codes</th>
+              <th className="px-4 py-2.5 text-right">Orders</th>
+              <th className="px-4 py-2.5 text-right">Revenue</th>
+              <th className="px-4 py-2.5 text-right">Share</th>
+              <th className="w-8 px-3 py-2.5" />
+            </tr>
+          </thead>
+          <tbody>
+            {areaQ.isLoading ? (
+              <tr><td colSpan={6} className="py-8 text-center text-muted-fg">Loading…</td></tr>
+            ) : top5Areas.length === 0 ? (
+              <tr><td colSpan={6} className="py-8 text-center text-muted-fg">No sales yesterday for {storeLabel}.</td></tr>
+            ) : top5Areas.map((a) => (
+              <tr
+                key={a.name}
+                className="group cursor-pointer border-t border-border hover:bg-muted/30"
+                onClick={openDetail(areaZipConfig(a))}
+              >
+                <td className="px-4 py-2 font-medium">{a.name}</td>
+                <td className="px-4 py-2 text-right num text-muted-fg">{fmtNumber(a.zipCount)}</td>
+                <td className="px-4 py-2 text-right num text-muted-fg">{fmtNumber(a.orders)}</td>
+                <td className="px-4 py-2 text-right num font-semibold">{fmtCurrency(a.revenue)}</td>
+                <td className="px-4 py-2 text-right num text-muted-fg">{yAreas.total ? ((a.revenue / yAreas.total) * 100).toFixed(1) : '0.0'}%</td>
+                <td className="px-3 py-2 text-right"><ChevronRight size={14} className="text-muted-fg opacity-0 transition group-hover:opacity-100" /></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {yAreas.areas.length > 5 && (
+          <div className="border-t border-border p-2 text-center">
+            <button
+              type="button"
+              onClick={openDetail(allAreasConfig)}
+              className="rounded-lg px-3 py-1.5 text-xs font-semibold text-primary transition hover:bg-muted"
+            >
+              See all {fmtNumber(yAreas.areas.length)} areas →
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* ═══════════════ Top 5 vendors (yesterday) ═══════════════ */}
+      <SectionHeading
+        icon={Truck}
+        title={`Vendor Wise Analysis · Yesterday · ${storeLabel}`}
+        hint="Top 5 vendors by units sold yesterday · click for their item-type breakdown"
+      />
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
+        {vendorQ.isLoading ? (
+          <div className="col-span-2 lg:col-span-5 py-6 text-center text-xs text-muted-fg">Loading vendors…</div>
+        ) : topVendors.length === 0 ? (
+          <div className="col-span-2 lg:col-span-5 py-6 text-center text-xs text-muted-fg">No vendor sales yesterday</div>
+        ) : topVendors.map((v, i) => {
+          const vendor = String(v.vendor || '').trim();
+          const vunits = Number(v.units) || 0;
+          const skus   = Number(v.skus) || 0;
+          const accent = ['primary', 'emerald', 'amber', 'violet', 'sky'][i % 5];
+          return (
+            <HeroStat
+              key={vendor}
+              label={`#${i + 1} · ${vendor}`}
+              value={fmtNumber(vunits)}
+              icon={Truck}
+              accent={accent}
+              subtitle={`${fmtNumber(vunits)} item${vunits === 1 ? '' : 's'} · ${fmtNumber(skus)} SKU${skus === 1 ? '' : 's'}`}
+              loading={vendorQ.isLoading}
+              onClick={openDetail({
+                title: `${vendor} · Items Sold Yesterday · ${storeLabel}`,
+                icon: Truck,
+                accent,
+                headline: `${fmtNumber(vunits)} items`,
+                subtitle: `By item type · Stock Item / Star-SKU · ${fmtNumber(skus)} distinct SKUs`,
+                detailsDb: 'sql',
+                detailsSql: `
+                  WITH m AS (SELECT MAX(SaleDate) AS d FROM SalesItemDetail),
+                       base AS (
+                         SELECT LTRIM(RTRIM(ItemID)) AS ItemID,
+                                UPPER(ISNULL(Description2,'')) AS d2
+                         FROM SalesItemDetail CROSS JOIN m
+                         WHERE SaleDate = m.d
+                           AND LEFT(CAST(SaleNo AS VARCHAR(20)), 1) = '${selectedBldg}'
+                           AND LTRIM(RTRIM(VendorID)) = '${vendor.replace(/'/g, "''")}'
+                       ),
+                       typed AS (
+                         SELECT ${itemTypeCase} AS item_type,
+                                CASE WHEN LEFT(ItemID, 1) LIKE '[0-9]' THEN 1 ELSE 0 END AS is_lineup,
+                                CASE WHEN LEFT(ItemID, 1) = '*'        THEN 1 ELSE 0 END AS is_star
+                         FROM base
+                       )
+                  SELECT item_type,
+                         COUNT(*)        AS units,
+                         SUM(is_lineup)  AS lineup,
+                         SUM(is_star)    AS star
+                  FROM typed GROUP BY item_type ORDER BY units DESC
+                `,
+                detailsColumns: [
+                  { key: 'item_type', label: 'Item Type' },
+                  { key: 'units',   label: 'Total Sold', align: 'right', render: (r) => <span className="font-semibold">{fmtNumber(r.units)}</span> },
+                  { key: 'lineup',  label: 'Stock Item', align: 'right', render: (r) => r.lineup > 0 ? <span className="font-semibold text-emerald-600 dark:text-emerald-300">{fmtNumber(r.lineup)}</span> : <span className="text-muted-fg">0</span> },
+                  { key: 'star',    label: 'Star SKU', align: 'right', render: (r) => r.star > 0 ? <span className="font-semibold text-amber-600 dark:text-amber-300">{fmtNumber(r.star)}</span> : <span className="text-muted-fg">0</span> },
+                ],
+                detailsEmpty: `No items sold for ${vendor} yesterday`,
+              })}
+            />
+          );
+        })}
+      </div>
+
+      {/* ═══════════════ Item Sold Analysis (yesterday) ═══════════════ */}
+      <SectionHeading
+        icon={Package}
+        title={`Item Sold Analysis · Yesterday · ${storeLabel}`}
+        hint="Units sold yesterday by category · click a category for the item list"
+      />
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+        {['Living Room', 'Bedroom', 'Dining Room', 'Accessories']
+          .map((key) => ROOM_RULES.find((r) => r.key === key))
+          .map((room) => {
+            const runits = itemCatByRoom[room.key] || 0;
+            return (
+              <HeroStat
+                key={room.key}
+                label={room.key}
+                value={fmtNumber(runits)}
+                icon={room.icon}
+                accent={room.accent}
+                subtitle={runits ? `${fmtNumber(runits)} item${runits === 1 ? '' : 's'} sold yesterday` : 'None sold yesterday'}
+                loading={itemCatQ.isLoading}
+                onClick={openDetail({
+                  title: `${room.key} · Items Sold Yesterday · ${storeLabel}`,
+                  icon: room.icon,
+                  accent: room.accent,
+                  headline: fmtNumber(runits),
+                  subtitle: `${fmtNumber(runits)} item${runits === 1 ? '' : 's'} sold · by item type · click a type to see the items`,
+                  detailsDb: 'sql',
+                  detailsSql: `
+                    WITH m AS (SELECT MAX(SaleDate) AS d FROM SalesItemDetail),
+                         base AS (
+                           SELECT UPPER(ISNULL(Description2,'')) AS d2
+                           FROM SalesItemDetail CROSS JOIN m
+                           WHERE SaleDate = m.d AND LEFT(CAST(SaleNo AS VARCHAR(20)), 1) = '${selectedBldg}'
+                         ),
+                         roomed AS (
+                           SELECT ${itemTypeCase} AS item_type
+                           FROM base
+                           WHERE (${roomCase}) = '${room.key}'
+                         )
+                    SELECT item_type, COUNT(*) AS units
+                    FROM roomed GROUP BY item_type ORDER BY units DESC
+                  `,
+                  detailsColumns: [
+                    { key: 'item_type', label: 'Item Type' },
+                    { key: 'units', label: 'Total Sold', align: 'right', render: (r) => <span className="font-semibold">{fmtNumber(Number(r.units) || 0)}</span> },
+                  ],
+                  detailsEmpty: `No ${room.key.toLowerCase()} items sold yesterday`,
+                  onRowClick: (row) => ({
+                    title: `${room.key} · ${row.item_type} · ${storeLabel}`,
+                    icon: room.icon,
+                    accent: room.accent,
+                    headline: `${fmtNumber(Number(row.units) || 0)} ${row.item_type}`,
+                    subtitle: `Individual ${row.item_type} pieces sold yesterday · same item on one sale is grouped with a Qty`,
+                    detailsDb: 'sql',
+                    detailsSql: `
+                      WITH m AS (SELECT MAX(SaleDate) AS d FROM SalesItemDetail),
+                           base AS (
+                             SELECT SaleDate, SaleNo,
+                                    LTRIM(RTRIM(ItemID)) AS ItemID,
+                                    LTRIM(RTRIM(VendorID)) AS VendorID,
+                                    LTRIM(RTRIM(ISNULL(Description2,''))) AS ItemType,
+                                    UPPER(ISNULL(Description2,'')) AS d2
+                             FROM SalesItemDetail CROSS JOIN m
+                             WHERE SaleDate = m.d AND LEFT(CAST(SaleNo AS VARCHAR(20)), 1) = '${selectedBldg}'
+                           ),
+                           filt AS (
+                             SELECT SaleDate, SaleNo, ItemID, VendorID, ItemType
+                             FROM base
+                             WHERE (${roomCase}) = '${room.key}'
+                               AND (${itemTypeCase}) = '${String(row.item_type).replace(/'/g, "''")}'
+                           )
+                      SELECT MIN(SaleDate) AS SaleDate, SaleNo, ItemID, VendorID, ItemType, COUNT(*) AS Qty
+                      FROM filt GROUP BY SaleNo, ItemID, VendorID, ItemType ORDER BY MIN(SaleDate) DESC
+                    `,
+                    detailsColumns: [
+                      { key: 'SaleNo',   label: 'Sale #' },
+                      { key: 'ItemID',   label: 'Item ID' },
+                      { key: 'VendorID', label: 'Vendor' },
+                      { key: 'ItemType', label: 'Description' },
+                      { key: 'Qty',      label: 'Qty', align: 'right', render: (r) => {
+                        const n = Number(r.Qty) || 1;
+                        return n > 1
+                          ? <span className="font-semibold text-primary">×{fmtNumber(n)}</span>
+                          : <span className="text-muted-fg">1</span>;
+                      }},
+                    ],
+                    detailsEmpty: `No ${row.item_type} sold yesterday`,
+                  }),
+                })}
+              />
+            );
+          })}
+      </div>
+
+      <MetricDrilldown drilldown={drilldown} onClose={() => setDrilldown(null)} />
+    </>
+  );
+}
+
+// SectionHeading — local copy (keeps this view self-contained).
+function SectionHeading({ icon: Icon, title, hint }) {
+  return (
+    <div className="flex items-end justify-between gap-3 pt-2">
+      <div className="flex items-center gap-2">
+        {Icon && (
+          <span className="grid h-7 w-7 place-items-center rounded-lg bg-primary/10 text-primary">
+            <Icon size={15} />
+          </span>
+        )}
+        <h2 className="text-base font-bold uppercase tracking-wider text-fg">{title}</h2>
+      </div>
+      {hint && <span className="hidden text-[11px] italic text-muted-fg sm:block">{hint}</span>}
+    </div>
+  );
+}
+
+// CustomerMixTile — total customers with a New vs Returning split bar.
+function CustomerMixTile({ label, total, newCount, returning, loading, onClick }) {
+  const newPct = total > 0 ? Math.round((newCount / total) * 100) : 0;
+  const retPct = total > 0 ? 100 - newPct : 0;
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        'group relative overflow-hidden rounded-2xl border bg-card text-left transition-all duration-300',
+        'border-violet-500/40 shadow-[0_8px_30px_-12px_rgba(139,92,246,0.45)]',
+        onClick && 'cursor-pointer hover:-translate-y-1 hover:shadow-[0_20px_40px_-15px_rgba(0,0,0,0.25)]',
+      )}
+    >
+      <div className="absolute inset-0 bg-gradient-to-br from-violet-500/20 via-violet-500/10 to-transparent opacity-90 dark:from-violet-500/25" />
+      <div className="absolute -bottom-4 -right-4 opacity-[0.06] dark:opacity-[0.08]">
+        <Users size={120} strokeWidth={1.5} />
+      </div>
+      <div className="relative p-4">
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-[10px] font-bold uppercase tracking-wider text-muted-fg leading-tight">{label}</span>
+          <div className="grid h-8 w-8 place-items-center rounded-lg shrink-0 text-white shadow-lg ring-2 bg-gradient-to-br from-violet-500 to-purple-500 ring-violet-500/30">
+            <Users size={15} strokeWidth={2.25} />
+          </div>
+        </div>
+        {loading ? (
+          <div className="mt-3 h-[78px] w-full animate-pulse rounded bg-muted/50" />
+        ) : (
+          <>
+            <div className="mt-2 flex items-baseline gap-1.5">
+              <span className="text-3xl font-extrabold leading-none tabular-nums text-violet-600 dark:text-violet-300">{fmtNumber(total)}</span>
+              <span className="text-[11px] font-medium text-muted-fg">total</span>
+            </div>
+            <div className="mt-3 flex h-2 w-full overflow-hidden rounded-full bg-muted">
+              <div className="h-full bg-violet-500 transition-all" style={{ width: `${newPct}%` }} title={`New · ${newPct}%`} />
+              <div className="h-full bg-emerald-500 transition-all" style={{ width: `${retPct}%` }} title={`Returning · ${retPct}%`} />
+            </div>
+            <div className="mt-2.5 space-y-1">
+              <div className="flex items-center gap-2">
+                <span className="h-2.5 w-2.5 shrink-0 rounded-sm bg-violet-500" />
+                <span className="text-xs text-fg/80">New</span>
+                <span className="ml-auto text-sm font-bold tabular-nums text-fg">{fmtNumber(newCount)}</span>
+                <span className="w-9 text-right text-[10px] tabular-nums text-muted-fg">{newPct}%</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="h-2.5 w-2.5 shrink-0 rounded-sm bg-emerald-500" />
+                <span className="text-xs text-fg/80">Returning</span>
+                <span className="ml-auto text-sm font-bold tabular-nums text-fg">{fmtNumber(returning)}</span>
+                <span className="w-9 text-right text-[10px] tabular-nums text-muted-fg">{retPct}%</span>
+              </div>
+            </div>
+          </>
+        )}
+      </div>
+    </button>
+  );
+}
