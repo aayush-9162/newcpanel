@@ -190,9 +190,10 @@ export default function DashboardDaily({ store, selectedBldg }) {
          vitems AS (SELECT SaleNo, vendor, COUNT(*) AS items FROM det GROUP BY SaleNo, vendor),
          saleTot AS (SELECT SaleNo, SUM(items) AS totItems FROM vitems GROUP BY SaleNo),
          saleRev AS (
-           SELECT CAST(wrt_so_no AS VARCHAR(20)) AS SaleNo, SUM(wrt_sls) AS amt
-           FROM SaleWRT WHERE wrt_pft_ctr = ${selectedBldg}
-           GROUP BY CAST(wrt_so_no AS VARCHAR(20))
+           SELECT CAST(S.wrt_so_no AS VARCHAR(20)) AS SaleNo, SUM(S.wrt_sls) AS amt
+           FROM SaleWRT S CROSS JOIN m
+           WHERE S.wrt_pft_ctr = ${selectedBldg} AND CAST(S.wrt_cng_bdat AS DATE) = m.d
+           GROUP BY CAST(S.wrt_so_no AS VARCHAR(20))
          ),
          vrev AS (
            SELECT vi.vendor, SUM(ISNULL(sr.amt, 0) * vi.items * 1.0 / NULLIF(st.totItems, 0)) AS revenue
