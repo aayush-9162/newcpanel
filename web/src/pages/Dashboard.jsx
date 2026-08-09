@@ -544,6 +544,61 @@ export default function Dashboard() {
     [topVendors, vendorRevByName],
   );
 
+  // ── Area-wise sales for the selected month + store (SaleWRT + SaleRV),
+  //    grouped by delivery zip and rolled up to the area (city).
+  const mAreaCityExpr = `LTRIM(RTRIM(COALESCE(NULLIF(LTRIM(RTRIM(SR.DeliveryCity)),''), NULLIF(LTRIM(RTRIM(SR.BillingCity)),''), 'Unknown')))`;
+  const mAreaZipExpr  = `LTRIM(RTRIM(COALESCE(NULLIF(LTRIM(RTRIM(SR.DeliveryZip)),''),  NULLIF(LTRIM(RTRIM(SR.BillingZip)),''),  'Unknown')))`;
+  const monthAreaSql = `
+    SELECT ${mAreaCityExpr} AS City,
+           ${mAreaZipExpr}  AS Zip,
+           SUM(S.wrt_sls)              AS Revenue,
+           COUNT(DISTINCT S.wrt_so_no) AS Orders
+    FROM SaleWRT S
+    LEFT JOIN SaleRV SR ON S.wrt_so_no = SR.sales_no
+    WHERE S.wrt_pft_ctr = ${selectedBldg}
+      AND YEAR(S.wrt_cng_bdat) = ${curYear} AND MONTH(S.wrt_cng_bdat) = ${month}
+    GROUP BY ${mAreaCityExpr}, ${mAreaZipExpr}
+    HAVING SUM(S.wrt_sls) <> 0
+    ORDER BY Revenue DESC
+  `;
+  const monthAreaQ = useSqlQuery(monthAreaSql, []);
+  const monthAreas = useMemo(() => {
+    const rows = monthAreaQ.data?.rows ?? [];
+    const map = new Map();
+    let total = 0;
+    for (const r of rows) {
+      const name = String(r.City || 'Unknown').trim() || 'Unknown';
+      const zip  = String(r.Zip || '').trim() || '—';
+      const rev  = Number(r.Revenue) || 0;
+      const ord  = Number(r.Orders) || 0;
+      total += rev;
+      if (!map.has(name)) map.set(name, { name, revenue: 0, orders: 0, zips: [] });
+      const a = map.get(name);
+      a.revenue += rev; a.orders += ord;
+      a.zips.push({ zip, revenue: rev, orders: ord });
+    }
+    const areas = [...map.values()]
+      .map((a) => ({ ...a, zipCount: a.zips.length, zips: a.zips.sort((x, y) => y.revenue - x.revenue) }))
+      .sort((a, b) => b.revenue - a.revenue);
+    return { areas, total };
+  }, [monthAreaQ.data]);
+
+  // Drill-down config listing one area's zip codes for the selected month.
+  const monthAreaZipConfig = (a) => ({
+    title: `${a.name} · Zip Codes · ${monthName}`,
+    icon: MapPin,
+    accent: 'primary',
+    headline: fmtCurrency(a.revenue),
+    subtitle: `${fmtNumber(a.zipCount)} zip code${a.zipCount === 1 ? '' : 's'} · ${fmtNumber(a.orders)} order${a.orders === 1 ? '' : 's'}`,
+    loadRows: () => a.zips.map((z) => ({ zip: z.zip, orders: z.orders, revenue: z.revenue })),
+    detailsColumns: [
+      { key: 'zip', label: 'Zip Code', render: (r) => <span className="font-mono font-semibold">{r.zip}</span> },
+      { key: 'orders', label: 'Orders', align: 'right', render: (r) => fmtNumber(r.orders) },
+      { key: 'revenue', label: 'Revenue', align: 'right', render: (r) => <span className="font-semibold">{fmtCurrency(r.revenue)}</span> },
+    ],
+    detailsEmpty: 'No zip codes',
+  });
+
   // ── derive: recency KPIs (yesterday / 7d) + this-month rollups.
   // Best/lowest day are calculated within the current calendar month so they
   // can't be skewed by an outlier day from the prior month.
@@ -698,6 +753,93 @@ export default function Dashboard() {
             subtitle={daysLeft > 0 ? `Current avg ${fmtCompactCurrency(tyAvgPerDay)} / day` : 'Average per day this month'}
             loading={monthTotQ.isLoading}
           />
+        </div>
+
+        {/* ─── Area Wise Sales (selected month, top 5) ─── */}
+        <SectionHeading
+          icon={MapPin}
+          title={`Area Wise Sales · ${monthName} · ${store === 'ARDEN' ? 'Arden (S1)' : 'Waynesville (S2)'}`}
+          hint={monthAreas.total > 0
+            ? `${fmtNumber(monthAreas.areas.length)} areas · ${fmtCurrency(monthAreas.total)} · click an area for its zip codes`
+            : 'Top 5 areas by revenue · click an area for its zip codes'}
+        />
+        <div className="overflow-hidden rounded-2xl border border-border bg-card">
+          {monthAreaQ.isLoading ? (
+            <div className="py-8 text-center text-sm text-muted-fg">Loading…</div>
+          ) : monthAreas.areas.length === 0 ? (
+            <div className="py-8 text-center text-sm text-muted-fg">No sales for {monthName}.</div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-muted/50 text-xs uppercase tracking-wider text-muted-fg">
+                  <tr>
+                    <th className="px-3 py-2.5 text-left font-semibold">#</th>
+                    <th className="px-3 py-2.5 text-left font-semibold">Area</th>
+                    <th className="px-3 py-2.5 text-right font-semibold">Zips</th>
+                    <th className="px-3 py-2.5 text-right font-semibold">Orders</th>
+                    <th className="px-3 py-2.5 text-right font-semibold">Revenue</th>
+                    <th className="px-4 py-2.5 text-left font-semibold">Share of month</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {monthAreas.areas.slice(0, 5).map((a, i) => {
+                    const share  = monthAreas.total ? (a.revenue / monthAreas.total) * 100 : 0;
+                    const top    = monthAreas.areas[0].revenue;
+                    const barPct = top ? Math.max(3, (a.revenue / top) * 100) : 0;
+                    const grad = ['from-blue-500 to-indigo-500', 'from-emerald-500 to-teal-500', 'from-amber-500 to-orange-500', 'from-violet-500 to-purple-500', 'from-sky-500 to-cyan-500'][i % 5];
+                    return (
+                      <tr
+                        key={a.name}
+                        onClick={openDetail(monthAreaZipConfig(a))}
+                        className="group cursor-pointer border-t border-border hover:bg-muted/30"
+                      >
+                        <td className="px-3 py-2.5"><span className={cn('grid h-6 w-6 place-items-center rounded-md bg-gradient-to-br text-xs font-bold text-white', grad)}>{i + 1}</span></td>
+                        <td className="px-3 py-2.5 font-semibold">{a.name}</td>
+                        <td className="px-3 py-2.5 text-right tabular-nums text-muted-fg">{fmtNumber(a.zipCount)}</td>
+                        <td className="px-3 py-2.5 text-right tabular-nums text-muted-fg">{fmtNumber(a.orders)}</td>
+                        <td className="px-3 py-2.5 text-right font-bold tabular-nums">{fmtCurrency(a.revenue)}</td>
+                        <td className="px-4 py-2.5">
+                          <div className="flex items-center gap-2">
+                            <div className="h-2 w-24 overflow-hidden rounded-full bg-muted sm:w-32">
+                              <div className={cn('h-full rounded-full bg-gradient-to-r', grad)} style={{ width: `${barPct}%` }} />
+                            </div>
+                            <span className="w-11 text-right text-xs font-semibold tabular-nums text-muted-fg">{share.toFixed(1)}%</span>
+                            <ChevronRight size={14} className="text-muted-fg opacity-0 transition group-hover:opacity-100" />
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+              {monthAreas.areas.length > 5 && (
+                <div className="border-t border-border p-2 text-center">
+                  <button
+                    type="button"
+                    onClick={openDetail({
+                      title: `All Areas · ${monthName} · ${store === 'ARDEN' ? 'Arden (S1)' : 'Waynesville (S2)'}`,
+                      icon: MapPin,
+                      accent: 'primary',
+                      headline: fmtCurrency(monthAreas.total),
+                      subtitle: `${fmtNumber(monthAreas.areas.length)} areas · click an area to see its zip codes`,
+                      loadRows: () => monthAreas.areas.map((a) => ({ name: a.name, zips: a.zipCount, orders: a.orders, revenue: a.revenue, _area: a })),
+                      detailsColumns: [
+                        { key: 'name', label: 'Area' },
+                        { key: 'zips', label: 'Zip Codes', align: 'right', render: (r) => fmtNumber(r.zips) },
+                        { key: 'orders', label: 'Orders', align: 'right', render: (r) => fmtNumber(r.orders) },
+                        { key: 'revenue', label: 'Revenue', align: 'right', render: (r) => <span className="font-semibold">{fmtCurrency(r.revenue)}</span> },
+                      ],
+                      onRowClick: (row) => monthAreaZipConfig(row._area),
+                      detailsEmpty: 'No sales this month',
+                    })}
+                    className="rounded-lg px-3 py-1.5 text-sm font-semibold text-primary transition hover:bg-muted"
+                  >
+                    See all {fmtNumber(monthAreas.areas.length)} areas →
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* ─── Company Snapshot ─── */}
