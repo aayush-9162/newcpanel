@@ -409,76 +409,6 @@ export default function DashboardDaily({ store, selectedBldg }) {
         />
       </div>
 
-      {/* ═══════════════ Top Salespersons ═══════════════ */}
-      <SectionHeading
-        icon={Award}
-        title={`Top Salespersons · ${dateShort} · ${storeLabel}`}
-        hint="By revenue on the day · sales count + total revenue"
-      />
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-        {spQ.isLoading ? (
-          <div className="col-span-1 py-6 text-center text-xs text-muted-fg sm:col-span-3">Loading…</div>
-        ) : topSalespeople.length === 0 ? (
-          <div className="col-span-1 py-6 text-center text-xs text-muted-fg sm:col-span-3">No salesperson sales on file for this day.</div>
-        ) : topSalespeople.map((s, i) => {
-          const code = String(s.salesperson || '—').trim();
-          const name = resolveSp(code);
-          const fullName = resolveSpFull(code);
-          const spOrders = Number(s.orders) || 0;
-          const spRev    = Number(s.revenue) || 0;
-          const medal = [
-            { grad: 'from-amber-400 to-yellow-500',  ring: 'ring-amber-500/30' },
-            { grad: 'from-slate-300 to-slate-400',   ring: 'ring-slate-400/30' },
-            { grad: 'from-orange-400 to-amber-600',  ring: 'ring-orange-500/30' },
-          ][i] || { grad: 'from-slate-300 to-slate-400', ring: 'ring-slate-400/30' };
-          return (
-            <button
-              key={code}
-              type="button"
-              onClick={openDetail({
-                title: `${name} · ${dateShort} · ${storeLabel}`,
-                icon: Award,
-                accent: 'amber',
-                headline: fmtCurrency(spRev),
-                subtitle: `${fmtNumber(spOrders)} sale${spOrders === 1 ? '' : 's'} on ${dayLabel || 'the latest day'}`,
-                detailsDb: 'sql',
-                detailsSql: dayStr ? `
-                  SELECT sd.SalesNo,
-                         MAX(sd.CustomerName) AS CustomerName,
-                         SUM(ISNULL(sd.SaleSplitAmt, 0)) AS amount
-                  FROM SalespersonDaily sd
-                  WHERE CAST(sd.SaleDate AS DATE) = '${dayStr}' AND ${spdStore}
-                    AND LTRIM(RTRIM(sd.SalesPerson)) = '${code.replace(/'/g, "''")}'
-                  GROUP BY sd.SalesNo
-                  ORDER BY amount DESC
-                ` : undefined,
-                detailsColumns: [
-                  { key: 'SalesNo',      label: 'Sale #' },
-                  { key: 'CustomerName', label: 'Customer' },
-                  { key: 'amount',       label: 'Amount', align: 'right', render: (r) => <span className="font-semibold">{fmtCurrency(Number(r.amount) || 0)}</span> },
-                ],
-                detailsEmpty: `No sales for ${name} on this day`,
-              })}
-              className="group relative flex items-center gap-3 overflow-hidden rounded-xl border border-border bg-card p-4 text-left transition hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-md"
-            >
-              <span className={cn('grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-gradient-to-br text-base font-extrabold text-white shadow ring-2', medal.grad, medal.ring)}>
-                {i + 1}
-              </span>
-              <div className="min-w-0 flex-1">
-                <div className="truncate text-sm font-bold text-fg" title={fullName}>{name}</div>
-                <div className="truncate text-xs text-muted-fg">
-                  {fmtNumber(spOrders)} sale{spOrders === 1 ? '' : 's'}{name !== code ? ` · ${code}` : ''}
-                </div>
-              </div>
-              <div className="text-right">
-                <div className="text-lg font-extrabold tabular-nums text-fg">{fmtCurrency(spRev)}</div>
-                <div className="text-[10px] uppercase tracking-wider text-muted-fg">revenue</div>
-              </div>
-            </button>
-          );
-        })}
-      </div>
-
       {/* ═══════════════ Area-wise sales (top 5 + see all) ═══════════════ */}
       <SectionHeading
         icon={MapPin}
@@ -556,6 +486,76 @@ export default function DashboardDaily({ store, selectedBldg }) {
             )}
           </div>
         )}
+      </div>
+
+      {/* ═══════════════ Top Salespersons ═══════════════ */}
+      <SectionHeading
+        icon={Award}
+        title={`Top Salespersons · ${dateShort} · ${storeLabel}`}
+        hint="By revenue on the day · sales count + total revenue"
+      />
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        {spQ.isLoading ? (
+          <div className="col-span-1 py-6 text-center text-xs text-muted-fg sm:col-span-3">Loading…</div>
+        ) : topSalespeople.length === 0 ? (
+          <div className="col-span-1 py-6 text-center text-xs text-muted-fg sm:col-span-3">No salesperson sales on file for this day.</div>
+        ) : topSalespeople.map((s, i) => {
+          const code = String(s.salesperson || '—').trim();
+          const name = resolveSp(code);
+          const fullName = resolveSpFull(code);
+          const spOrders = Number(s.orders) || 0;
+          const spRev    = Number(s.revenue) || 0;
+          const medal = [
+            { grad: 'from-amber-400 to-yellow-500',  ring: 'ring-amber-500/30' },
+            { grad: 'from-slate-300 to-slate-400',   ring: 'ring-slate-400/30' },
+            { grad: 'from-orange-400 to-amber-600',  ring: 'ring-orange-500/30' },
+          ][i] || { grad: 'from-slate-300 to-slate-400', ring: 'ring-slate-400/30' };
+          return (
+            <button
+              key={code}
+              type="button"
+              onClick={openDetail({
+                title: `${name} · ${dateShort} · ${storeLabel}`,
+                icon: Award,
+                accent: 'amber',
+                headline: fmtCurrency(spRev),
+                subtitle: `${fmtNumber(spOrders)} sale${spOrders === 1 ? '' : 's'} on ${dayLabel || 'the latest day'}`,
+                detailsDb: 'sql',
+                detailsSql: dayStr ? `
+                  SELECT sd.SalesNo,
+                         MAX(sd.CustomerName) AS CustomerName,
+                         SUM(ISNULL(sd.SaleSplitAmt, 0)) AS amount
+                  FROM SalespersonDaily sd
+                  WHERE CAST(sd.SaleDate AS DATE) = '${dayStr}' AND ${spdStore}
+                    AND LTRIM(RTRIM(sd.SalesPerson)) = '${code.replace(/'/g, "''")}'
+                  GROUP BY sd.SalesNo
+                  ORDER BY amount DESC
+                ` : undefined,
+                detailsColumns: [
+                  { key: 'SalesNo',      label: 'Sale #' },
+                  { key: 'CustomerName', label: 'Customer' },
+                  { key: 'amount',       label: 'Amount', align: 'right', render: (r) => <span className="font-semibold">{fmtCurrency(Number(r.amount) || 0)}</span> },
+                ],
+                detailsEmpty: `No sales for ${name} on this day`,
+              })}
+              className="group relative flex items-center gap-3 overflow-hidden rounded-xl border border-border bg-card p-4 text-left transition hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-md"
+            >
+              <span className={cn('grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-gradient-to-br text-base font-extrabold text-white shadow ring-2', medal.grad, medal.ring)}>
+                {i + 1}
+              </span>
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-sm font-bold text-fg" title={fullName}>{name}</div>
+                <div className="truncate text-xs text-muted-fg">
+                  {fmtNumber(spOrders)} sale{spOrders === 1 ? '' : 's'}{name !== code ? ` · ${code}` : ''}
+                </div>
+              </div>
+              <div className="text-right">
+                <div className="text-lg font-extrabold tabular-nums text-fg">{fmtCurrency(spRev)}</div>
+                <div className="text-[10px] uppercase tracking-wider text-muted-fg">revenue</div>
+              </div>
+            </button>
+          );
+        })}
       </div>
 
       {/* ═══════════════ Top 5 vendors (yesterday) ═══════════════ */}
