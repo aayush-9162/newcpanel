@@ -233,11 +233,18 @@ function weekdayFor(dayNum, monthIdx, year) {
   return { name: WEEKDAYS[dow], weekend: dow === 0 || dow === 6 };
 }
 
+// Weekday cell styling — weekends get an amber tint so they stand out.
+const dayCellClass = (d) => cn(
+  'px-3 py-2 text-center text-xs font-semibold',
+  d.weekend ? 'bg-amber-500/15 text-amber-700 dark:text-amber-300' : 'text-muted-fg',
+);
+
 export default function SCR() {
   const today = new Date();
   const [store, setStore] = useState('ARDEN');
   const [category, setCategory] = useState('Written');
   const [monthIdx, setMonthIdx] = useState(today.getMonth());
+  const [align, setAlign] = useState('date'); // 'date' = same calendar date, 'weekday' = same day of week
   const monthName = MONTHS[monthIdx];
 
   const dailyQry = useMemo(() => buildDailySql(category), [category]);
@@ -254,6 +261,46 @@ export default function SCR() {
   const fourYear = useSqlQuery(fourYearQry, [store]);
 
   const dailyRows = daily.data?.rows ?? [];
+
+  // Daily comparison rows — supports two pairing modes:
+  //   'date'    — this year's day D vs last year's SAME calendar date (D).
+  //   'weekday' — this year's day D vs last year's SAME weekday. Because the
+  //               calendar shifts ~1 day/year, we offset last year's series by
+  //               a constant amount for the month so Sat lines up with Sat.
+  // Running totals are recomputed from whichever pairing is active.
+  const dailyDisplay = useMemo(() => {
+    const lyByDay = new Map();
+    dailyRows.forEach((r) => {
+      lyByDay.set(parseInt(String(r.DayMonth).split('-')[0], 10), Number(r.LastYear) || 0);
+    });
+    // Weekday offset from day 1 of the month (this year vs last year).
+    const wdTY1 = new Date(SCR_CURRENT_YEAR, monthIdx, 1).getDay();
+    const wdLY1 = new Date(SCR_CURRENT_YEAR - 1, monthIdx, 1).getDay();
+    const raw = (wdTY1 - wdLY1 + 7) % 7;      // 0..6
+    const offset = raw > 3 ? raw - 7 : raw;   // nearest signed shift (−3..+3)
+
+    let lyRun = 0, tyRun = 0;
+    return dailyRows.map((r) => {
+      const dayNum = parseInt(String(r.DayMonth).split('-')[0], 10);
+      const ty = Number(r.ThisYear) || 0;
+      let ly, alignedDay = null, lyExists = true;
+      if (align === 'weekday') {
+        alignedDay = dayNum + offset;
+        if (lyByDay.has(alignedDay)) ly = lyByDay.get(alignedDay);
+        else { ly = null; lyExists = false; }   // aligned day falls outside this month
+      } else {
+        ly = Number(r.LastYear) || 0;
+      }
+      tyRun += ty;
+      if (ly != null) lyRun += ly;
+      const diff = ly == null ? null : ty - ly;
+      const dTY = weekdayFor(dayNum, monthIdx, SCR_CURRENT_YEAR);
+      // In weekday mode the LY weekday equals the TY weekday (that's the point).
+      const dLY = align === 'weekday' ? dTY : weekdayFor(dayNum, monthIdx, SCR_CURRENT_YEAR - 1);
+      return { DayMonth: r.DayMonth, ty, ly, diff, lyRun, tyRun, dTY, dLY, alignedDay, lyExists };
+    });
+  }, [dailyRows, align, monthIdx]);
+
   const monthlyRows = monthly.data?.rows ?? [];
   const weeklyRows = weekly.data?.rows ?? [];
   const quarterlyRows = quarterly.data?.rows ?? [];
@@ -590,6 +637,21 @@ export default function SCR() {
         <PerformanceMatrix matrix={matrix} loading={monthly.isLoading || daily.isLoading} monthName={monthName} />
 
         <Card>
+          <CardHeader className="flex-row items-start justify-between gap-3 space-y-0">
+            <div>
+              <CardTitle>Daily comparison · {monthName}</CardTitle>
+              <CardDescription>
+                {align === 'weekday'
+                  ? 'By weekday — this year vs last year matched on the same day of week (Sat vs Sat).'
+                  : 'By calendar date — this year vs last year on the same date.'}
+              </CardDescription>
+            </div>
+            <div className="flex shrink-0 items-center gap-1">
+              <span className="mr-1 text-[11px] uppercase tracking-wider text-muted-fg">Compare</span>
+              <Button size="sm" variant={align === 'date' ? 'primary' : 'outline'} onClick={() => setAlign('date')}>By Date</Button>
+              <Button size="sm" variant={align === 'weekday' ? 'primary' : 'outline'} onClick={() => setAlign('weekday')}>By Weekday</Button>
+            </div>
+          </CardHeader>
           <CardContent className="p-0 overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="bg-muted/60 text-[11px] uppercase tracking-wider text-muted-fg">
@@ -607,34 +669,27 @@ export default function SCR() {
               <tbody>
                 {daily.isLoading ? (
                   <tr><td colSpan={8} className="py-8 text-center text-muted-fg">Loading…</td></tr>
-                ) : dailyRows.length === 0 ? (
+                ) : dailyDisplay.length === 0 ? (
                   <tr><td colSpan={8} className="py-8 text-center text-muted-fg">No records for {monthName}.</td></tr>
-                ) : dailyRows.map((r) => {
-                  const ty = Number(r.ThisYear) || 0;
-                  const ly = Number(r.LastYear) || 0;
-                  const diff = Number(r.Difference) || (ty - ly);
-                  const dayNum = parseInt(String(r.DayMonth).split('-')[0], 10);
-                  const dLY = weekdayFor(dayNum, monthIdx, SCR_CURRENT_YEAR - 1);
-                  const dTY = weekdayFor(dayNum, monthIdx, SCR_CURRENT_YEAR);
-                  const dayCls = (d) => cn(
-                    'px-3 py-2 text-center text-xs font-semibold',
-                    d.weekend ? 'bg-amber-500/15 text-amber-700 dark:text-amber-300' : 'text-muted-fg',
-                  );
-                  return (
-                    <tr key={r.DayMonth} className="border-t border-border">
-                      <td className="px-4 py-2 font-medium">{r.DayMonth}</td>
-                      <td className={dayCls(dLY)}>{dLY.name}</td>
-                      <td className="px-4 py-2 text-right num text-muted-fg">{fmtCurrency(ly)}</td>
-                      <td className={dayCls(dTY)}>{dTY.name}</td>
-                      <td className="px-4 py-2 text-right num">{fmtCurrency(ty)}</td>
-                      <td className={`px-4 py-2 text-right num ${diff > 0 ? 'text-success' : diff < 0 ? 'text-danger' : ''}`}>
-                        {diff ? fmtCurrency(diff) : '—'}
-                      </td>
-                      <td className="px-4 py-2 text-right num text-muted-fg">{fmtCurrency(Number(r.LYR))}</td>
-                      <td className="px-4 py-2 text-right num">{fmtCurrency(Number(r.TYR))}</td>
-                    </tr>
-                  );
-                })}
+                ) : dailyDisplay.map((r) => (
+                  <tr key={r.DayMonth} className="border-t border-border">
+                    <td className="px-4 py-2 font-medium">{r.DayMonth}</td>
+                    <td className={dayCellClass(r.dLY)}
+                        title={align === 'weekday' && r.lyExists ? `Last year: ${MONTHS[monthIdx].slice(0, 3)} ${r.alignedDay}` : undefined}>
+                      {align === 'weekday'
+                        ? (r.lyExists ? `${r.dLY.name} ${r.alignedDay}` : '—')
+                        : r.dLY.name}
+                    </td>
+                    <td className="px-4 py-2 text-right num text-muted-fg">{r.ly == null ? '—' : fmtCurrency(r.ly)}</td>
+                    <td className={dayCellClass(r.dTY)}>{r.dTY.name}</td>
+                    <td className="px-4 py-2 text-right num">{fmtCurrency(r.ty)}</td>
+                    <td className={`px-4 py-2 text-right num ${r.diff > 0 ? 'text-success' : r.diff < 0 ? 'text-danger' : ''}`}>
+                      {r.diff ? fmtCurrency(r.diff) : '—'}
+                    </td>
+                    <td className="px-4 py-2 text-right num text-muted-fg">{fmtCurrency(r.lyRun)}</td>
+                    <td className="px-4 py-2 text-right num">{fmtCurrency(r.tyRun)}</td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </CardContent>
