@@ -503,6 +503,48 @@ export default function Dashboard() {
   const vendorAnalysisQ = useSqlQuery(vendorAnalysisSql, []);
   const topVendors = vendorAnalysisQ.data?.rows ?? [];
 
+  // Vendor revenue (this month) — SalesItemDetail has no per-line price, so we
+  // attribute each sale's revenue (SalespersonDaily) across its vendors in
+  // proportion to their item count on that sale. Isolated so a miss never
+  // breaks the vendor tiles.
+  const vendorRevSql = `
+    WITH m AS (SELECT MAX(SaleDate) AS d FROM SalesItemDetail),
+         items AS (
+           SELECT CAST(SaleNo AS VARCHAR(20)) AS SaleNo,
+                  LTRIM(RTRIM(VendorID))       AS vendor,
+                  COUNT(*)                     AS items
+           FROM SalesItemDetail CROSS JOIN m
+           WHERE YEAR(SaleDate) = YEAR(m.d) AND MONTH(SaleDate) = MONTH(m.d)
+             AND LEFT(CAST(SaleNo AS VARCHAR(20)), 1) = '${selectedBldg}'
+             AND VendorID IS NOT NULL AND LTRIM(RTRIM(VendorID)) NOT IN ('CFC', 'USLD', 'NONE', '')
+           GROUP BY CAST(SaleNo AS VARCHAR(20)), LTRIM(RTRIM(VendorID))
+         ),
+         tot AS (SELECT SaleNo, SUM(items) AS totItems FROM items GROUP BY SaleNo),
+         rev AS (
+           SELECT CAST(sd.SalesNo AS VARCHAR(20)) AS SaleNo, SUM(ISNULL(sd.SaleSplitAmt, 0)) AS amt
+           FROM SalespersonDaily sd CROSS JOIN m
+           WHERE YEAR(sd.SaleDate) = YEAR(m.d) AND MONTH(sd.SaleDate) = MONTH(m.d)
+             AND LEFT(CAST(sd.SalesNo AS VARCHAR(20)), 1) = '${selectedBldg}'
+           GROUP BY CAST(sd.SalesNo AS VARCHAR(20))
+         )
+    SELECT i.vendor AS vendor,
+           SUM(ISNULL(rev.amt, 0) * i.items * 1.0 / NULLIF(tot.totItems, 0)) AS revenue
+    FROM items i
+    JOIN tot ON tot.SaleNo = i.SaleNo
+    LEFT JOIN rev ON rev.SaleNo = i.SaleNo
+    GROUP BY i.vendor
+  `;
+  const vendorRevQ = useSqlQuery(vendorRevSql, []);
+  const vendorRevByName = useMemo(() => {
+    const map = {};
+    for (const r of (vendorRevQ.data?.rows ?? [])) map[String(r.vendor || '').trim()] = Number(r.revenue) || 0;
+    return map;
+  }, [vendorRevQ.data]);
+  const topVendorsRevTotal = useMemo(
+    () => topVendors.reduce((s, v) => s + (vendorRevByName[String(v.vendor || '').trim()] || 0), 0),
+    [topVendors, vendorRevByName],
+  );
+
   // ── derive: recency KPIs (yesterday / 7d) + this-month rollups.
   // Best/lowest day are calculated within the current calendar month so they
   // can't be skewed by an outlier day from the prior month.
@@ -1208,7 +1250,9 @@ export default function Dashboard() {
         <SectionHeading
           icon={Truck}
           title={`Vendor Wise Analysis · ${store === 'ARDEN' ? 'Arden (S1)' : 'Waynesville (S2)'}`}
-          hint="Top 5 vendors by units sold this month · click for their item-type breakdown"
+          hint={topVendorsRevTotal > 0
+            ? `Top 5 vendors · ${fmtCurrency(topVendorsRevTotal)} revenue · click for their item-type breakdown`
+            : 'Top 5 vendors by units sold this month · click for their item-type breakdown'}
         />
         <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
           {vendorAnalysisQ.isLoading ? (
@@ -1219,12 +1263,14 @@ export default function Dashboard() {
             const vendor = String(v.vendor || '').trim();
             const units  = Number(v.units) || 0;
             const skus   = Number(v.skus) || 0;
+            const vrev   = vendorRevByName[vendor] || 0;
             const accent = ['primary', 'emerald', 'amber', 'violet', 'sky'][i % 5];
             return (
               <HeroStat
                 key={vendor}
                 label={`#${i + 1} · ${vendor}`}
-                value={fmtNumber(units)}
+                value={vrev > 0 ? fmtCompactCurrency(vrev) : fmtNumber(units)}
+                fullValue={vrev > 0 ? fmtCurrency(vrev) : null}
                 icon={Truck}
                 accent={accent}
                 subtitle={`${fmtNumber(units)} item${units === 1 ? '' : 's'} · ${fmtNumber(skus)} SKU${skus === 1 ? '' : 's'}`}

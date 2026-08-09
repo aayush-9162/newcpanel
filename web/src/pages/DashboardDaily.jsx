@@ -33,7 +33,7 @@ export default function DashboardDaily({ store, selectedBldg }) {
   // ── KPI query — orders / revenue / customers (new vs returning) for the
   //    latest day on file. Correlated sub-selects all key off the same m.d.
   const kpiSql = `
-    WITH m AS (SELECT MAX(SaleDate) AS d FROM SalespersonDaily),
+    WITH m AS (SELECT MAX(SaleDate) AS d FROM SalespersonDaily WHERE LEFT(CAST(SalesNo AS VARCHAR(20)), 1) = '${selectedBldg}'),
          fc AS (
            SELECT sd.CustomerId, MIN(sd.SaleDate) AS firstSale
            FROM SalespersonDaily sd
@@ -67,7 +67,7 @@ export default function DashboardDaily({ store, selectedBldg }) {
 
   // ── Units sold (SalesItemDetail latest day).
   const unitsSql = `
-    WITH m AS (SELECT MAX(SaleDate) AS d FROM SalesItemDetail)
+    WITH m AS (SELECT MAX(SaleDate) AS d FROM SalesItemDetail WHERE LEFT(CAST(SaleNo AS VARCHAR(20)), 1) = '${selectedBldg}')
     SELECT (SELECT COUNT(*) FROM SalesItemDetail s
               WHERE s.SaleDate = m.d AND LEFT(CAST(s.SaleNo AS VARCHAR(20)), 1) = '${selectedBldg}') AS units
     FROM m
@@ -116,7 +116,7 @@ export default function DashboardDaily({ store, selectedBldg }) {
 
   // ── Top 5 vendors (units sold, latest day).
   const vendorSql = `
-    WITH m AS (SELECT MAX(SaleDate) AS d FROM SalesItemDetail)
+    WITH m AS (SELECT MAX(SaleDate) AS d FROM SalesItemDetail WHERE LEFT(CAST(SaleNo AS VARCHAR(20)), 1) = '${selectedBldg}')
     SELECT TOP 5 LTRIM(RTRIM(VendorID)) AS vendor,
                  COUNT(*)               AS units,
                  COUNT(DISTINCT ItemID) AS skus
@@ -131,9 +131,50 @@ export default function DashboardDaily({ store, selectedBldg }) {
   const vendorQ = useSqlQuery(vendorSql, []);
   const topVendors = vendorQ.data?.rows ?? [];
 
+  // Vendor revenue (latest day) — SalesItemDetail has no per-line price, so we
+  // attribute each sale's revenue (from SalespersonDaily, the same source the
+  // KPI tiles use) across its vendors in proportion to their item count on that
+  // sale. SaleNo (item table) and SalesNo (salesperson table) are the same sale
+  // ticket. Isolated from the units query so it can't break the vendor tiles.
+  const vendorRevSql = `
+    WITH m AS (SELECT MAX(SaleDate) AS d FROM SalesItemDetail WHERE LEFT(CAST(SaleNo AS VARCHAR(20)), 1) = '${selectedBldg}'),
+         items AS (
+           SELECT CAST(SaleNo AS VARCHAR(20)) AS SaleNo,
+                  LTRIM(RTRIM(VendorID))       AS vendor,
+                  COUNT(*)                     AS items
+           FROM SalesItemDetail CROSS JOIN m
+           WHERE SaleDate = m.d AND LEFT(CAST(SaleNo AS VARCHAR(20)), 1) = '${selectedBldg}'
+             AND VendorID IS NOT NULL AND LTRIM(RTRIM(VendorID)) NOT IN ('CFC', 'USLD', 'NONE', '')
+           GROUP BY CAST(SaleNo AS VARCHAR(20)), LTRIM(RTRIM(VendorID))
+         ),
+         tot AS (SELECT SaleNo, SUM(items) AS totItems FROM items GROUP BY SaleNo),
+         rev AS (
+           SELECT CAST(sd.SalesNo AS VARCHAR(20)) AS SaleNo, SUM(ISNULL(sd.SaleSplitAmt, 0)) AS amt
+           FROM SalespersonDaily sd CROSS JOIN m
+           WHERE sd.SaleDate = m.d AND LEFT(CAST(sd.SalesNo AS VARCHAR(20)), 1) = '${selectedBldg}'
+           GROUP BY CAST(sd.SalesNo AS VARCHAR(20))
+         )
+    SELECT i.vendor AS vendor,
+           SUM(ISNULL(rev.amt, 0) * i.items * 1.0 / NULLIF(tot.totItems, 0)) AS revenue
+    FROM items i
+    JOIN tot ON tot.SaleNo = i.SaleNo
+    LEFT JOIN rev ON rev.SaleNo = i.SaleNo
+    GROUP BY i.vendor
+  `;
+  const vendorRevQ = useSqlQuery(vendorRevSql, []);
+  const vendorRevByName = useMemo(() => {
+    const map = {};
+    for (const r of (vendorRevQ.data?.rows ?? [])) map[String(r.vendor || '').trim()] = Number(r.revenue) || 0;
+    return map;
+  }, [vendorRevQ.data]);
+  const topVendorsRevTotal = useMemo(
+    () => topVendors.reduce((s, v) => s + (vendorRevByName[String(v.vendor || '').trim()] || 0), 0),
+    [topVendors, vendorRevByName],
+  );
+
   // ── Item Sold by room (latest day).
   const itemCatSql = `
-    WITH m AS (SELECT MAX(SaleDate) AS d FROM SalesItemDetail),
+    WITH m AS (SELECT MAX(SaleDate) AS d FROM SalesItemDetail WHERE LEFT(CAST(SaleNo AS VARCHAR(20)), 1) = '${selectedBldg}'),
          base AS (
            SELECT UPPER(ISNULL(Description2,'')) AS d2
            FROM SalesItemDetail CROSS JOIN m
@@ -223,7 +264,7 @@ export default function DashboardDaily({ store, selectedBldg }) {
             subtitle: `Every distinct sale ticket rung up on ${dayLabel || 'the latest day'}`,
             detailsDb: 'sql',
             detailsSql: `
-              WITH m AS (SELECT MAX(SaleDate) AS d FROM SalespersonDaily)
+              WITH m AS (SELECT MAX(SaleDate) AS d FROM SalespersonDaily WHERE LEFT(CAST(SalesNo AS VARCHAR(20)), 1) = '${selectedBldg}')
               SELECT sd.SalesNo,
                      MAX(sd.CustomerName) AS CustomerName,
                      MAX(sd.SalesPerson)  AS SalesPerson,
@@ -275,7 +316,7 @@ export default function DashboardDaily({ store, selectedBldg }) {
               : 'No customers yesterday',
             detailsDb: 'sql',
             detailsSql: `
-              WITH m AS (SELECT MAX(SaleDate) AS d FROM SalespersonDaily),
+              WITH m AS (SELECT MAX(SaleDate) AS d FROM SalespersonDaily WHERE LEFT(CAST(SalesNo AS VARCHAR(20)), 1) = '${selectedBldg}'),
                    fc AS (
                      SELECT sd.CustomerId, MIN(sd.SaleDate) AS firstSale
                      FROM SalespersonDaily sd
@@ -318,50 +359,63 @@ export default function DashboardDaily({ store, selectedBldg }) {
       <SectionHeading
         icon={MapPin}
         title={`Area Wise Sales · Yesterday · ${storeLabel}`}
-        hint="Top 5 areas by revenue · click an area for its zip codes"
+        hint={yAreas.total > 0
+          ? `${fmtNumber(yAreas.areas.length)} areas · ${fmtCurrency(yAreas.total)} · click an area for its zip codes`
+          : 'Top areas by revenue · click an area for its zip codes'}
       />
-      <div className="overflow-hidden rounded-2xl border border-border bg-card">
-        <table className="w-full text-sm">
-          <thead className="bg-muted/60 text-[11px] uppercase tracking-wider text-muted-fg">
-            <tr>
-              <th className="px-4 py-2.5 text-left">Area</th>
-              <th className="px-4 py-2.5 text-right">Zip Codes</th>
-              <th className="px-4 py-2.5 text-right">Orders</th>
-              <th className="px-4 py-2.5 text-right">Revenue</th>
-              <th className="px-4 py-2.5 text-right">Share</th>
-              <th className="w-8 px-3 py-2.5" />
-            </tr>
-          </thead>
-          <tbody>
-            {areaQ.isLoading ? (
-              <tr><td colSpan={6} className="py-8 text-center text-muted-fg">Loading…</td></tr>
-            ) : top5Areas.length === 0 ? (
-              <tr><td colSpan={6} className="py-8 text-center text-muted-fg">No sales yesterday for {storeLabel}.</td></tr>
-            ) : top5Areas.map((a) => (
-              <tr
-                key={a.name}
-                className="group cursor-pointer border-t border-border hover:bg-muted/30"
-                onClick={openDetail(areaZipConfig(a))}
+      <div className="rounded-2xl border border-border bg-card p-4">
+        {areaQ.isLoading ? (
+          <div className="py-8 text-center text-sm text-muted-fg">Loading…</div>
+        ) : top5Areas.length === 0 ? (
+          <div className="py-8 text-center text-sm text-muted-fg">No sales yesterday for {storeLabel}.</div>
+        ) : (
+          <div className="space-y-2">
+            {top5Areas.map((a, i) => {
+              const share  = yAreas.total ? (a.revenue / yAreas.total) * 100 : 0;
+              const barPct = top5Areas[0].revenue ? Math.max(4, (a.revenue / top5Areas[0].revenue) * 100) : 0;
+              const grad = [
+                'from-blue-500 to-indigo-500',
+                'from-emerald-500 to-teal-500',
+                'from-amber-500 to-orange-500',
+                'from-violet-500 to-purple-500',
+                'from-sky-500 to-cyan-500',
+              ][i % 5];
+              return (
+                <button
+                  key={a.name}
+                  type="button"
+                  onClick={openDetail(areaZipConfig(a))}
+                  className="group flex w-full items-center gap-3 rounded-xl border border-border/60 bg-muted/20 p-3 text-left transition hover:-translate-y-0.5 hover:border-primary/40 hover:bg-muted/40 hover:shadow-sm"
+                >
+                  <span className={cn('grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-gradient-to-br text-sm font-extrabold text-white shadow', grad)}>
+                    {i + 1}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-baseline justify-between gap-2">
+                      <span className="truncate text-sm font-bold text-fg" title={a.name}>{a.name}</span>
+                      <span className="shrink-0 text-sm font-extrabold tabular-nums text-fg">{fmtCurrency(a.revenue)}</span>
+                    </div>
+                    <div className="mt-1.5 h-2 w-full overflow-hidden rounded-full bg-muted">
+                      <div className={cn('h-full rounded-full bg-gradient-to-r transition-all', grad)} style={{ width: `${barPct}%` }} />
+                    </div>
+                    <div className="mt-1 flex items-center justify-between gap-2 text-[11px] text-muted-fg">
+                      <span>{fmtNumber(a.zipCount)} zip{a.zipCount === 1 ? '' : 's'} · {fmtNumber(a.orders)} order{a.orders === 1 ? '' : 's'}</span>
+                      <span className="font-semibold tabular-nums">{share.toFixed(1)}% of day</span>
+                    </div>
+                  </div>
+                  <ChevronRight size={16} className="shrink-0 text-muted-fg opacity-0 transition group-hover:opacity-100" />
+                </button>
+              );
+            })}
+            {yAreas.areas.length > 5 && (
+              <button
+                type="button"
+                onClick={openDetail(allAreasConfig)}
+                className="mt-1 w-full rounded-xl border border-dashed border-border py-2.5 text-xs font-semibold text-primary transition hover:bg-muted"
               >
-                <td className="px-4 py-2 font-medium">{a.name}</td>
-                <td className="px-4 py-2 text-right num text-muted-fg">{fmtNumber(a.zipCount)}</td>
-                <td className="px-4 py-2 text-right num text-muted-fg">{fmtNumber(a.orders)}</td>
-                <td className="px-4 py-2 text-right num font-semibold">{fmtCurrency(a.revenue)}</td>
-                <td className="px-4 py-2 text-right num text-muted-fg">{yAreas.total ? ((a.revenue / yAreas.total) * 100).toFixed(1) : '0.0'}%</td>
-                <td className="px-3 py-2 text-right"><ChevronRight size={14} className="text-muted-fg opacity-0 transition group-hover:opacity-100" /></td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        {yAreas.areas.length > 5 && (
-          <div className="border-t border-border p-2 text-center">
-            <button
-              type="button"
-              onClick={openDetail(allAreasConfig)}
-              className="rounded-lg px-3 py-1.5 text-xs font-semibold text-primary transition hover:bg-muted"
-            >
-              See all {fmtNumber(yAreas.areas.length)} areas →
-            </button>
+                See all {fmtNumber(yAreas.areas.length)} areas →
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -370,7 +424,9 @@ export default function DashboardDaily({ store, selectedBldg }) {
       <SectionHeading
         icon={Truck}
         title={`Vendor Wise Analysis · Yesterday · ${storeLabel}`}
-        hint="Top 5 vendors by units sold yesterday · click for their item-type breakdown"
+        hint={topVendorsRevTotal > 0
+          ? `Top 5 vendors · ${fmtCurrency(topVendorsRevTotal)} revenue · click for their item-type breakdown`
+          : 'Top 5 vendors by units sold yesterday · click for their item-type breakdown'}
       />
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
         {vendorQ.isLoading ? (
@@ -381,12 +437,14 @@ export default function DashboardDaily({ store, selectedBldg }) {
           const vendor = String(v.vendor || '').trim();
           const vunits = Number(v.units) || 0;
           const skus   = Number(v.skus) || 0;
+          const vrev   = vendorRevByName[vendor] || 0;
           const accent = ['primary', 'emerald', 'amber', 'violet', 'sky'][i % 5];
           return (
             <HeroStat
               key={vendor}
               label={`#${i + 1} · ${vendor}`}
-              value={fmtNumber(vunits)}
+              value={vrev > 0 ? fmtCompactCurrency(vrev) : fmtNumber(vunits)}
+              fullValue={vrev > 0 ? fmtCurrency(vrev) : null}
               icon={Truck}
               accent={accent}
               subtitle={`${fmtNumber(vunits)} item${vunits === 1 ? '' : 's'} · ${fmtNumber(skus)} SKU${skus === 1 ? '' : 's'}`}
@@ -399,7 +457,7 @@ export default function DashboardDaily({ store, selectedBldg }) {
                 subtitle: `By item type · Stock Item / Star-SKU · ${fmtNumber(skus)} distinct SKUs`,
                 detailsDb: 'sql',
                 detailsSql: `
-                  WITH m AS (SELECT MAX(SaleDate) AS d FROM SalesItemDetail),
+                  WITH m AS (SELECT MAX(SaleDate) AS d FROM SalesItemDetail WHERE LEFT(CAST(SaleNo AS VARCHAR(20)), 1) = '${selectedBldg}'),
                        base AS (
                          SELECT LTRIM(RTRIM(ItemID)) AS ItemID,
                                 UPPER(ISNULL(Description2,'')) AS d2
@@ -461,7 +519,7 @@ export default function DashboardDaily({ store, selectedBldg }) {
                   subtitle: `${fmtNumber(runits)} item${runits === 1 ? '' : 's'} sold · by item type · click a type to see the items`,
                   detailsDb: 'sql',
                   detailsSql: `
-                    WITH m AS (SELECT MAX(SaleDate) AS d FROM SalesItemDetail),
+                    WITH m AS (SELECT MAX(SaleDate) AS d FROM SalesItemDetail WHERE LEFT(CAST(SaleNo AS VARCHAR(20)), 1) = '${selectedBldg}'),
                          base AS (
                            SELECT UPPER(ISNULL(Description2,'')) AS d2
                            FROM SalesItemDetail CROSS JOIN m
@@ -488,7 +546,7 @@ export default function DashboardDaily({ store, selectedBldg }) {
                     subtitle: `Individual ${row.item_type} pieces sold yesterday · same item on one sale is grouped with a Qty`,
                     detailsDb: 'sql',
                     detailsSql: `
-                      WITH m AS (SELECT MAX(SaleDate) AS d FROM SalesItemDetail),
+                      WITH m AS (SELECT MAX(SaleDate) AS d FROM SalesItemDetail WHERE LEFT(CAST(SaleNo AS VARCHAR(20)), 1) = '${selectedBldg}'),
                            base AS (
                              SELECT SaleDate, SaleNo,
                                     LTRIM(RTRIM(ItemID)) AS ItemID,
