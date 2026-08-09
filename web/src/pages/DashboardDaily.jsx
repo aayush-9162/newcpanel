@@ -638,19 +638,18 @@ function StatCard({ label, value, caption, icon: Icon, accent = 'sky', loading, 
       )}
     >
       <div className={cn('absolute inset-0 bg-gradient-to-br via-transparent to-transparent opacity-90', a.wash)} />
-      <div className="absolute -bottom-5 -right-5 opacity-[0.06] dark:opacity-[0.08]"><Icon size={130} strokeWidth={1.5} /></div>
       <div className="relative flex items-center justify-between gap-2">
         <span className="text-[10px] font-bold uppercase tracking-wider text-muted-fg leading-tight">{label}</span>
-        <div className={cn('grid h-8 w-8 shrink-0 place-items-center rounded-lg text-white shadow-lg ring-2 bg-gradient-to-br', a.grad, a.ring)}>
-          <Icon size={15} strokeWidth={2.25} />
+        <div className={cn('grid h-9 w-9 shrink-0 place-items-center rounded-xl text-white shadow-lg ring-2 bg-gradient-to-br transition-transform group-hover:scale-110', a.grad, a.ring)}>
+          <Icon size={17} strokeWidth={2.25} />
         </div>
       </div>
       {loading ? (
-        <div className="relative mt-6 h-10 w-24 animate-pulse rounded bg-muted/50" />
+        <div className="relative my-auto h-12 w-28 animate-pulse rounded bg-muted/50" />
       ) : (
-        <div className="relative mt-auto pt-5">
-          <div className={cn('text-4xl font-extrabold leading-none tabular-nums', a.text)}>{value}</div>
-          {caption && <div className="mt-2 text-[11px] font-medium text-muted-fg">{caption}</div>}
+        <div className="relative flex flex-1 flex-col items-center justify-center py-2 text-center">
+          <div className={cn('text-6xl font-extrabold leading-none tracking-tight tabular-nums', a.text)}>{value}</div>
+          {caption && <div className="mt-2 text-xs font-medium text-muted-fg">{caption}</div>}
         </div>
       )}
     </Comp>
