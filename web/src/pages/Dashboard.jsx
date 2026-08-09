@@ -74,6 +74,9 @@ export default function Dashboard() {
   const [store, setStore] = useState('ARDEN');                 // ARDEN | WAYNESVILLE
   const [category, setCategory] = useState('Written');         // Written | Delivered
   const [period, setPeriod] = useState('daily');               // daily (yesterday) | monthly
+  // The monthly view's queries are heavy; only run them when Monthly is active
+  // (in Daily mode the whole monthly section is hidden, so they'd be wasted).
+  const monthlyOn = { enabled: period === 'monthly' };
   const [month, setMonth] = useState(new Date().getMonth() + 1);
 
   // Detail-panel state — non-null value opens the MetricDrilldown modal.
@@ -95,7 +98,7 @@ export default function Dashboard() {
     ORDER BY TRY_CONVERT(DATE,
       LEFT(DayMonth, 2) + ' ' + LEFT(SUBSTRING(DayMonth, 4, 99), 3) + ' ' + CAST(YEAR(GETDATE()) AS VARCHAR), 106)
   `;
-  const dailyQ = useSqlQuery(dailySql, []);
+  const dailyQ = useSqlQuery(dailySql, [], monthlyOn);
   const daily = dailyQ.data?.rows ?? [];
 
   // ── 2) Month totals (LY / TY) — drives the target donut
@@ -106,7 +109,7 @@ export default function Dashboard() {
     FROM SalesAggrDayWiseReport
     WHERE ProfitCenter = '${store}' AND DayMonth LIKE '%${monthName}'
   `;
-  const monthTotQ = useSqlQuery(monthTotSql, []);
+  const monthTotQ = useSqlQuery(monthTotSql, [], monthlyOn);
   const totals = monthTotQ.data?.rows[0] ?? { thisYearTotal: 0, lastYearTotal: 0 };
 
   // ── 3) Year-wise monthly summary (for the bottom chart)
@@ -124,7 +127,7 @@ export default function Dashboard() {
       WHEN 'October' THEN 10 WHEN 'November' THEN 11 WHEN 'December' THEN 12
     END
   `;
-  const monthlyQ = useSqlQuery(monthlySql, []);
+  const monthlyQ = useSqlQuery(monthlySql, [], monthlyOn);
   const monthly = monthlyQ.data?.rows ?? [];
 
   // ── derive: comparative daily with running totals
@@ -249,7 +252,7 @@ export default function Dashboard() {
     WHERE DayMonth LIKE ?
     GROUP BY ProfitCenter, DayMonth
   `;
-  const companyDayQ = useSqlQuery(companyDaySql, [`%${curMonthName}`]);
+  const companyDayQ = useSqlQuery(companyDaySql, [`%${curMonthName}`], monthlyOn);
   const companyDayRows = companyDayQ.data?.rows ?? [];
 
   // 2) Month-wise per store — drives YTD totals, store scoreboard, monthly chart.
@@ -260,7 +263,7 @@ export default function Dashboard() {
     FROM SalesAggrMonthWiseReport
     GROUP BY ProfitCenter, MonthName
   `;
-  const companyMonthQ = useSqlQuery(companyMonthSql, []);
+  const companyMonthQ = useSqlQuery(companyMonthSql, [], monthlyOn);
   const companyMonthRows = companyMonthQ.data?.rows ?? [];
 
   // 3) Receivables + open-order backlog + open damages (MS SQL warehouse).
@@ -275,7 +278,7 @@ export default function Dashboard() {
       (SELECT COUNT(*)                     FROM DamagedItemsFormCapture
                                            WHERE Status IS NULL OR LTRIM(RTRIM(Status)) = '') AS damagesOpen
   `;
-  const opsMsQ = useSqlQuery(opsMsSql, []);
+  const opsMsQ = useSqlQuery(opsMsSql, [], monthlyOn);
   const opsMs = opsMsQ.data?.rows?.[0] ?? {};
 
   // 4) Service load + hot-button issues (MySQL app DB).
@@ -285,7 +288,7 @@ export default function Dashboard() {
       (SELECT COUNT(*) FROM svc_need_attention WHERE is_resolved = 0)    AS svcAttention,
       (SELECT COUNT(*) FROM hotbutton_issues   WHERE is_resolved = false) AS hotOpen
   `;
-  const opsMyQ = useMysqlQuery(opsMySql, []);
+  const opsMyQ = useMysqlQuery(opsMySql, [], monthlyOn);
   const opsMy = opsMyQ.data?.rows?.[0] ?? {};
 
   // 5) Sales pipeline — active leads (MySQL app DB).
@@ -296,7 +299,7 @@ export default function Dashboard() {
                 AND LOWER(TRIM(status)) NOT LIKE 'closed%' THEN 1 ELSE 0 END)  AS hotLeads
     FROM leads
   `;
-  const leadsQ = useMysqlQuery(leadsSql, []);
+  const leadsQ = useMysqlQuery(leadsSql, [], monthlyOn);
   const leadsRow = leadsQ.data?.rows?.[0] ?? {};
 
   // ── derive: company MTD (completed days only) + per-store MTD + sparkline
@@ -414,7 +417,7 @@ export default function Dashboard() {
     GROUP BY a.dt
     ORDER BY a.dt
   `;
-  const recencyQ = useSqlQuery(recencySql, []);
+  const recencyQ = useSqlQuery(recencySql, [], monthlyOn);
   const recencyRows = recencyQ.data?.rows ?? [];
 
   // Order counts + this-month revenue — all from SalespersonDaily, the
@@ -460,7 +463,7 @@ export default function Dashboard() {
         WHERE ${spdStore} AND YEAR(sd.SaleDate) = YEAR(m4.d) AND MONTH(sd.SaleDate) = MONTH(m4.d)
           AND sd.CustomerId IS NOT NULL AND LTRIM(RTRIM(sd.CustomerId)) <> '')          AS thisMonthCustomers
   `;
-  const orderCountQ = useSqlQuery(orderCountSql, []);
+  const orderCountQ = useSqlQuery(orderCountSql, [], monthlyOn);
   const orderCount = orderCountQ.data?.rows?.[0] ?? {};
 
   // ── Item Sold Analysis — categorize items sold THIS MONTH (selected store)
@@ -479,7 +482,7 @@ export default function Dashboard() {
          cat AS (SELECT ${roomCase} AS room FROM base)
     SELECT room, COUNT(*) AS units FROM cat GROUP BY room
   `;
-  const itemCatQ = useSqlQuery(itemCatSql, []);
+  const itemCatQ = useSqlQuery(itemCatSql, [], monthlyOn);
   const itemCatByRoom = useMemo(() => {
     const map = {};
     for (const r of (itemCatQ.data?.rows ?? [])) map[r.room] = Number(r.units) || 0;
@@ -522,7 +525,7 @@ export default function Dashboard() {
     FROM vagg LEFT JOIN vrev ON vrev.vendor = vagg.vendor
     ORDER BY revenue DESC
   `;
-  const vendorAnalysisQ = useSqlQuery(vendorAnalysisSql, []);
+  const vendorAnalysisQ = useSqlQuery(vendorAnalysisSql, [], monthlyOn);
   const topVendors = vendorAnalysisQ.data?.rows ?? [];
   const topVendorsRevTotal = topVendors.reduce((s, v) => s + (Number(v.revenue) || 0), 0);
 
@@ -543,7 +546,7 @@ export default function Dashboard() {
     HAVING SUM(S.wrt_sls) <> 0
     ORDER BY Revenue DESC
   `;
-  const monthAreaQ = useSqlQuery(monthAreaSql, []);
+  const monthAreaQ = useSqlQuery(monthAreaSql, [], monthlyOn);
   const monthAreas = useMemo(() => {
     const rows = monthAreaQ.data?.rows ?? [];
     const map = new Map();

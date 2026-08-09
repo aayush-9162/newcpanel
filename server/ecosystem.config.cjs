@@ -20,7 +20,11 @@ module.exports = {
       instances: 1,
       exec_mode: 'fork',
       autorestart: true,
-      max_memory_restart: '400M',
+      // Was 400M — too low for the data dashboard (many concurrent queries
+      // buffer result sets), so PM2 kept killing the process mid-request,
+      // aborting in-flight DB queries. 1G gives real headroom.
+      max_memory_restart: '1G',
+      node_args: '--max-old-space-size=896',
       env: {
         NODE_ENV: 'production',
         // PORT is read from server/.env. Uncomment to force it here instead:
