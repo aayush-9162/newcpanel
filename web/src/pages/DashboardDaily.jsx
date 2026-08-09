@@ -37,7 +37,7 @@ export default function DashboardDaily({ store, selectedBldg }) {
   // uses, and which reliably has the store's latest sales day). The day is the
   // store's most recent SaleWRT date.
   const kpiSql = `
-    WITH m AS (SELECT MAX(CAST(wrt_cng_bdat AS DATE)) AS d FROM SaleWRT WHERE wrt_pft_ctr = ${selectedBldg})
+    WITH m AS (SELECT MAX(CAST(wrt_cng_bdat AS DATE)) AS d FROM SaleWRT WHERE wrt_pft_ctr = ${selectedBldg} AND CAST(wrt_cng_bdat AS DATE) < CAST(GETDATE() AS DATE))
     SELECT
       (SELECT CONVERT(char(10), d, 23) FROM m) AS day,
       (SELECT COUNT(DISTINCT S.wrt_so_no) FROM SaleWRT S CROSS JOIN m
@@ -62,7 +62,7 @@ export default function DashboardDaily({ store, selectedBldg }) {
   // Only the day's customers are checked for prior history (fast anti-join),
   // instead of computing a first-sale date for every customer in the table.
   const custSql = `
-    WITH w AS (SELECT MAX(CAST(wrt_cng_bdat AS DATE)) AS d FROM SaleWRT WHERE wrt_pft_ctr = ${selectedBldg}),
+    WITH w AS (SELECT MAX(CAST(wrt_cng_bdat AS DATE)) AS d FROM SaleWRT WHERE wrt_pft_ctr = ${selectedBldg} AND CAST(wrt_cng_bdat AS DATE) < CAST(GETDATE() AS DATE)),
          dayc AS (
            SELECT DISTINCT sd.CustomerId
            FROM SalespersonDaily sd CROSS JOIN w
@@ -127,7 +127,7 @@ export default function DashboardDaily({ store, selectedBldg }) {
 
   // ── Units sold (SalesItemDetail latest day).
   const unitsSql = `
-    WITH m AS (SELECT MAX(SaleDate) AS d FROM SalesItemDetail WHERE LEFT(CAST(SaleNo AS VARCHAR(20)), 1) = '${selectedBldg}')
+    WITH m AS (SELECT MAX(SaleDate) AS d FROM SalesItemDetail WHERE LEFT(CAST(SaleNo AS VARCHAR(20)), 1) = '${selectedBldg}' AND SaleDate < CAST(GETDATE() AS DATE))
     SELECT (SELECT COUNT(*) FROM SalesItemDetail s
               WHERE s.SaleDate = m.d AND LEFT(CAST(s.SaleNo AS VARCHAR(20)), 1) = '${selectedBldg}') AS units
     FROM m
@@ -139,7 +139,7 @@ export default function DashboardDaily({ store, selectedBldg }) {
   const areaCityExpr = `LTRIM(RTRIM(COALESCE(NULLIF(LTRIM(RTRIM(SR.DeliveryCity)),''), NULLIF(LTRIM(RTRIM(SR.BillingCity)),''), 'Unknown')))`;
   const areaZipExpr  = `LTRIM(RTRIM(COALESCE(NULLIF(LTRIM(RTRIM(SR.DeliveryZip)),''),  NULLIF(LTRIM(RTRIM(SR.BillingZip)),''),  'Unknown')))`;
   const areaSql = `
-    WITH m AS (SELECT MAX(CAST(wrt_cng_bdat AS DATE)) AS d FROM SaleWRT WHERE wrt_pft_ctr = ${selectedBldg})
+    WITH m AS (SELECT MAX(CAST(wrt_cng_bdat AS DATE)) AS d FROM SaleWRT WHERE wrt_pft_ctr = ${selectedBldg} AND CAST(wrt_cng_bdat AS DATE) < CAST(GETDATE() AS DATE))
     SELECT ${areaCityExpr} AS City,
            ${areaZipExpr}  AS Zip,
            SUM(S.wrt_sls)              AS Revenue,
@@ -178,7 +178,7 @@ export default function DashboardDaily({ store, selectedBldg }) {
   //    per-line price, so each sale's revenue (from SaleWRT) is split across its
   //    vendors in proportion to item count; vendors are then ranked by that.
   const vendorSql = `
-    WITH m AS (SELECT MAX(SaleDate) AS d FROM SalesItemDetail WHERE LEFT(CAST(SaleNo AS VARCHAR(20)), 1) = '${selectedBldg}'),
+    WITH m AS (SELECT MAX(SaleDate) AS d FROM SalesItemDetail WHERE LEFT(CAST(SaleNo AS VARCHAR(20)), 1) = '${selectedBldg}' AND SaleDate < CAST(GETDATE() AS DATE)),
          det AS (
            SELECT CAST(SaleNo AS VARCHAR(20)) AS SaleNo,
                   LTRIM(RTRIM(VendorID))       AS vendor,
@@ -212,7 +212,7 @@ export default function DashboardDaily({ store, selectedBldg }) {
 
   // ── Item Sold by room (latest day).
   const itemCatSql = `
-    WITH m AS (SELECT MAX(SaleDate) AS d FROM SalesItemDetail WHERE LEFT(CAST(SaleNo AS VARCHAR(20)), 1) = '${selectedBldg}'),
+    WITH m AS (SELECT MAX(SaleDate) AS d FROM SalesItemDetail WHERE LEFT(CAST(SaleNo AS VARCHAR(20)), 1) = '${selectedBldg}' AND SaleDate < CAST(GETDATE() AS DATE)),
          base AS (
            SELECT UPPER(ISNULL(Description2,'')) AS d2
            FROM SalesItemDetail CROSS JOIN m
@@ -538,7 +538,7 @@ export default function DashboardDaily({ store, selectedBldg }) {
                 subtitle: `By item type · Stock Item / Star-SKU · ${fmtNumber(skus)} distinct SKUs`,
                 detailsDb: 'sql',
                 detailsSql: `
-                  WITH m AS (SELECT MAX(SaleDate) AS d FROM SalesItemDetail WHERE LEFT(CAST(SaleNo AS VARCHAR(20)), 1) = '${selectedBldg}'),
+                  WITH m AS (SELECT MAX(SaleDate) AS d FROM SalesItemDetail WHERE LEFT(CAST(SaleNo AS VARCHAR(20)), 1) = '${selectedBldg}' AND SaleDate < CAST(GETDATE() AS DATE)),
                        base AS (
                          SELECT LTRIM(RTRIM(ItemID)) AS ItemID,
                                 UPPER(ISNULL(Description2,'')) AS d2
@@ -600,7 +600,7 @@ export default function DashboardDaily({ store, selectedBldg }) {
                   subtitle: `${fmtNumber(runits)} item${runits === 1 ? '' : 's'} sold · by item type · click a type to see the items`,
                   detailsDb: 'sql',
                   detailsSql: `
-                    WITH m AS (SELECT MAX(SaleDate) AS d FROM SalesItemDetail WHERE LEFT(CAST(SaleNo AS VARCHAR(20)), 1) = '${selectedBldg}'),
+                    WITH m AS (SELECT MAX(SaleDate) AS d FROM SalesItemDetail WHERE LEFT(CAST(SaleNo AS VARCHAR(20)), 1) = '${selectedBldg}' AND SaleDate < CAST(GETDATE() AS DATE)),
                          base AS (
                            SELECT UPPER(ISNULL(Description2,'')) AS d2
                            FROM SalesItemDetail CROSS JOIN m
@@ -627,7 +627,7 @@ export default function DashboardDaily({ store, selectedBldg }) {
                     subtitle: `Individual ${row.item_type} pieces sold yesterday · same item on one sale is grouped with a Qty`,
                     detailsDb: 'sql',
                     detailsSql: `
-                      WITH m AS (SELECT MAX(SaleDate) AS d FROM SalesItemDetail WHERE LEFT(CAST(SaleNo AS VARCHAR(20)), 1) = '${selectedBldg}'),
+                      WITH m AS (SELECT MAX(SaleDate) AS d FROM SalesItemDetail WHERE LEFT(CAST(SaleNo AS VARCHAR(20)), 1) = '${selectedBldg}' AND SaleDate < CAST(GETDATE() AS DATE)),
                            base AS (
                              SELECT SaleDate, SaleNo,
                                     LTRIM(RTRIM(ItemID)) AS ItemID,
