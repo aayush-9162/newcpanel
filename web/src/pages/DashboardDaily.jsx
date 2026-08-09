@@ -50,7 +50,11 @@ export default function DashboardDaily({ store, selectedBldg }) {
   const revenue   = Number(k.revenue) || 0;
   const dayStr    = k.day || null;
   const dayLabel  = dayStr ? localDate(dayStr).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) : '';
-  const avgOrder  = orders ? revenue / orders : 0;
+  // Short "8 Aug" style date used in place of the word "Yesterday" on labels.
+  const dateShort = dayStr
+    ? `${localDate(dayStr).getDate()} ${localDate(dayStr).toLocaleDateString('en-US', { month: 'short' })}`
+    : 'Latest day';
+  const weekdayLong = dayStr ? localDate(dayStr).toLocaleDateString('en-US', { weekday: 'long' }) : '';
 
   // Customers (total / new / returning) for that same day — from SalespersonDaily
   // (the only source with first-purchase history), anchored on the SaleWRT day.
@@ -219,7 +223,7 @@ export default function DashboardDaily({ store, selectedBldg }) {
 
   // "See all areas" popup — every area, click one to drill into its zips.
   const allAreasConfig = {
-    title: `All Areas · Yesterday${dayLabel ? ` (${dayLabel})` : ''}`,
+    title: `All Areas · ${dateShort} · ${storeLabel}`,
     icon: MapPin,
     accent: 'primary',
     headline: fmtCurrency(yAreas.total),
@@ -243,7 +247,7 @@ export default function DashboardDaily({ store, selectedBldg }) {
       {/* ═══════════════ YESTERDAY headline ═══════════════ */}
       <HeroBanner icon={Calendar} decorIcon={Calendar} accent="emerald">
         <div className="text-[11px] font-bold uppercase tracking-widest text-emerald-700 dark:text-emerald-300">
-          {storeLabel} · Yesterday{dayLabel ? ` · ${dayLabel}` : ''}
+          {storeLabel}{weekdayLong ? ` · ${weekdayLong}` : ''} · {dateShort}
         </div>
         <div className="mt-1 flex items-baseline gap-3 flex-wrap">
           <span
@@ -259,16 +263,16 @@ export default function DashboardDaily({ store, selectedBldg }) {
       </HeroBanner>
 
       {/* ═══════════════ KPI tiles ═══════════════ */}
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <HeroStat
-          label="Orders · Yesterday"
+      <div className="grid grid-cols-1 items-stretch gap-4 sm:grid-cols-3">
+        <StatCard
+          label={`Orders · ${dateShort}`}
           value={fmtNumber(orders)}
+          caption={weekdayLong || 'Latest day'}
           icon={ShoppingCart}
           accent="sky"
-          subtitle={dayLabel || 'Latest day'}
           loading={kpiQ.isLoading}
           onClick={openDetail({
-            title: `Orders · Yesterday · ${storeLabel}`,
+            title: `Orders · ${dateShort} · ${storeLabel}`,
             icon: ShoppingCart,
             accent: 'sky',
             headline: fmtNumber(orders),
@@ -288,31 +292,22 @@ export default function DashboardDaily({ store, selectedBldg }) {
             detailsEmpty: 'No orders yesterday',
           })}
         />
-        <HeroStat
-          label="Items Sold · Yesterday"
+        <StatCard
+          label={`Items Sold · ${dateShort}`}
           value={fmtNumber(units)}
+          caption="units across all categories"
           icon={Boxes}
           accent="primary"
-          subtitle={units ? 'Units across all categories' : 'None sold'}
           loading={unitsQ.isLoading}
         />
-        <HeroStat
-          label="Avg Order Value"
-          value={fmtCompactCurrency(avgOrder)}
-          fullValue={fmtCurrency(avgOrder)}
-          icon={Activity}
-          accent="amber"
-          subtitle={orders ? `${fmtNumber(orders)} order${orders === 1 ? '' : 's'}` : 'No orders'}
-          loading={kpiQ.isLoading}
-        />
         <CustomerMixTile
-          label="Customers · Yesterday"
+          label={`Customers · ${dateShort}`}
           total={customers}
           newCount={newC}
           returning={returning}
           loading={custQ.isLoading}
           onClick={openDetail({
-            title: `Customers · Yesterday · ${storeLabel}`,
+            title: `Customers · ${dateShort} · ${storeLabel}`,
             icon: Users,
             accent: 'violet',
             headline: fmtNumber(customers),
@@ -361,7 +356,7 @@ export default function DashboardDaily({ store, selectedBldg }) {
       {/* ═══════════════ Area-wise sales (top 5 + see all) ═══════════════ */}
       <SectionHeading
         icon={MapPin}
-        title={`Area Wise Sales · Yesterday · ${storeLabel}`}
+        title={`Area Wise Sales · ${dateShort} · ${storeLabel}`}
         hint={yAreas.total > 0
           ? `${fmtNumber(yAreas.areas.length)} areas · ${fmtCurrency(yAreas.total)} · click an area for its zip codes`
           : 'Top areas by revenue · click an area for its zip codes'}
@@ -440,7 +435,7 @@ export default function DashboardDaily({ store, selectedBldg }) {
       {/* ═══════════════ Top 5 vendors (yesterday) ═══════════════ */}
       <SectionHeading
         icon={Truck}
-        title={`Vendor Wise Analysis · Yesterday · ${storeLabel}`}
+        title={`Vendor Wise Analysis · ${dateShort} · ${storeLabel}`}
         hint={topVendorsRevTotal > 0
           ? `Top 5 vendors · ${fmtCurrency(topVendorsRevTotal)} revenue · click for their item-type breakdown`
           : 'Top 5 vendors by units sold yesterday · click for their item-type breakdown'}
@@ -467,7 +462,7 @@ export default function DashboardDaily({ store, selectedBldg }) {
               subtitle={`${fmtNumber(vunits)} item${vunits === 1 ? '' : 's'} · ${fmtNumber(skus)} SKU${skus === 1 ? '' : 's'}`}
               loading={vendorQ.isLoading}
               onClick={openDetail({
-                title: `${vendor} · Items Sold Yesterday · ${storeLabel}`,
+                title: `${vendor} · Items Sold · ${dateShort} · ${storeLabel}`,
                 icon: Truck,
                 accent,
                 headline: `${fmtNumber(vunits)} items`,
@@ -511,8 +506,8 @@ export default function DashboardDaily({ store, selectedBldg }) {
       {/* ═══════════════ Item Sold Analysis (yesterday) ═══════════════ */}
       <SectionHeading
         icon={Package}
-        title={`Item Sold Analysis · Yesterday · ${storeLabel}`}
-        hint="Units sold yesterday by category · click a category for the item list"
+        title={`Item Sold Analysis · ${dateShort} · ${storeLabel}`}
+        hint="Units sold by category · click a category for the item list"
       />
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         {['Living Room', 'Bedroom', 'Dining Room', 'Accessories']
@@ -529,7 +524,7 @@ export default function DashboardDaily({ store, selectedBldg }) {
                 subtitle={runits ? `${fmtNumber(runits)} item${runits === 1 ? '' : 's'} sold yesterday` : 'None sold yesterday'}
                 loading={itemCatQ.isLoading}
                 onClick={openDetail({
-                  title: `${room.key} · Items Sold Yesterday · ${storeLabel}`,
+                  title: `${room.key} · Items Sold · ${dateShort} · ${storeLabel}`,
                   icon: room.icon,
                   accent: room.accent,
                   headline: fmtNumber(runits),
@@ -624,6 +619,44 @@ function SectionHeading({ icon: Icon, title, hint }) {
   );
 }
 
+// StatCard — a headline KPI tile (big number + caption). Styled to match
+// CustomerMixTile and stretches to the row height so the KPI row reads evenly.
+const STAT_ACCENTS = {
+  sky:     { border: 'border-sky-500/40',   glow: 'shadow-[0_8px_30px_-12px_rgba(14,165,233,0.45)]', wash: 'from-sky-500/20 dark:from-sky-500/25',   grad: 'from-sky-500 to-cyan-500',    ring: 'ring-sky-500/30',   text: 'text-sky-600 dark:text-sky-300' },
+  primary: { border: 'border-blue-500/40',  glow: 'shadow-[0_8px_30px_-12px_rgba(59,130,246,0.45)]', wash: 'from-blue-500/20 dark:from-blue-500/25', grad: 'from-blue-500 to-indigo-500', ring: 'ring-blue-500/30',  text: 'text-blue-600 dark:text-blue-300' },
+};
+function StatCard({ label, value, caption, icon: Icon, accent = 'sky', loading, onClick }) {
+  const a = STAT_ACCENTS[accent] || STAT_ACCENTS.sky;
+  const Comp = onClick ? 'button' : 'div';
+  return (
+    <Comp
+      {...(onClick ? { type: 'button', onClick } : {})}
+      className={cn(
+        'group relative flex h-full flex-col overflow-hidden rounded-2xl border bg-card p-4 text-left transition-all duration-300',
+        a.border, a.glow,
+        onClick && 'cursor-pointer hover:-translate-y-1 hover:shadow-[0_20px_40px_-15px_rgba(0,0,0,0.25)]',
+      )}
+    >
+      <div className={cn('absolute inset-0 bg-gradient-to-br via-transparent to-transparent opacity-90', a.wash)} />
+      <div className="absolute -bottom-5 -right-5 opacity-[0.06] dark:opacity-[0.08]"><Icon size={130} strokeWidth={1.5} /></div>
+      <div className="relative flex items-center justify-between gap-2">
+        <span className="text-[10px] font-bold uppercase tracking-wider text-muted-fg leading-tight">{label}</span>
+        <div className={cn('grid h-8 w-8 shrink-0 place-items-center rounded-lg text-white shadow-lg ring-2 bg-gradient-to-br', a.grad, a.ring)}>
+          <Icon size={15} strokeWidth={2.25} />
+        </div>
+      </div>
+      {loading ? (
+        <div className="relative mt-6 h-10 w-24 animate-pulse rounded bg-muted/50" />
+      ) : (
+        <div className="relative mt-auto pt-5">
+          <div className={cn('text-4xl font-extrabold leading-none tabular-nums', a.text)}>{value}</div>
+          {caption && <div className="mt-2 text-[11px] font-medium text-muted-fg">{caption}</div>}
+        </div>
+      )}
+    </Comp>
+  );
+}
+
 // CustomerMixTile — total customers with a New vs Returning split bar.
 function CustomerMixTile({ label, total, newCount, returning, loading, onClick }) {
   const newPct = total > 0 ? Math.round((newCount / total) * 100) : 0;
@@ -633,7 +666,7 @@ function CustomerMixTile({ label, total, newCount, returning, loading, onClick }
       type="button"
       onClick={onClick}
       className={cn(
-        'group relative overflow-hidden rounded-2xl border bg-card text-left transition-all duration-300',
+        'group relative h-full overflow-hidden rounded-2xl border bg-card text-left transition-all duration-300',
         'border-violet-500/40 shadow-[0_8px_30px_-12px_rgba(139,92,246,0.45)]',
         onClick && 'cursor-pointer hover:-translate-y-1 hover:shadow-[0_20px_40px_-15px_rgba(0,0,0,0.25)]',
       )}
