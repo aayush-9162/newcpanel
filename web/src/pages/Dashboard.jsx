@@ -521,11 +521,10 @@ export default function Dashboard() {
          ),
          tot AS (SELECT SaleNo, SUM(items) AS totItems FROM items GROUP BY SaleNo),
          rev AS (
-           SELECT CAST(sd.SalesNo AS VARCHAR(20)) AS SaleNo, SUM(ISNULL(sd.SaleSplitAmt, 0)) AS amt
-           FROM SalespersonDaily sd CROSS JOIN m
-           WHERE YEAR(sd.SaleDate) = YEAR(m.d) AND MONTH(sd.SaleDate) = MONTH(m.d)
-             AND LEFT(CAST(sd.SalesNo AS VARCHAR(20)), 1) = '${selectedBldg}'
-           GROUP BY CAST(sd.SalesNo AS VARCHAR(20))
+           SELECT CAST(wrt_so_no AS VARCHAR(20)) AS SaleNo, SUM(wrt_sls) AS amt
+           FROM SaleWRT
+           WHERE wrt_pft_ctr = ${selectedBldg}
+           GROUP BY CAST(wrt_so_no AS VARCHAR(20))
          )
     SELECT i.vendor AS vendor,
            SUM(ISNULL(rev.amt, 0) * i.items * 1.0 / NULLIF(tot.totItems, 0)) AS revenue
