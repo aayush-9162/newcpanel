@@ -58,21 +58,23 @@ export default function DashboardDaily({ store, selectedBldg }) {
 
   // Customers (total / new / returning) for that same day — from SalespersonDaily
   // (the only source with first-purchase history), anchored on the SaleWRT day.
+  // Only the day's customers are checked for prior history (fast anti-join),
+  // instead of computing a first-sale date for every customer in the table.
   const custSql = `
     WITH w AS (SELECT MAX(CAST(wrt_cng_bdat AS DATE)) AS d FROM SaleWRT WHERE wrt_pft_ctr = ${selectedBldg}),
-         fc AS (
-           SELECT sd.CustomerId, MIN(sd.SaleDate) AS firstSale
-           FROM SalespersonDaily sd
-           WHERE sd.CustomerId IS NOT NULL AND LTRIM(RTRIM(sd.CustomerId)) <> ''
-           GROUP BY sd.CustomerId
+         dayc AS (
+           SELECT DISTINCT sd.CustomerId
+           FROM SalespersonDaily sd CROSS JOIN w
+           WHERE ${spdStore} AND CAST(sd.SaleDate AS DATE) = w.d
+             AND sd.CustomerId IS NOT NULL AND LTRIM(RTRIM(sd.CustomerId)) <> ''
          )
     SELECT
-      (SELECT COUNT(DISTINCT sd.CustomerId) FROM SalespersonDaily sd CROSS JOIN w
-         WHERE ${spdStore} AND CAST(sd.SaleDate AS DATE) = w.d
-           AND sd.CustomerId IS NOT NULL AND LTRIM(RTRIM(sd.CustomerId)) <> '')      AS customers,
-      (SELECT COUNT(DISTINCT sd.CustomerId) FROM SalespersonDaily sd
-         INNER JOIN fc ON fc.CustomerId = sd.CustomerId CROSS JOIN w
-         WHERE ${spdStore} AND CAST(fc.firstSale AS DATE) = w.d AND CAST(sd.SaleDate AS DATE) = w.d) AS newCustomers
+      (SELECT COUNT(*) FROM dayc) AS customers,
+      (SELECT COUNT(*) FROM dayc c CROSS JOIN w
+         WHERE NOT EXISTS (
+           SELECT 1 FROM SalespersonDaily s2
+           WHERE s2.CustomerId = c.CustomerId AND CAST(s2.SaleDate AS DATE) < w.d
+         )) AS newCustomers
   `;
   const custQ = useSqlQuery(custSql, []);
   const cust = custQ.data?.rows?.[0] ?? {};
@@ -113,6 +115,12 @@ export default function DashboardDaily({ store, selectedBldg }) {
       const full = empMap[c.toUpperCase()];
       return full ? (full.trim().split(/\s+/)[0] || full) : c; // first name only
     })
+    .filter(Boolean)
+    .join(' / ') || String(raw || '—');
+  // Full name(s) — used for the hover tooltip.
+  const resolveSpFull = (raw) => String(raw || '')
+    .split('/')
+    .map((part) => { const c = part.trim(); return empMap[c.toUpperCase()] || c; })
     .filter(Boolean)
     .join(' / ') || String(raw || '—');
 
@@ -415,6 +423,7 @@ export default function DashboardDaily({ store, selectedBldg }) {
         ) : topSalespeople.map((s, i) => {
           const code = String(s.salesperson || '—').trim();
           const name = resolveSp(code);
+          const fullName = resolveSpFull(code);
           const spOrders = Number(s.orders) || 0;
           const spRev    = Number(s.revenue) || 0;
           const medal = [
@@ -456,7 +465,7 @@ export default function DashboardDaily({ store, selectedBldg }) {
                 {i + 1}
               </span>
               <div className="min-w-0 flex-1">
-                <div className="truncate text-sm font-bold text-fg" title={name}>{name}</div>
+                <div className="truncate text-sm font-bold text-fg" title={fullName}>{name}</div>
                 <div className="truncate text-xs text-muted-fg">
                   {fmtNumber(spOrders)} sale{spOrders === 1 ? '' : 's'}{name !== code ? ` · ${code}` : ''}
                 </div>
