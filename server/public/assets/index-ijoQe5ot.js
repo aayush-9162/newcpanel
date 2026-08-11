@@ -680,8 +680,10 @@ In order to be iterable, non-array objects must have a [Symbol.iterator]() metho
     WITH m AS (SELECT CAST(MAX(wrt_cng_bdat) AS DATE) AS d FROM SaleWRT WHERE wrt_pft_ctr = ${t} AND wrt_cng_bdat < CAST(GETDATE() AS DATE))
     SELECT
       (SELECT CONVERT(char(10), d, 23) FROM m) AS day,
-      (SELECT COUNT(DISTINCT S.wrt_so_no) FROM SaleWRT S CROSS JOIN m
-         WHERE S.wrt_cng_bdat >= m.d AND S.wrt_cng_bdat < DATEADD(DAY, 1, m.d) AND S.wrt_pft_ctr = ${t}) AS orders,
+      (SELECT COUNT(*) FROM (
+         SELECT S.wrt_so_no FROM SaleWRT S CROSS JOIN m
+           WHERE S.wrt_cng_bdat >= m.d AND S.wrt_cng_bdat < DATEADD(DAY, 1, m.d) AND S.wrt_pft_ctr = ${t}
+           GROUP BY S.wrt_so_no HAVING SUM(S.wrt_sls) > 0) t) AS orders,
       (SELECT SUM(S.wrt_sls) FROM SaleWRT S CROSS JOIN m
          WHERE S.wrt_cng_bdat >= m.d AND S.wrt_cng_bdat < DATEADD(DAY, 1, m.d) AND S.wrt_pft_ctr = ${t}) AS revenue
   `,c=ze(l,[]),u=((Ye=(Ze=c.data)==null?void 0:Ze.rows)==null?void 0:Ye[0])??{},f=Number(u.orders)||0,d=Number(u.revenue)||0,p=u.day||null,m=p?np(p).toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric"}):"",h=p?`${np(p).getDate()} ${np(p).toLocaleDateString("en-US",{month:"short"})}`:"Latest day",g=p?np(p).toLocaleDateString("en-US",{weekday:"long"}):"",b=`
@@ -769,6 +771,7 @@ In order to be iterable, non-array objects must have a [Symbol.iterator]() metho
               FROM SaleWRT S
               WHERE S.wrt_cng_bdat >= '${p}' AND S.wrt_cng_bdat < DATEADD(DAY, 1, '${p}') AND S.wrt_pft_ctr = ${t}
               GROUP BY CAST(S.wrt_so_no AS VARCHAR(20))
+              HAVING SUM(S.wrt_sls) > 0
               ORDER BY amount DESC
             `:void 0,detailsColumns:[{key:"SaleNo",label:"Sale #"},{key:"amount",label:"Amount",align:"right",render:re=>s.jsx("span",{className:"font-semibold",children:Y(Number(re.amount)||0)})}],detailsEmpty:"No orders yesterday"})}),s.jsx(ip,{label:`Items Sold · ${h}`,value:U(V),caption:f?`${(V/f).toFixed(1)} per order`:"units sold",icon:ba,accent:"primary",loading:$.isLoading}),s.jsx(ip,{label:`Customers · ${h}`,value:U(S),caption:S?`${U(w)} new · ${U(y)} returning`:"no customers",icon:Sa,accent:"violet",loading:v.isLoading,onClick:o({title:`Customers · ${h} · ${r}`,icon:Sa,accent:"violet",headline:U(S),subtitle:S?`${U(w)} new · ${U(y)} returning on ${m||"the latest day"}`:"No customers yesterday",detailsDb:"sql",detailsSql:p?`
               WITH fc AS (

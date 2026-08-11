@@ -40,8 +40,10 @@ export default function DashboardDaily({ store, selectedBldg }) {
     WITH m AS (SELECT CAST(MAX(wrt_cng_bdat) AS DATE) AS d FROM SaleWRT WHERE wrt_pft_ctr = ${selectedBldg} AND wrt_cng_bdat < CAST(GETDATE() AS DATE))
     SELECT
       (SELECT CONVERT(char(10), d, 23) FROM m) AS day,
-      (SELECT COUNT(DISTINCT S.wrt_so_no) FROM SaleWRT S CROSS JOIN m
-         WHERE S.wrt_cng_bdat >= m.d AND S.wrt_cng_bdat < DATEADD(DAY, 1, m.d) AND S.wrt_pft_ctr = ${selectedBldg}) AS orders,
+      (SELECT COUNT(*) FROM (
+         SELECT S.wrt_so_no FROM SaleWRT S CROSS JOIN m
+           WHERE S.wrt_cng_bdat >= m.d AND S.wrt_cng_bdat < DATEADD(DAY, 1, m.d) AND S.wrt_pft_ctr = ${selectedBldg}
+           GROUP BY S.wrt_so_no HAVING SUM(S.wrt_sls) > 0) t) AS orders,
       (SELECT SUM(S.wrt_sls) FROM SaleWRT S CROSS JOIN m
          WHERE S.wrt_cng_bdat >= m.d AND S.wrt_cng_bdat < DATEADD(DAY, 1, m.d) AND S.wrt_pft_ctr = ${selectedBldg}) AS revenue
   `;
@@ -343,6 +345,7 @@ export default function DashboardDaily({ store, selectedBldg }) {
               FROM SaleWRT S
               WHERE S.wrt_cng_bdat >= '${dayStr}' AND S.wrt_cng_bdat < DATEADD(DAY, 1, '${dayStr}') AND S.wrt_pft_ctr = ${selectedBldg}
               GROUP BY CAST(S.wrt_so_no AS VARCHAR(20))
+              HAVING SUM(S.wrt_sls) > 0
               ORDER BY amount DESC
             ` : undefined,
             detailsColumns: [
