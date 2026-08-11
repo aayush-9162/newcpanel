@@ -51,6 +51,21 @@ const PERIOD_CLAUSE = {
   ALL:   `1 = 1`,
 };
 
+// Same store + period expressed against SaleWRT (wrt_pft_ctr / wrt_cng_bdat),
+// sargable so the DB can seek by date. Used for vendor-revenue attribution.
+const STORE_CLAUSE_WRT = {
+  ALL: `S.wrt_pft_ctr IN (1, 2)`,
+  S1:  `S.wrt_pft_ctr = 1`,
+  S2:  `S.wrt_pft_ctr = 2`,
+};
+const PERIOD_CLAUSE_WRT = {
+  MONTH: `S.wrt_cng_bdat >= DATEFROMPARTS(YEAR(m.d), MONTH(m.d), 1) AND S.wrt_cng_bdat < DATEADD(month, 1, DATEFROMPARTS(YEAR(m.d), MONTH(m.d), 1))`,
+  Q:     `S.wrt_cng_bdat >= DATEADD(month, -2, DATEFROMPARTS(YEAR(m.d), MONTH(m.d), 1))`,
+  YTD:   `S.wrt_cng_bdat >= DATEFROMPARTS(YEAR(m.d), 1, 1)`,
+  Y12:   `S.wrt_cng_bdat >= DATEADD(month, -11, DATEFROMPARTS(YEAR(m.d), MONTH(m.d), 1))`,
+  ALL:   `1 = 1`,
+};
+
 // ── CAT code → friendly label + room grouping + accent ──────────────────────
 const CAT_META = {
   UPS: { label: 'Upholstery · Stationary', group: 'Living Room', accent: 'primary' },
@@ -224,8 +239,8 @@ export default function ItemSoldAnalysis() {
          tot AS (SELECT SaleNo, SUM(items) AS totItems FROM det GROUP BY SaleNo),
          rev AS (
            SELECT CAST(S.wrt_so_no AS VARCHAR(20)) AS SaleNo, SUM(S.wrt_sls) AS amt
-           FROM SaleWRT S
-           WHERE CAST(S.wrt_so_no AS VARCHAR(20)) IN (SELECT SaleNo FROM tot)
+           FROM SaleWRT S CROSS JOIN m
+           WHERE ${STORE_CLAUSE_WRT[store]} AND ${PERIOD_CLAUSE_WRT[period]}
            GROUP BY CAST(S.wrt_so_no AS VARCHAR(20))
          )
     SELECT TOP 10 d.vendor AS vendor,
