@@ -16,12 +16,27 @@ const TONES = {
 
 export function Topbar({ title, subtitle }) {
   const [dark, setDark] = useState(() => document.documentElement.classList.contains('dark'));
+  const [refreshing, setRefreshing] = useState(false);
   const qc = useQueryClient();
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', dark);
     localStorage.setItem('theme', dark ? 'dark' : 'light');
   }, [dark]);
+
+  // Refresh: clear the server-side cache, then force every mounted query to
+  // refetch fresh data (invalidate alone doesn't always re-run them).
+  const handleRefresh = async () => {
+    if (refreshing) return;
+    setRefreshing(true);
+    try {
+      await clearServerCache();
+      await qc.invalidateQueries();
+      await qc.refetchQueries({ type: 'active' });
+    } finally {
+      setRefreshing(false);
+    }
+  };
 
   return (
     <header className="sticky top-0 z-10 flex h-16 items-center gap-3 border-b border-border bg-bg/80 px-5 backdrop-blur">
@@ -59,9 +74,10 @@ export function Topbar({ title, subtitle }) {
             variant="outline"
             size="icon"
             title="Refresh — clears the cache and reloads fresh data"
-            onClick={async () => { await clearServerCache(); qc.invalidateQueries(); }}
+            onClick={handleRefresh}
+            disabled={refreshing}
           >
-            <RefreshCw size={16} />
+            <RefreshCw size={16} className={refreshing ? 'animate-spin' : ''} />
           </Button>
           <Button variant="outline" size="icon" title="Toggle theme" onClick={() => setDark((d) => !d)}>
             {dark ? <Sun size={16} /> : <Moon size={16} />}
