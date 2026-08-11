@@ -523,8 +523,17 @@ export default function DashboardDaily({ store, selectedBldg }) {
         icon={Truck}
         title={`Vendor Wise Analysis · ${dateShort} · ${storeLabel}`}
         hint={topVendorsRevTotal > 0
-          ? `Top 5 vendors · ${fmtCurrency(topVendorsRevTotal)} revenue · click for their item-type breakdown`
-          : 'Top 5 vendors by units sold yesterday · click for their item-type breakdown'}
+          ? `Top 5 · ${fmtCurrency(topVendorsRevTotal)} revenue`
+          : 'Top 5 vendors by revenue'}
+        action={topVendors.length > 0 ? (
+          <button
+            type="button"
+            onClick={openDetail(allVendorsConfig)}
+            className="inline-flex items-center gap-1 rounded-lg border border-border px-2.5 py-1 text-xs font-semibold text-primary transition hover:bg-muted"
+          >
+            See all <ChevronRight size={13} />
+          </button>
+        ) : null}
       />
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
         {vendorQ.isLoading ? (
@@ -589,17 +598,6 @@ export default function DashboardDaily({ store, selectedBldg }) {
           );
         })}
       </div>
-      {topVendors.length > 0 && (
-        <div className="text-center">
-          <button
-            type="button"
-            onClick={openDetail(allVendorsConfig)}
-            className="inline-flex items-center gap-1 rounded-lg border border-border px-3 py-1.5 text-xs font-semibold text-primary transition hover:bg-muted"
-          >
-            See all vendors <ChevronRight size={13} />
-          </button>
-        </div>
-      )}
 
       {/* ═══════════════ Item Sold Analysis (yesterday) ═══════════════ */}
       <SectionHeading
@@ -701,7 +699,7 @@ export default function DashboardDaily({ store, selectedBldg }) {
 }
 
 // SectionHeading — local copy (keeps this view self-contained).
-function SectionHeading({ icon: Icon, title, hint }) {
+function SectionHeading({ icon: Icon, title, hint, action }) {
   return (
     <div className="flex items-end justify-between gap-3 pt-2">
       <div className="flex items-center gap-2">
@@ -712,7 +710,10 @@ function SectionHeading({ icon: Icon, title, hint }) {
         )}
         <h2 className="text-base font-bold uppercase tracking-wider text-fg">{title}</h2>
       </div>
-      {hint && <span className="hidden text-[11px] italic text-muted-fg sm:block">{hint}</span>}
+      <div className="flex shrink-0 items-center gap-3">
+        {hint && <span className="hidden text-[11px] italic text-muted-fg sm:block">{hint}</span>}
+        {action}
+      </div>
     </div>
   );
 }

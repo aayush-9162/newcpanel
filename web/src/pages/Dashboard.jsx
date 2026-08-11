@@ -1354,8 +1354,31 @@ export default function Dashboard() {
           icon={Truck}
           title={`Vendor Wise Analysis · ${store === 'ARDEN' ? 'Arden (S1)' : 'Waynesville (S2)'}`}
           hint={topVendorsRevTotal > 0
-            ? `Top 5 vendors · ${fmtCurrency(topVendorsRevTotal)} revenue · click for their item-type breakdown`
-            : 'Top 5 vendors by units sold this month · click for their item-type breakdown'}
+            ? `Top 5 · ${fmtCurrency(topVendorsRevTotal)} revenue`
+            : 'Top 5 vendors by revenue'}
+          action={topVendors.length > 0 ? (
+            <button
+              type="button"
+              onClick={openDetail({
+                title: `All Vendors · ${monthName} · ${store === 'ARDEN' ? 'Arden (S1)' : 'Waynesville (S2)'}`,
+                icon: Truck,
+                accent: 'primary',
+                subtitle: 'Every vendor with sales this month, ranked by revenue',
+                detailsDb: 'sql',
+                detailsSql: allVendorsSql,
+                detailsColumns: [
+                  { key: 'vendor',  label: 'Vendor', render: (r) => <span className="font-semibold">{r.vendor}</span> },
+                  { key: 'revenue', label: 'Revenue', align: 'right', render: (r) => <span className="font-semibold">{fmtCurrency(Number(r.revenue) || 0)}</span> },
+                  { key: 'units',   label: 'Items', align: 'right', render: (r) => fmtNumber(Number(r.units) || 0) },
+                  { key: 'skus',    label: 'SKUs', align: 'right', render: (r) => fmtNumber(Number(r.skus) || 0) },
+                ],
+                detailsEmpty: 'No vendor sales this month',
+              })}
+              className="inline-flex items-center gap-1 rounded-lg border border-border px-2.5 py-1 text-xs font-semibold text-primary transition hover:bg-muted"
+            >
+              See all <ChevronRight size={13} />
+            </button>
+          ) : null}
         />
         <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
           {vendorAnalysisQ.isLoading ? (
@@ -1423,31 +1446,6 @@ export default function Dashboard() {
             );
           })}
         </div>
-        {topVendors.length > 0 && (
-          <div className="text-center">
-            <button
-              type="button"
-              onClick={openDetail({
-                title: `All Vendors · ${monthName} · ${store === 'ARDEN' ? 'Arden (S1)' : 'Waynesville (S2)'}`,
-                icon: Truck,
-                accent: 'primary',
-                subtitle: 'Every vendor with sales this month, ranked by revenue',
-                detailsDb: 'sql',
-                detailsSql: allVendorsSql,
-                detailsColumns: [
-                  { key: 'vendor',  label: 'Vendor', render: (r) => <span className="font-semibold">{r.vendor}</span> },
-                  { key: 'revenue', label: 'Revenue', align: 'right', render: (r) => <span className="font-semibold">{fmtCurrency(Number(r.revenue) || 0)}</span> },
-                  { key: 'units',   label: 'Items', align: 'right', render: (r) => fmtNumber(Number(r.units) || 0) },
-                  { key: 'skus',    label: 'SKUs', align: 'right', render: (r) => fmtNumber(Number(r.skus) || 0) },
-                ],
-                detailsEmpty: 'No vendor sales this month',
-              })}
-              className="inline-flex items-center gap-1 rounded-lg border border-border px-3 py-1.5 text-xs font-semibold text-primary transition hover:bg-muted"
-            >
-              See all vendors <ChevronRight size={13} />
-            </button>
-          </div>
-        )}
         </>
         )}
       </div>
@@ -1542,7 +1540,7 @@ function CustomerMixTile({ label, total, newCount, returning, loading, onClick }
 }
 
 // SectionHeading — used between major dashboard sections to make scanning easy.
-function SectionHeading({ icon: Icon, title, hint }) {
+function SectionHeading({ icon: Icon, title, hint, action }) {
   return (
     <div className="flex items-end justify-between gap-3 pt-2">
       <div className="flex items-center gap-2">
@@ -1553,7 +1551,10 @@ function SectionHeading({ icon: Icon, title, hint }) {
         )}
         <h2 className="text-sm font-bold uppercase tracking-wider text-fg">{title}</h2>
       </div>
-      {hint && <span className="text-[11px] text-muted-fg italic" title={hint}>{hint}</span>}
+      <div className="flex shrink-0 items-center gap-3">
+        {hint && <span className="hidden text-[11px] italic text-muted-fg sm:block" title={hint}>{hint}</span>}
+        {action}
+      </div>
     </div>
   );
 }
