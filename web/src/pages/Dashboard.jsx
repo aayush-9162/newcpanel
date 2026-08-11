@@ -1376,7 +1376,7 @@ export default function Dashboard() {
               })}
               className="inline-flex items-center gap-1 rounded-lg border border-border px-2.5 py-1 text-xs font-semibold text-primary transition hover:bg-muted"
             >
-              See all <ChevronRight size={13} />
+              See all vendors <ChevronRight size={13} />
             </button>
           ) : null}
         />
@@ -1543,18 +1543,16 @@ function CustomerMixTile({ label, total, newCount, returning, loading, onClick }
 function SectionHeading({ icon: Icon, title, hint, action }) {
   return (
     <div className="flex items-end justify-between gap-3 pt-2">
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2.5">
         {Icon && (
           <span className="grid h-7 w-7 place-items-center rounded-lg bg-primary/10 text-primary">
             <Icon size={15} />
           </span>
         )}
         <h2 className="text-sm font-bold uppercase tracking-wider text-fg">{title}</h2>
-      </div>
-      <div className="flex shrink-0 items-center gap-3">
-        {hint && <span className="hidden text-[11px] italic text-muted-fg sm:block" title={hint}>{hint}</span>}
         {action}
       </div>
+      {hint && <span className="hidden shrink-0 text-[11px] italic text-muted-fg sm:block" title={hint}>{hint}</span>}
     </div>
   );
 }
