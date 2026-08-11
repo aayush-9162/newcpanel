@@ -265,7 +265,7 @@ export default function ItemSoldAnalysis() {
   }, [storeCmpQ.data]);
 
   const lineupPie = useMemo(() => ([
-    { name: 'Lineup (catalog)', value: lineup },
+    { name: 'Stock Item (catalog)', value: lineup },
     { name: 'Star-SKU (special order)', value: star },
   ]), [lineup, star]);
 
@@ -315,14 +315,14 @@ export default function ItemSoldAnalysis() {
     title: `${vendor} · Items Sold · ${STORE_LABEL[store]}`,
     icon: Truck, accent,
     headline: `${fmtNumber(unitCount)} units`,
-    subtitle: `${periodLabel} · split into Lineup / Star-SKU`,
+    subtitle: `${periodLabel} · split into Stock Item / Star SKU`,
     detailsDb: 'sql',
     detailsSql: `
       WITH m AS (SELECT MAX(SaleDate) AS d FROM SalesItemDetail)
       SELECT TOP 400 LTRIM(RTRIM(ItemID)) AS ItemID,
              MAX(Description2) AS descr,
              MAX(CAT) AS cat,
-             MAX(CASE WHEN LEFT(LTRIM(RTRIM(ItemID)), 1) = '*' THEN 'Star-SKU' ELSE 'Lineup' END) AS kind,
+             MAX(CASE WHEN LEFT(LTRIM(RTRIM(ItemID)), 1) = '*' THEN 'Star SKU' ELSE 'Stock Item' END) AS kind,
              COUNT(*) AS units
       FROM SalesItemDetail CROSS JOIN m
       WHERE ${scope} AND LTRIM(RTRIM(VendorID)) = '${vendor.replace(/'/g, "''")}'
@@ -335,7 +335,7 @@ export default function ItemSoldAnalysis() {
       { key: 'cat',    label: 'Category', render: (r) => catLabel(r.cat) },
       { key: 'kind',   label: 'Type', render: (r) => (
         <span className={cn('inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold',
-          r.kind === 'Star-SKU'
+          r.kind === 'Star SKU'
             ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-200'
             : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-200')}>
           {r.kind}
@@ -390,7 +390,7 @@ export default function ItemSoldAnalysis() {
             </span>
           </div>
           <div className="mt-2 text-xs text-muted-fg">
-            <strong className="text-fg">{fmtNumber(lineup)}</strong> catalog (lineup) · <strong className="text-fg">{fmtNumber(star)}</strong> special-order (★ SKU) · {lineupPct}% from the lineup
+            <strong className="text-fg">{fmtNumber(lineup)}</strong> catalog (stock item) · <strong className="text-fg">{fmtNumber(star)}</strong> special-order (★ SKU) · {lineupPct}% stock items
           </div>
         </HeroBanner>
 
@@ -402,7 +402,7 @@ export default function ItemSoldAnalysis() {
             subtitle={units ? `${(units / Math.max(skus, 1)).toFixed(1)} units per SKU avg` : null} loading={loading} />
           <HeroStat label="Vendors Sold" value={fmtNumber(vendors)} icon={Truck} accent="emerald"
             subtitle="Distinct suppliers with a sale" loading={loading} />
-          <HeroStat label="Lineup vs ★ SKU"
+          <HeroStat label="Stock Item vs ★ SKU"
             value={<span className="inline-flex items-baseline gap-1.5">
               <span className="text-emerald-600 dark:text-emerald-400">{fmtNumber(lineup)}</span>
               <span className="text-muted-fg/70 text-base font-normal">/</span>
@@ -485,7 +485,7 @@ export default function ItemSoldAnalysis() {
 
           <Card>
             <CardHeader>
-              <CardTitle className="flex items-center gap-2"><Star size={16} className="text-amber-500" /> Lineup vs Star-SKU</CardTitle>
+              <CardTitle className="flex items-center gap-2"><Star size={16} className="text-amber-500" /> Stock Item vs Star SKU</CardTitle>
               <CardDescription>Catalog SKUs vs special orders</CardDescription>
             </CardHeader>
             <CardContent>
