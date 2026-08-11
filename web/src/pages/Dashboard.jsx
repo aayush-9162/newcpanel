@@ -24,7 +24,7 @@ import {
   Target, TrendingUp, TrendingDown, Calendar, DollarSign, Activity, Trophy,
   Building2, Receipt, Wrench, Flame, Users, PackageX, Truck,
   ArrowUpRight, ArrowDownRight, AlertTriangle, ShoppingCart, User, Tag, Heart,
-  Sparkles, ChevronRight, Sofa, BedDouble, Utensils, Lamp, Package, MapPin,
+  Sparkles, ChevronRight, Sofa, BedDouble, Utensils, Lamp, Package, MapPin, Boxes,
 } from 'lucide-react';
 import { cn } from '@/lib/cn';
 import { MetricDrilldown } from '@/components/MetricDrilldown';
@@ -530,6 +530,10 @@ export default function Dashboard() {
   `;
   const topItemsQ = useSqlQuery(topItemsSql, [], monthlyOn);
   const topItems = topItemsQ.data?.rows ?? [];
+  // Same items, ranked by revenue instead of quantity.
+  const topItemsRevSql = topItemsSql.replace('ORDER BY qty DESC', 'ORDER BY revenue DESC');
+  const topItemsRevQ = useSqlQuery(topItemsRevSql, [], monthlyOn);
+  const topItemsRev = topItemsRevQ.data?.rows ?? [];
 
   // ── Vendor Wise Analysis — top 5 vendors by units sold this month (selected
   //    store). Clicking a vendor drills into their item-type breakdown.
@@ -1484,36 +1488,16 @@ export default function Dashboard() {
           })}
         </div>
 
-        {/* ─── Top Selling Items (this month, selected store) ─── */}
+        {/* ─── Top Selling Items — units vs revenue (this month, selected store) ─── */}
         <SectionHeading
           icon={Package}
           title={`Top Selling Items · ${store === 'ARDEN' ? 'Arden (S1)' : 'Waynesville (S2)'}`}
-          hint="Top 5 by quantity this month · with vendor + revenue"
+          hint="Top 5 by units sold vs by revenue · this month"
         />
-        <Card>
-          <CardContent className="space-y-1 p-3">
-            {topItemsQ.isLoading ? (
-              <div className="py-6 text-center text-xs text-muted-fg">Loading…</div>
-            ) : topItems.length === 0 ? (
-              <div className="py-6 text-center text-xs text-muted-fg">No items sold this month.</div>
-            ) : topItems.map((r, i) => {
-              const grad = ['from-blue-500 to-indigo-500', 'from-emerald-500 to-teal-500', 'from-amber-500 to-orange-500', 'from-violet-500 to-purple-500', 'from-sky-500 to-cyan-500'][i % 5];
-              const id = trimStr(r.ItemID);
-              return (
-                <div key={id + i} className="flex items-center gap-2.5 rounded-lg px-2 py-1.5 transition hover:bg-muted/40">
-                  <span className={cn('grid h-6 w-6 shrink-0 place-items-center rounded-md bg-gradient-to-br text-xs font-bold text-white', grad)}>{i + 1}</span>
-                  <span className="shrink-0 font-mono text-xs font-semibold">
-                    {id}{id.startsWith('*') && <span className="ml-0.5 text-amber-500" title="Star / special-order SKU">★</span>}
-                  </span>
-                  <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] font-semibold text-muted-fg">{trimStr(r.vendor) || '—'}</span>
-                  <span className="min-w-0 flex-1 truncate text-[11px] text-muted-fg" title={trimStr(r.descr)}>{trimStr(r.descr) || '—'}</span>
-                  <span className="shrink-0 text-[11px] tabular-nums text-muted-fg">{fmtNumber(Number(r.qty) || 0)} sold</span>
-                  <span className="w-20 shrink-0 text-right text-sm font-bold tabular-nums">{fmtCurrency(Number(r.revenue) || 0)}</span>
-                </div>
-              );
-            })}
-          </CardContent>
-        </Card>
+        <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
+          <TopItemList title="Top 5 · By Units Sold" icon={Boxes} iconClass="text-primary" metric="qty" rows={topItems} loading={topItemsQ.isLoading} />
+          <TopItemList title="Top 5 · By Revenue" icon={TrendingUp} iconClass="text-emerald-500" metric="revenue" rows={topItemsRev} loading={topItemsRevQ.isLoading} />
+        </div>
         </>
         )}
       </div>
@@ -1604,6 +1588,50 @@ function CustomerMixTile({ label, total, newCount, returning, loading, onClick }
         )}
       </div>
     </button>
+  );
+}
+
+// TopItemList — compact ranked list of best-selling items (used twice: by units
+// and by revenue). `metric` decides which figure is emphasized on the right.
+function TopItemList({ title, icon: Icon, iconClass, metric, rows, loading }) {
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle className="flex items-center gap-2 text-sm">{Icon && <Icon size={15} className={iconClass} />} {title}</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-1 p-3 pt-0">
+        {loading ? (
+          <div className="py-6 text-center text-xs text-muted-fg">Loading…</div>
+        ) : rows.length === 0 ? (
+          <div className="py-6 text-center text-xs text-muted-fg">No items this month.</div>
+        ) : rows.map((r, i) => {
+          const grad = ['from-blue-500 to-indigo-500', 'from-emerald-500 to-teal-500', 'from-amber-500 to-orange-500', 'from-violet-500 to-purple-500', 'from-sky-500 to-cyan-500'][i % 5];
+          const id = trimStr(r.ItemID);
+          const qtyStr = `${fmtNumber(Number(r.qty) || 0)} sold`;
+          const revStr = fmtCurrency(Number(r.revenue) || 0);
+          const primary   = metric === 'revenue' ? revStr : qtyStr;
+          const secondary = metric === 'revenue' ? qtyStr : revStr;
+          return (
+            <div key={id + i} className="flex items-center gap-2 rounded-lg px-2 py-1.5 transition hover:bg-muted/40">
+              <span className={cn('grid h-6 w-6 shrink-0 place-items-center rounded-md bg-gradient-to-br text-xs font-bold text-white', grad)}>{i + 1}</span>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-1.5">
+                  <span className="shrink-0 font-mono text-xs font-semibold">
+                    {id}{id.startsWith('*') && <span className="ml-0.5 text-amber-500" title="Star / special-order SKU">★</span>}
+                  </span>
+                  <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] font-semibold text-muted-fg">{trimStr(r.vendor) || '—'}</span>
+                </div>
+                <div className="truncate text-[11px] text-muted-fg" title={trimStr(r.descr)}>{trimStr(r.descr) || '—'}</div>
+              </div>
+              <div className="shrink-0 text-right">
+                <div className="text-sm font-bold tabular-nums">{primary}</div>
+                <div className="text-[10px] tabular-nums text-muted-fg">{secondary}</div>
+              </div>
+            </div>
+          );
+        })}
+      </CardContent>
+    </Card>
   );
 }
 
