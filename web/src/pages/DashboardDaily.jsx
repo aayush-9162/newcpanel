@@ -325,14 +325,14 @@ export default function DashboardDaily({ store, selectedBldg }) {
       </HeroBanner>
 
       {/* ═══════════════ KPI tiles (compact) ═══════════════ */}
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <StatCard
-          label={`Orders · ${dateShort}`}
-          value={fmtNumber(orders)}
-          caption={weekdayLong || 'Latest day'}
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        <DualStatCard
+          label={`Orders & Items · ${dateShort}`}
           icon={ShoppingCart}
           accent="sky"
-          loading={kpiQ.isLoading}
+          loading={kpiQ.isLoading || unitsQ.isLoading}
+          primary={{ value: fmtNumber(orders), label: 'Orders', caption: weekdayLong || 'Latest day' }}
+          secondary={{ value: fmtNumber(units), label: 'Items Sold', caption: orders ? `${(units / orders).toFixed(1)} per order` : 'units sold' }}
           onClick={openDetail({
             title: `Orders · ${dateShort} · ${storeLabel}`,
             icon: ShoppingCart,
@@ -354,14 +354,6 @@ export default function DashboardDaily({ store, selectedBldg }) {
             ],
             detailsEmpty: 'No orders yesterday',
           })}
-        />
-        <StatCard
-          label={`Items Sold · ${dateShort}`}
-          value={fmtNumber(units)}
-          caption={orders ? `${(units / orders).toFixed(1)} per order` : 'units sold'}
-          icon={Boxes}
-          accent="primary"
-          loading={unitsQ.isLoading}
         />
         <StatCard
           label={`Customers · ${dateShort}`}
@@ -751,6 +743,49 @@ const STAT_ACCENTS = {
   violet:  { border: 'border-violet-500/40', grad: 'from-violet-500 to-purple-500', ring: 'ring-violet-500/30', text: 'text-violet-600 dark:text-violet-300', wash: 'from-violet-500/15 dark:from-violet-500/20' },
   emerald: { border: 'border-emerald-500/40',grad: 'from-emerald-500 to-teal-500',  ring: 'ring-emerald-500/30',text: 'text-emerald-600 dark:text-emerald-300',wash: 'from-emerald-500/15 dark:from-emerald-500/20' },
 };
+// DualStatCard — two related metrics on one tile, split by a divider. The whole
+// tile is clickable (opens the primary metric's drilldown).
+function DualStatCard({ label, icon: Icon, accent = 'sky', loading, onClick,
+                        primary, secondary }) {
+  const a = STAT_ACCENTS[accent] || STAT_ACCENTS.sky;
+  const Comp = onClick ? 'button' : 'div';
+  return (
+    <Comp
+      {...(onClick ? { type: 'button', onClick } : {})}
+      className={cn(
+        'group relative w-full overflow-hidden rounded-xl border bg-card p-3.5 text-left transition-all duration-200',
+        a.border,
+        onClick && 'cursor-pointer hover:-translate-y-0.5 hover:shadow-md',
+      )}
+    >
+      <div className={cn('absolute inset-0 bg-gradient-to-br via-transparent to-transparent opacity-80', a.wash)} />
+      <div className="relative flex items-start justify-between gap-2">
+        <div className="truncate text-[10px] font-bold uppercase tracking-wider text-muted-fg">{label}</div>
+        <div className={cn('grid h-8 w-8 shrink-0 place-items-center rounded-lg text-white shadow ring-2 bg-gradient-to-br', a.grad, a.ring)}>
+          <Icon size={15} strokeWidth={2.25} />
+        </div>
+      </div>
+      {loading ? (
+        <div className="relative mt-2 h-7 w-full animate-pulse rounded bg-muted/50" />
+      ) : (
+        <div className="relative mt-2 flex items-stretch gap-3">
+          <div className="min-w-0 flex-1">
+            <div className={cn('text-3xl font-extrabold leading-none tabular-nums', a.text)}>{primary.value}</div>
+            <div className="mt-1 truncate text-[10px] font-semibold uppercase tracking-wide text-muted-fg">{primary.label}</div>
+            {primary.caption && <div className="mt-0.5 truncate text-[11px] font-medium text-muted-fg">{primary.caption}</div>}
+          </div>
+          <div className="w-px shrink-0 self-stretch bg-border" />
+          <div className="min-w-0 flex-1">
+            <div className="text-3xl font-extrabold leading-none tabular-nums text-fg">{secondary.value}</div>
+            <div className="mt-1 truncate text-[10px] font-semibold uppercase tracking-wide text-muted-fg">{secondary.label}</div>
+            {secondary.caption && <div className="mt-0.5 truncate text-[11px] font-medium text-muted-fg">{secondary.caption}</div>}
+          </div>
+        </div>
+      )}
+    </Comp>
+  );
+}
+
 function StatCard({ label, value, caption, icon: Icon, accent = 'sky', loading, onClick }) {
   const a = STAT_ACCENTS[accent] || STAT_ACCENTS.sky;
   const Comp = onClick ? 'button' : 'div';
