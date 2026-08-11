@@ -280,7 +280,7 @@ export default function SCR() {
     const offset = raw > 3 ? raw - 7 : raw;   // nearest signed shift (−3..+3)
 
     let lyRun = 0, tyRun = 0;
-    return dailyRows.map((r) => {
+    const rows = dailyRows.map((r) => {
       const dayNum = parseInt(String(r.DayMonth).split('-')[0], 10);
       const ty = Number(r.ThisYear) || 0;
       let ly, alignedDay = null, lyExists = true;
@@ -299,6 +299,11 @@ export default function SCR() {
       const dLY = align === 'weekday' ? dTY : weekdayFor(dayNum, monthIdx, SCR_CURRENT_YEAR - 1);
       return { DayMonth: r.DayMonth, ty, ly, diff, lyRun, tyRun, dTY, dLY, alignedDay, lyExists };
     });
+    // Trim trailing days that haven't happened yet — show through the last day
+    // that actually has This-Year sales (adding $0 future rows just adds noise).
+    let lastIdx = -1;
+    for (let i = 0; i < rows.length; i++) if (rows[i].ty > 0) lastIdx = i;
+    return lastIdx >= 0 ? rows.slice(0, lastIdx + 1) : rows;
   }, [dailyRows, align, monthIdx]);
 
   const monthlyRows = monthly.data?.rows ?? [];
@@ -605,8 +610,8 @@ export default function SCR() {
                   <th className="px-3 py-2.5 text-center">Day · TY</th>
                   <th className="px-4 py-2.5 text-right">This Year</th>
                   <th className="px-4 py-2.5 text-right">Δ</th>
-                  <th className="px-4 py-2.5 text-right">LY Running</th>
-                  <th className="px-4 py-2.5 text-right">TY Running</th>
+                  <th className="px-4 py-2.5 text-right">LY Total</th>
+                  <th className="px-4 py-2.5 text-right">TY Total</th>
                 </tr>
               </thead>
               <tbody>
