@@ -532,6 +532,8 @@ export default function Dashboard() {
   const vendorAnalysisQ = useSqlQuery(vendorAnalysisSql, [], monthlyOn);
   const topVendors = vendorAnalysisQ.data?.rows ?? [];
   const topVendorsRevTotal = topVendors.reduce((s, v) => s + (Number(v.revenue) || 0), 0);
+  // Same query without the TOP 5 cap — powers the "See all vendors" popup.
+  const allVendorsSql = vendorAnalysisSql.replace('SELECT TOP 5 vagg.vendor', 'SELECT vagg.vendor');
 
   // ── Area-wise sales for the selected month + store (SaleWRT + SaleRV),
   //    grouped by delivery zip and rolled up to the area (city).
@@ -1421,6 +1423,31 @@ export default function Dashboard() {
             );
           })}
         </div>
+        {topVendors.length > 0 && (
+          <div className="text-center">
+            <button
+              type="button"
+              onClick={openDetail({
+                title: `All Vendors · ${monthName} · ${store === 'ARDEN' ? 'Arden (S1)' : 'Waynesville (S2)'}`,
+                icon: Truck,
+                accent: 'primary',
+                subtitle: 'Every vendor with sales this month, ranked by revenue',
+                detailsDb: 'sql',
+                detailsSql: allVendorsSql,
+                detailsColumns: [
+                  { key: 'vendor',  label: 'Vendor', render: (r) => <span className="font-semibold">{r.vendor}</span> },
+                  { key: 'revenue', label: 'Revenue', align: 'right', render: (r) => <span className="font-semibold">{fmtCurrency(Number(r.revenue) || 0)}</span> },
+                  { key: 'units',   label: 'Items', align: 'right', render: (r) => fmtNumber(Number(r.units) || 0) },
+                  { key: 'skus',    label: 'SKUs', align: 'right', render: (r) => fmtNumber(Number(r.skus) || 0) },
+                ],
+                detailsEmpty: 'No vendor sales this month',
+              })}
+              className="inline-flex items-center gap-1 rounded-lg border border-border px-3 py-1.5 text-xs font-semibold text-primary transition hover:bg-muted"
+            >
+              See all vendors <ChevronRight size={13} />
+            </button>
+          </div>
+        )}
         </>
         )}
       </div>
