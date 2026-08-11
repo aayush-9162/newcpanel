@@ -125,6 +125,23 @@ export default function DashboardDaily({ store, selectedBldg }) {
     .filter(Boolean)
     .join(' / ') || String(raw || '—');
 
+  // Same query without the TOP 3 cap — powers the "See all salespersons" popup.
+  const allSpSql = spSql.replace('TOP 3 ', '');
+  const allSalespeopleConfig = {
+    title: `All Salespersons · ${dateShort} · ${storeLabel}`,
+    icon: Award,
+    accent: 'amber',
+    subtitle: 'Everyone with sales that day, ranked by revenue',
+    detailsDb: 'sql',
+    detailsSql: dayStr ? allSpSql : undefined,
+    detailsColumns: [
+      { key: 'salesperson', label: 'Salesperson', render: (r) => <span className="font-semibold" title={resolveSpFull(r.salesperson)}>{resolveSp(r.salesperson)}</span> },
+      { key: 'orders',      label: 'Sales', align: 'right', render: (r) => fmtNumber(Number(r.orders) || 0) },
+      { key: 'revenue',     label: 'Revenue', align: 'right', render: (r) => <span className="font-semibold">{fmtCurrency(Number(r.revenue) || 0)}</span> },
+    ],
+    detailsEmpty: 'No salesperson sales that day',
+  };
+
   // ── Units sold (SalesItemDetail latest day).
   const unitsSql = `
     WITH m AS (SELECT MAX(SaleDate) AS d FROM SalesItemDetail WHERE LEFT(CAST(SaleNo AS VARCHAR(20)), 1) = '${selectedBldg}' AND SaleDate < CAST(GETDATE() AS DATE))
@@ -450,7 +467,16 @@ export default function DashboardDaily({ store, selectedBldg }) {
       <SectionHeading
         icon={Award}
         title={`Top Salespersons · ${dateShort} · ${storeLabel}`}
-        hint="By revenue on the day · sales count + total revenue"
+        hint="By revenue on the day · sales count + revenue"
+        action={topSalespeople.length > 0 ? (
+          <button
+            type="button"
+            onClick={openDetail(allSalespeopleConfig)}
+            className="inline-flex items-center gap-1 rounded-lg border border-border px-2.5 py-1 text-xs font-semibold text-primary transition hover:bg-muted"
+          >
+            See all salespersons <ChevronRight size={13} />
+          </button>
+        ) : null}
       />
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         {spQ.isLoading ? (
