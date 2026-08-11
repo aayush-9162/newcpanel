@@ -491,6 +491,46 @@ export default function Dashboard() {
     return map;
   }, [itemCatQ.data]);
 
+  // ── Top 5 best-selling items this month (qty + vendor + revenue). Revenue is
+  //    each line's equal share of its sale's SaleWRT revenue, summed per item.
+  const topItemsSql = `
+    WITH m AS (SELECT MAX(SaleDate) AS d FROM SalesItemDetail),
+         mb AS (SELECT DATEFROMPARTS(YEAR(d), MONTH(d), 1) AS mStart,
+                       DATEADD(MONTH, 1, DATEFROMPARTS(YEAR(d), MONTH(d), 1)) AS mEnd FROM m),
+         det AS (
+           SELECT CAST(SaleNo AS VARCHAR(20)) AS SaleNo,
+                  LTRIM(RTRIM(ItemID))   AS ItemID,
+                  LTRIM(RTRIM(VendorID)) AS vendor,
+                  LTRIM(RTRIM(ISNULL(Description2,''))) AS descr
+           FROM SalesItemDetail CROSS JOIN mb
+           WHERE SaleDate >= mb.mStart AND SaleDate < mb.mEnd
+             AND LEFT(CAST(SaleNo AS VARCHAR(20)), 1) = '${selectedBldg}'
+             AND ItemID IS NOT NULL AND LTRIM(RTRIM(ItemID)) <> ''
+         ),
+         saleTot AS (SELECT SaleNo, COUNT(*) AS totItems FROM det GROUP BY SaleNo),
+         saleRev AS (
+           SELECT CAST(S.wrt_so_no AS VARCHAR(20)) AS SaleNo, SUM(S.wrt_sls) AS amt
+           FROM SaleWRT S CROSS JOIN mb
+           WHERE S.wrt_pft_ctr = ${selectedBldg}
+             AND S.wrt_cng_bdat >= mb.mStart AND S.wrt_cng_bdat < mb.mEnd
+           GROUP BY CAST(S.wrt_so_no AS VARCHAR(20))
+         ),
+         lines AS (
+           SELECT d.ItemID, d.vendor, d.descr,
+                  ISNULL(sr.amt, 0) * 1.0 / NULLIF(st.totItems, 0) AS lineRev
+           FROM det d JOIN saleTot st ON st.SaleNo = d.SaleNo
+           LEFT JOIN saleRev sr ON sr.SaleNo = d.SaleNo
+         )
+    SELECT TOP 5 ItemID,
+           MAX(descr)  AS descr,
+           MAX(vendor) AS vendor,
+           COUNT(*)    AS qty,
+           SUM(lineRev) AS revenue
+    FROM lines GROUP BY ItemID ORDER BY qty DESC
+  `;
+  const topItemsQ = useSqlQuery(topItemsSql, [], monthlyOn);
+  const topItems = topItemsQ.data?.rows ?? [];
+
   // ── Vendor Wise Analysis — top 5 vendors by units sold this month (selected
   //    store). Clicking a vendor drills into their item-type breakdown.
   // Top 5 vendors ranked BY REVENUE (this month). SalesItemDetail has no
@@ -1443,6 +1483,49 @@ export default function Dashboard() {
             );
           })}
         </div>
+
+        {/* ─── Top Selling Items (this month, selected store) ─── */}
+        <SectionHeading
+          icon={Package}
+          title={`Top Selling Items · ${store === 'ARDEN' ? 'Arden (S1)' : 'Waynesville (S2)'}`}
+          hint="Top 5 by quantity this month · with vendor + revenue"
+        />
+        <Card>
+          <CardContent className="p-0 overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-muted/60 text-[11px] uppercase tracking-wider text-muted-fg">
+                <tr>
+                  <th className="px-4 py-2.5 text-left">#</th>
+                  <th className="px-4 py-2.5 text-left">Item</th>
+                  <th className="px-4 py-2.5 text-left">Vendor</th>
+                  <th className="px-4 py-2.5 text-right">Qty</th>
+                  <th className="px-4 py-2.5 text-right">Revenue</th>
+                </tr>
+              </thead>
+              <tbody>
+                {topItemsQ.isLoading ? (
+                  <tr><td colSpan={5} className="py-8 text-center text-muted-fg">Loading…</td></tr>
+                ) : topItems.length === 0 ? (
+                  <tr><td colSpan={5} className="py-8 text-center text-muted-fg">No items sold this month.</td></tr>
+                ) : topItems.map((r, i) => (
+                  <tr key={trimStr(r.ItemID) + i} className="border-t border-border hover:bg-muted/30">
+                    <td className="px-4 py-2.5 text-xs font-bold tabular-nums text-muted-fg">{i + 1}</td>
+                    <td className="px-4 py-2.5">
+                      <div className="font-mono text-xs font-semibold">
+                        {trimStr(r.ItemID)}
+                        {trimStr(r.ItemID).startsWith('*') && <span className="ml-1 text-amber-500" title="Star / special-order SKU">★</span>}
+                      </div>
+                      <div className="max-w-[340px] truncate text-[11px] text-muted-fg" title={trimStr(r.descr)}>{trimStr(r.descr) || '—'}</div>
+                    </td>
+                    <td className="px-4 py-2.5 font-medium">{trimStr(r.vendor) || '—'}</td>
+                    <td className="px-4 py-2.5 text-right num font-bold">{fmtNumber(Number(r.qty) || 0)}</td>
+                    <td className="px-4 py-2.5 text-right num font-semibold">{fmtCurrency(Number(r.revenue) || 0)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </CardContent>
+        </Card>
         </>
         )}
       </div>
