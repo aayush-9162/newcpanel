@@ -473,10 +473,12 @@ export default function Dashboard() {
   //    generic "chair" rule sends it to Living Room.
   const itemCatSql = `
     WITH m AS (SELECT MAX(SaleDate) AS d FROM SalesItemDetail),
+         mb AS (SELECT DATEFROMPARTS(YEAR(d), MONTH(d), 1) AS mStart,
+                       DATEADD(MONTH, 1, DATEFROMPARTS(YEAR(d), MONTH(d), 1)) AS mEnd FROM m),
          base AS (
            SELECT UPPER(ISNULL(Description2,'')) AS d2
-           FROM SalesItemDetail CROSS JOIN m
-           WHERE YEAR(SaleDate) = YEAR(m.d) AND MONTH(SaleDate) = MONTH(m.d)
+           FROM SalesItemDetail CROSS JOIN mb
+           WHERE SaleDate >= mb.mStart AND SaleDate < mb.mEnd
              AND LEFT(CAST(SaleNo AS VARCHAR(20)), 1) = '${selectedBldg}'
          ),
          cat AS (SELECT ${roomCase} AS room FROM base)
@@ -496,12 +498,14 @@ export default function Dashboard() {
   // in proportion to item count; vendors are then ranked by that revenue.
   const vendorAnalysisSql = `
     WITH m AS (SELECT MAX(SaleDate) AS d FROM SalesItemDetail),
+         mb AS (SELECT DATEFROMPARTS(YEAR(d), MONTH(d), 1) AS mStart,
+                       DATEADD(MONTH, 1, DATEFROMPARTS(YEAR(d), MONTH(d), 1)) AS mEnd FROM m),
          det AS (
            SELECT CAST(SaleNo AS VARCHAR(20)) AS SaleNo,
                   LTRIM(RTRIM(VendorID))       AS vendor,
                   LTRIM(RTRIM(ItemID))         AS ItemID
-           FROM SalesItemDetail CROSS JOIN m
-           WHERE YEAR(SaleDate) = YEAR(m.d) AND MONTH(SaleDate) = MONTH(m.d)
+           FROM SalesItemDetail CROSS JOIN mb
+           WHERE SaleDate >= mb.mStart AND SaleDate < mb.mEnd
              AND LEFT(CAST(SaleNo AS VARCHAR(20)), 1) = '${selectedBldg}'
              AND VendorID IS NOT NULL AND LTRIM(RTRIM(VendorID)) NOT IN ('CFC', 'USLD', 'NONE', '')
          ),
@@ -509,9 +513,9 @@ export default function Dashboard() {
          saleTot AS (SELECT SaleNo, SUM(items) AS totItems FROM vitems GROUP BY SaleNo),
          saleRev AS (
            SELECT CAST(S.wrt_so_no AS VARCHAR(20)) AS SaleNo, SUM(S.wrt_sls) AS amt
-           FROM SaleWRT S CROSS JOIN m
+           FROM SaleWRT S CROSS JOIN mb
            WHERE S.wrt_pft_ctr = ${selectedBldg}
-             AND YEAR(S.wrt_cng_bdat) = YEAR(m.d) AND MONTH(S.wrt_cng_bdat) = MONTH(m.d)
+             AND S.wrt_cng_bdat >= mb.mStart AND S.wrt_cng_bdat < mb.mEnd
            GROUP BY CAST(S.wrt_so_no AS VARCHAR(20))
          ),
          vrev AS (
@@ -541,7 +545,8 @@ export default function Dashboard() {
     FROM SaleWRT S
     LEFT JOIN SaleRV SR ON S.wrt_so_no = SR.sales_no
     WHERE S.wrt_pft_ctr = ${selectedBldg}
-      AND YEAR(S.wrt_cng_bdat) = ${curYear} AND MONTH(S.wrt_cng_bdat) = ${month}
+      AND S.wrt_cng_bdat >= DATEFROMPARTS(${curYear}, ${month}, 1)
+      AND S.wrt_cng_bdat <  DATEADD(MONTH, 1, DATEFROMPARTS(${curYear}, ${month}, 1))
     GROUP BY ${mAreaCityExpr}, ${mAreaZipExpr}
     HAVING SUM(S.wrt_sls) <> 0
     ORDER BY Revenue DESC
