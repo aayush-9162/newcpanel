@@ -468,6 +468,78 @@ export default function ItemSoldAnalysis() {
           ))}
         </div>
 
+        {/* ═══════════ Top vendors — units vs revenue ═══════════ */}
+        <SectionHeading icon={Truck} title="Top Vendors" hint="Top 10 by units sold vs by revenue · click a vendor for its items" />
+        <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
+          {/* By units sold */}
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="flex items-center gap-2 text-sm"><Boxes size={15} className="text-primary" /> Top 10 · By Units Sold</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-1 p-3 pt-0">
+              {vendorQ.isLoading ? (
+                <div className="py-8 text-center text-xs text-muted-fg">Loading…</div>
+              ) : vendorRows.length === 0 ? (
+                <div className="py-8 text-center text-xs text-muted-fg">No vendor sales this period</div>
+              ) : vendorRows.map((v, i) => {
+                const u = Number(v.units) || 0;
+                const vn = trimStr(v.vendor);
+                const accent = ['primary', 'emerald', 'amber', 'violet', 'sky', 'rose'][i % 6];
+                const pct = vendorMax > 0 ? (u / vendorMax) * 100 : 0;
+                return (
+                  <button key={vn} type="button" onClick={openVendor(vn, u, accent)}
+                    className="group grid w-full grid-cols-[20px_minmax(56px,84px)_1fr_auto] items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition hover:bg-muted/50">
+                    <span className="text-xs font-bold tabular-nums text-muted-fg">{i + 1}</span>
+                    <span className="truncate text-sm font-semibold" title={vn}>{vn}</span>
+                    <span className="relative h-4 overflow-hidden rounded bg-muted/50">
+                      <span className={cn('absolute inset-y-0 left-0 rounded transition-all', BAR_BG[accent] || BAR_BG.sky)} style={{ width: `${Math.max(pct, 2)}%` }} />
+                    </span>
+                    <span className="flex items-center gap-1.5 tabular-nums">
+                      <span className="text-sm font-bold">{fmtNumber(u)}</span>
+                      <span className="hidden w-12 text-right text-[10px] text-muted-fg sm:inline">{fmtNumber(Number(v.skus) || 0)} SKU</span>
+                      <ChevronRight size={12} className="text-muted-fg opacity-0 transition group-hover:opacity-100" />
+                    </span>
+                  </button>
+                );
+              })}
+            </CardContent>
+          </Card>
+
+          {/* By revenue */}
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="flex items-center gap-2 text-sm"><TrendingUp size={15} className="text-emerald-500" /> Top 10 · By Revenue</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-1 p-3 pt-0">
+              {vendorRevQ.isLoading ? (
+                <div className="py-8 text-center text-xs text-muted-fg">Loading…</div>
+              ) : vendorRevRows.length === 0 ? (
+                <div className="py-8 text-center text-xs text-muted-fg">No vendor revenue this period</div>
+              ) : vendorRevRows.map((v, i) => {
+                const rev = Number(v.revenue) || 0;
+                const u = Number(v.units) || 0;
+                const vn = trimStr(v.vendor);
+                const accent = ['emerald', 'primary', 'amber', 'violet', 'sky', 'rose'][i % 6];
+                const pct = vendorRevMax > 0 ? (rev / vendorRevMax) * 100 : 0;
+                return (
+                  <button key={vn} type="button" onClick={openVendor(vn, u, accent)}
+                    className="group grid w-full grid-cols-[20px_minmax(56px,84px)_1fr_auto] items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition hover:bg-muted/50">
+                    <span className="text-xs font-bold tabular-nums text-muted-fg">{i + 1}</span>
+                    <span className="truncate text-sm font-semibold" title={vn}>{vn}</span>
+                    <span className="relative h-4 overflow-hidden rounded bg-muted/50">
+                      <span className={cn('absolute inset-y-0 left-0 rounded transition-all', BAR_BG[accent] || BAR_BG.emerald)} style={{ width: `${Math.max(pct, 2)}%` }} />
+                    </span>
+                    <span className="flex items-center gap-1.5 tabular-nums">
+                      <span className="text-sm font-bold" title={fmtCurrency(rev)}>{fmtCompactCurrency(rev)}</span>
+                      <ChevronRight size={12} className="text-muted-fg opacity-0 transition group-hover:opacity-100" />
+                    </span>
+                  </button>
+                );
+              })}
+            </CardContent>
+          </Card>
+        </div>
+
         {/* ═══════════ Category (CAT) breakdown ═══════════ */}
         <SectionHeading icon={Sparkles} title="By Category" hint="Warehouse CAT codes · click a bar to see the items" />
         <Card>
@@ -552,78 +624,6 @@ export default function ItemSoldAnalysis() {
                   </PieChart>
                 </ResponsiveContainer>
               )}
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* ═══════════ Top vendors — units vs revenue ═══════════ */}
-        <SectionHeading icon={Truck} title="Top Vendors" hint="Top 10 by units sold vs by revenue · click a vendor for its items" />
-        <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
-          {/* By units sold */}
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="flex items-center gap-2 text-sm"><Boxes size={15} className="text-primary" /> Top 10 · By Units Sold</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-1 p-3 pt-0">
-              {vendorQ.isLoading ? (
-                <div className="py-8 text-center text-xs text-muted-fg">Loading…</div>
-              ) : vendorRows.length === 0 ? (
-                <div className="py-8 text-center text-xs text-muted-fg">No vendor sales this period</div>
-              ) : vendorRows.map((v, i) => {
-                const u = Number(v.units) || 0;
-                const vn = trimStr(v.vendor);
-                const accent = ['primary', 'emerald', 'amber', 'violet', 'sky', 'rose'][i % 6];
-                const pct = vendorMax > 0 ? (u / vendorMax) * 100 : 0;
-                return (
-                  <button key={vn} type="button" onClick={openVendor(vn, u, accent)}
-                    className="group grid w-full grid-cols-[20px_minmax(56px,84px)_1fr_auto] items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition hover:bg-muted/50">
-                    <span className="text-xs font-bold tabular-nums text-muted-fg">{i + 1}</span>
-                    <span className="truncate text-sm font-semibold" title={vn}>{vn}</span>
-                    <span className="relative h-4 overflow-hidden rounded bg-muted/50">
-                      <span className={cn('absolute inset-y-0 left-0 rounded transition-all', BAR_BG[accent] || BAR_BG.sky)} style={{ width: `${Math.max(pct, 2)}%` }} />
-                    </span>
-                    <span className="flex items-center gap-1.5 tabular-nums">
-                      <span className="text-sm font-bold">{fmtNumber(u)}</span>
-                      <span className="hidden w-12 text-right text-[10px] text-muted-fg sm:inline">{fmtNumber(Number(v.skus) || 0)} SKU</span>
-                      <ChevronRight size={12} className="text-muted-fg opacity-0 transition group-hover:opacity-100" />
-                    </span>
-                  </button>
-                );
-              })}
-            </CardContent>
-          </Card>
-
-          {/* By revenue */}
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="flex items-center gap-2 text-sm"><TrendingUp size={15} className="text-emerald-500" /> Top 10 · By Revenue</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-1 p-3 pt-0">
-              {vendorRevQ.isLoading ? (
-                <div className="py-8 text-center text-xs text-muted-fg">Loading…</div>
-              ) : vendorRevRows.length === 0 ? (
-                <div className="py-8 text-center text-xs text-muted-fg">No vendor revenue this period</div>
-              ) : vendorRevRows.map((v, i) => {
-                const rev = Number(v.revenue) || 0;
-                const u = Number(v.units) || 0;
-                const vn = trimStr(v.vendor);
-                const accent = ['emerald', 'primary', 'amber', 'violet', 'sky', 'rose'][i % 6];
-                const pct = vendorRevMax > 0 ? (rev / vendorRevMax) * 100 : 0;
-                return (
-                  <button key={vn} type="button" onClick={openVendor(vn, u, accent)}
-                    className="group grid w-full grid-cols-[20px_minmax(56px,84px)_1fr_auto] items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition hover:bg-muted/50">
-                    <span className="text-xs font-bold tabular-nums text-muted-fg">{i + 1}</span>
-                    <span className="truncate text-sm font-semibold" title={vn}>{vn}</span>
-                    <span className="relative h-4 overflow-hidden rounded bg-muted/50">
-                      <span className={cn('absolute inset-y-0 left-0 rounded transition-all', BAR_BG[accent] || BAR_BG.emerald)} style={{ width: `${Math.max(pct, 2)}%` }} />
-                    </span>
-                    <span className="flex items-center gap-1.5 tabular-nums">
-                      <span className="text-sm font-bold" title={fmtCurrency(rev)}>{fmtCompactCurrency(rev)}</span>
-                      <ChevronRight size={12} className="text-muted-fg opacity-0 transition group-hover:opacity-100" />
-                    </span>
-                  </button>
-                );
-              })}
             </CardContent>
           </Card>
         </div>
