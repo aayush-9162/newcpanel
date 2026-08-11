@@ -1491,39 +1491,27 @@ export default function Dashboard() {
           hint="Top 5 by quantity this month · with vendor + revenue"
         />
         <Card>
-          <CardContent className="p-0 overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-muted/60 text-[11px] uppercase tracking-wider text-muted-fg">
-                <tr>
-                  <th className="px-4 py-2.5 text-left">#</th>
-                  <th className="px-4 py-2.5 text-left">Item</th>
-                  <th className="px-4 py-2.5 text-left">Vendor</th>
-                  <th className="px-4 py-2.5 text-right">Qty</th>
-                  <th className="px-4 py-2.5 text-right">Revenue</th>
-                </tr>
-              </thead>
-              <tbody>
-                {topItemsQ.isLoading ? (
-                  <tr><td colSpan={5} className="py-8 text-center text-muted-fg">Loading…</td></tr>
-                ) : topItems.length === 0 ? (
-                  <tr><td colSpan={5} className="py-8 text-center text-muted-fg">No items sold this month.</td></tr>
-                ) : topItems.map((r, i) => (
-                  <tr key={trimStr(r.ItemID) + i} className="border-t border-border hover:bg-muted/30">
-                    <td className="px-4 py-2.5 text-xs font-bold tabular-nums text-muted-fg">{i + 1}</td>
-                    <td className="px-4 py-2.5">
-                      <div className="font-mono text-xs font-semibold">
-                        {trimStr(r.ItemID)}
-                        {trimStr(r.ItemID).startsWith('*') && <span className="ml-1 text-amber-500" title="Star / special-order SKU">★</span>}
-                      </div>
-                      <div className="max-w-[340px] truncate text-[11px] text-muted-fg" title={trimStr(r.descr)}>{trimStr(r.descr) || '—'}</div>
-                    </td>
-                    <td className="px-4 py-2.5 font-medium">{trimStr(r.vendor) || '—'}</td>
-                    <td className="px-4 py-2.5 text-right num font-bold">{fmtNumber(Number(r.qty) || 0)}</td>
-                    <td className="px-4 py-2.5 text-right num font-semibold">{fmtCurrency(Number(r.revenue) || 0)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <CardContent className="space-y-1 p-3">
+            {topItemsQ.isLoading ? (
+              <div className="py-6 text-center text-xs text-muted-fg">Loading…</div>
+            ) : topItems.length === 0 ? (
+              <div className="py-6 text-center text-xs text-muted-fg">No items sold this month.</div>
+            ) : topItems.map((r, i) => {
+              const grad = ['from-blue-500 to-indigo-500', 'from-emerald-500 to-teal-500', 'from-amber-500 to-orange-500', 'from-violet-500 to-purple-500', 'from-sky-500 to-cyan-500'][i % 5];
+              const id = trimStr(r.ItemID);
+              return (
+                <div key={id + i} className="flex items-center gap-2.5 rounded-lg px-2 py-1.5 transition hover:bg-muted/40">
+                  <span className={cn('grid h-6 w-6 shrink-0 place-items-center rounded-md bg-gradient-to-br text-xs font-bold text-white', grad)}>{i + 1}</span>
+                  <span className="shrink-0 font-mono text-xs font-semibold">
+                    {id}{id.startsWith('*') && <span className="ml-0.5 text-amber-500" title="Star / special-order SKU">★</span>}
+                  </span>
+                  <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] font-semibold text-muted-fg">{trimStr(r.vendor) || '—'}</span>
+                  <span className="min-w-0 flex-1 truncate text-[11px] text-muted-fg" title={trimStr(r.descr)}>{trimStr(r.descr) || '—'}</span>
+                  <span className="shrink-0 text-[11px] tabular-nums text-muted-fg">{fmtNumber(Number(r.qty) || 0)} sold</span>
+                  <span className="w-20 shrink-0 text-right text-sm font-bold tabular-nums">{fmtCurrency(Number(r.revenue) || 0)}</span>
+                </div>
+              );
+            })}
           </CardContent>
         </Card>
         </>
