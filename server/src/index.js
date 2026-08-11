@@ -6,7 +6,7 @@ import path from 'node:path';
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { queries } from './queries/index.js';
-import { runSql, runMysql } from './upstream.js';
+import { runSql, runMysql, clearSqlCache } from './upstream.js';
 import { checkSelectOnly } from './sqlGuard.js';
 import { requireAuth, requireRouteAccess, verifyGoogleCredential, issueAppToken } from './auth.js';
 import { ensureUser, readUsers, upsertUser, removeUser } from './users.js';
@@ -197,6 +197,13 @@ app.post('/api/sql', async (req, res) => {
   } catch (err) {
     res.status(502).json({ error: 'upstream error', message: err.message });
   }
+});
+
+// Header "Refresh" button — clears the server-side SQL result cache so the
+// next queries pull fresh data from the warehouse. Under /api → auth-guarded.
+app.post('/api/cache/clear', (req, res) => {
+  clearSqlCache();
+  res.json({ ok: true });
 });
 
 // Same hardened guard, but forwards to the upstream MySQL endpoint instead

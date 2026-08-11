@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Moon, Sun, RefreshCw, LogOut, User as UserIcon, Shield } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { useQueryClient } from '@tanstack/react-query';
+import { clearServerCache } from '@/lib/api';
 import { externalLinks } from '@/routes';
 import { useAuth } from '@/auth/AuthProvider';
 import { cn } from '@/lib/cn';
@@ -54,7 +55,12 @@ export function Topbar({ title, subtitle }) {
         </div>
 
         <div className="ml-2 flex items-center gap-2 shrink-0">
-          <Button variant="outline" size="icon" title="Refresh data" onClick={() => qc.invalidateQueries()}>
+          <Button
+            variant="outline"
+            size="icon"
+            title="Refresh — clears the cache and reloads fresh data"
+            onClick={async () => { await clearServerCache(); qc.invalidateQueries(); }}
+          >
             <RefreshCw size={16} />
           </Button>
           <Button variant="outline" size="icon" title="Toggle theme" onClick={() => setDark((d) => !d)}>

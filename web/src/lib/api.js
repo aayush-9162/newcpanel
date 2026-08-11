@@ -93,6 +93,11 @@ export function useMysqlQuery(qry, values = [], options = {}) {
   });
 }
 
+// Clear the server-side SQL result cache (header Refresh button). Best-effort.
+export async function clearServerCache() {
+  try { await authFetch('/api/cache/clear', { method: 'POST' }); } catch { /* ignore */ }
+}
+
 // ─── Admin: manage the email → role access list (admin only) ────────────────
 export async function adminListUsers() {
   const res = await authFetch('/api/admin/users');
