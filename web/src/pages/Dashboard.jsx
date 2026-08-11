@@ -752,8 +752,32 @@ export default function Dashboard() {
           icon={MapPin}
           title={`Area Wise Sales · ${monthName} · ${store === 'ARDEN' ? 'Arden (S1)' : 'Waynesville (S2)'}`}
           hint={monthAreas.total > 0
-            ? `${fmtNumber(monthAreas.areas.length)} areas · ${fmtCurrency(monthAreas.total)} · click an area for its zip codes`
-            : 'Top 5 areas by revenue · click an area for its zip codes'}
+            ? `${fmtNumber(monthAreas.areas.length)} areas · ${fmtCurrency(monthAreas.total)}`
+            : 'Top 5 areas by revenue'}
+          action={monthAreas.areas.length > 0 ? (
+            <button
+              type="button"
+              onClick={openDetail({
+                title: `All Areas · ${monthName} · ${store === 'ARDEN' ? 'Arden (S1)' : 'Waynesville (S2)'}`,
+                icon: MapPin,
+                accent: 'primary',
+                headline: fmtCurrency(monthAreas.total),
+                subtitle: `${fmtNumber(monthAreas.areas.length)} areas · click an area to see its zip codes`,
+                loadRows: () => monthAreas.areas.map((a) => ({ name: a.name, zips: a.zipCount, orders: a.orders, revenue: a.revenue, _area: a })),
+                detailsColumns: [
+                  { key: 'name', label: 'Area' },
+                  { key: 'zips', label: 'Zip Codes', align: 'right', render: (r) => fmtNumber(r.zips) },
+                  { key: 'orders', label: 'Orders', align: 'right', render: (r) => fmtNumber(r.orders) },
+                  { key: 'revenue', label: 'Revenue', align: 'right', render: (r) => <span className="font-semibold">{fmtCurrency(r.revenue)}</span> },
+                ],
+                onRowClick: (row) => monthAreaZipConfig(row._area),
+                detailsEmpty: 'No sales this month',
+              })}
+              className="inline-flex items-center gap-1 rounded-lg border border-border px-2.5 py-1 text-xs font-semibold text-primary transition hover:bg-muted"
+            >
+              See all areas <ChevronRight size={13} />
+            </button>
+          ) : null}
         />
         <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
           {monthAreaQ.isLoading ? (
@@ -777,33 +801,6 @@ export default function Dashboard() {
             );
           })}
         </div>
-        {monthAreas.areas.length > 5 && (
-          <div className="text-center">
-            <button
-              type="button"
-              onClick={openDetail({
-                title: `All Areas · ${monthName} · ${store === 'ARDEN' ? 'Arden (S1)' : 'Waynesville (S2)'}`,
-                icon: MapPin,
-                accent: 'primary',
-                headline: fmtCurrency(monthAreas.total),
-                subtitle: `${fmtNumber(monthAreas.areas.length)} areas · click an area to see its zip codes`,
-                loadRows: () => monthAreas.areas.map((a) => ({ name: a.name, zips: a.zipCount, orders: a.orders, revenue: a.revenue, _area: a })),
-                detailsColumns: [
-                  { key: 'name', label: 'Area' },
-                  { key: 'zips', label: 'Zip Codes', align: 'right', render: (r) => fmtNumber(r.zips) },
-                  { key: 'orders', label: 'Orders', align: 'right', render: (r) => fmtNumber(r.orders) },
-                  { key: 'revenue', label: 'Revenue', align: 'right', render: (r) => <span className="font-semibold">{fmtCurrency(r.revenue)}</span> },
-                ],
-                onRowClick: (row) => monthAreaZipConfig(row._area),
-                detailsEmpty: 'No sales this month',
-              })}
-              className="rounded-lg border border-border px-3 py-1.5 text-xs font-semibold text-primary transition hover:bg-muted"
-            >
-              See all {fmtNumber(monthAreas.areas.length)} areas →
-            </button>
-          </div>
-        )}
-
         {/* ─── Company Snapshot ─── */}
         <SectionHeading icon={Sparkles} title="Company Snapshot" hint="Click any tile to see the details" />
         {/* YTD vs Last Year — full-width horizontal comparison card */}

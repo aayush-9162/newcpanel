@@ -411,8 +411,17 @@ export default function DashboardDaily({ store, selectedBldg }) {
         icon={MapPin}
         title={`Area Wise Sales · ${dateShort} · ${storeLabel}`}
         hint={yAreas.total > 0
-          ? `${fmtNumber(yAreas.areas.length)} areas · ${fmtCurrency(yAreas.total)} · click an area for its zip codes`
-          : 'Top areas by revenue · click an area for its zip codes'}
+          ? `${fmtNumber(yAreas.areas.length)} areas · ${fmtCurrency(yAreas.total)}`
+          : 'Top areas by revenue'}
+        action={yAreas.areas.length > 0 ? (
+          <button
+            type="button"
+            onClick={openDetail(allAreasConfig)}
+            className="inline-flex items-center gap-1 rounded-lg border border-border px-2.5 py-1 text-xs font-semibold text-primary transition hover:bg-muted"
+          >
+            See all areas <ChevronRight size={13} />
+          </button>
+        ) : null}
       />
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
         {areaQ.isLoading ? (
@@ -436,17 +445,6 @@ export default function DashboardDaily({ store, selectedBldg }) {
           );
         })}
       </div>
-      {yAreas.areas.length > 5 && (
-        <div className="text-center">
-          <button
-            type="button"
-            onClick={openDetail(allAreasConfig)}
-            className="rounded-lg border border-border px-3 py-1.5 text-xs font-semibold text-primary transition hover:bg-muted"
-          >
-            See all {fmtNumber(yAreas.areas.length)} areas →
-          </button>
-        </div>
-      )}
 
       {/* ═══════════════ Top Salespersons ═══════════════ */}
       <SectionHeading
