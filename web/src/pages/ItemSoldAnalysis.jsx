@@ -14,7 +14,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { HeroStat, HeroBanner } from '@/components/HeroStat';
 import { MetricDrilldown } from '@/components/MetricDrilldown';
 import { useSqlQuery } from '@/lib/api';
-import { fmtNumber, fmtPercent, trimStr } from '@/lib/format';
+import { fmtNumber, fmtPercent, fmtCurrency, fmtCompactCurrency, trimStr } from '@/lib/format';
 import { cn } from '@/lib/cn';
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid,
@@ -192,10 +192,10 @@ export default function ItemSoldAnalysis() {
     [typeQ.data],
   );
 
-  // ── 4) Top vendors ────────────────────────────────────────────────────────
+  // ── 4a) Top vendors — by UNITS sold ───────────────────────────────────────
   const vendorSql = `
     WITH m AS (SELECT MAX(SaleDate) AS d FROM SalesItemDetail)
-    SELECT TOP 12 LTRIM(RTRIM(VendorID)) AS vendor,
+    SELECT TOP 10 LTRIM(RTRIM(VendorID)) AS vendor,
            COUNT(*) AS units, COUNT(DISTINCT ItemID) AS skus
     FROM SalesItemDetail CROSS JOIN m
     WHERE ${scope}
@@ -207,6 +207,38 @@ export default function ItemSoldAnalysis() {
   const vendorQ = useSqlQuery(vendorSql, []);
   const vendorRows = vendorQ.data?.rows ?? [];
   const vendorMax = vendorRows.reduce((mx, v) => Math.max(mx, Number(v.units) || 0), 0);
+
+  // ── 4b) Top vendors — by REVENUE ──────────────────────────────────────────
+  // SalesItemDetail has no per-line price, so each sale's revenue (SaleWRT) is
+  // split across its vendors in proportion to item count. The SaleWRT set is
+  // restricted to the sales in scope (IN the item set) so it stays fast.
+  const vendorRevSql = `
+    WITH m AS (SELECT MAX(SaleDate) AS d FROM SalesItemDetail),
+         det AS (
+           SELECT CAST(SaleNo AS VARCHAR(20)) AS SaleNo, LTRIM(RTRIM(VendorID)) AS vendor, COUNT(*) AS items
+           FROM SalesItemDetail CROSS JOIN m
+           WHERE ${scope}
+             AND VendorID IS NOT NULL AND LTRIM(RTRIM(VendorID)) NOT IN ('CFC', 'USLD', 'NONE', '')
+           GROUP BY CAST(SaleNo AS VARCHAR(20)), LTRIM(RTRIM(VendorID))
+         ),
+         tot AS (SELECT SaleNo, SUM(items) AS totItems FROM det GROUP BY SaleNo),
+         rev AS (
+           SELECT CAST(S.wrt_so_no AS VARCHAR(20)) AS SaleNo, SUM(S.wrt_sls) AS amt
+           FROM SaleWRT S
+           WHERE CAST(S.wrt_so_no AS VARCHAR(20)) IN (SELECT SaleNo FROM tot)
+           GROUP BY CAST(S.wrt_so_no AS VARCHAR(20))
+         )
+    SELECT TOP 10 d.vendor AS vendor,
+           SUM(ISNULL(r.amt, 0) * d.items * 1.0 / NULLIF(t.totItems, 0)) AS revenue,
+           SUM(d.items) AS units
+    FROM det d JOIN tot t ON t.SaleNo = d.SaleNo
+    LEFT JOIN rev r ON r.SaleNo = d.SaleNo
+    GROUP BY d.vendor
+    ORDER BY revenue DESC
+  `;
+  const vendorRevQ = useSqlQuery(vendorRevSql, []);
+  const vendorRevRows = vendorRevQ.data?.rows ?? [];
+  const vendorRevMax = vendorRevRows.reduce((mx, v) => Math.max(mx, Number(v.revenue) || 0), 0);
 
   // ── 5) Top selling items (SKUs) ───────────────────────────────────────────
   const itemSql = `
@@ -509,37 +541,77 @@ export default function ItemSoldAnalysis() {
           </Card>
         </div>
 
-        {/* ═══════════ Top vendors ═══════════ */}
-        <SectionHeading icon={Truck} title="Top Vendors" hint="By units sold this period · click a vendor for its items" />
-        <Card>
-          <CardContent className="grid grid-cols-1 gap-1.5 p-4 md:grid-cols-2">
-            {vendorQ.isLoading ? (
-              <div className="col-span-full py-8 text-center text-xs text-muted-fg">Loading vendors…</div>
-            ) : vendorRows.length === 0 ? (
-              <div className="col-span-full py-8 text-center text-xs text-muted-fg">No vendor sales this period</div>
-            ) : vendorRows.map((v, i) => {
-              const u = Number(v.units) || 0;
-              const vn = trimStr(v.vendor);
-              const accent = ['primary', 'emerald', 'amber', 'violet', 'sky', 'rose'][i % 6];
-              const pct = vendorMax > 0 ? (u / vendorMax) * 100 : 0;
-              return (
-                <button key={vn} type="button" onClick={openVendor(vn, u, accent)}
-                  className="group grid grid-cols-[24px_minmax(70px,100px)_1fr_auto] items-center gap-3 rounded-lg px-2 py-1.5 text-left transition hover:bg-muted/50">
-                  <span className="text-xs font-bold tabular-nums text-muted-fg">{i + 1}</span>
-                  <span className="truncate text-sm font-semibold" title={vn}>{vn}</span>
-                  <span className="relative h-5 overflow-hidden rounded bg-muted/50">
-                    <span className={cn('absolute inset-y-0 left-0 rounded transition-all', BAR_BG[accent] || BAR_BG.sky)} style={{ width: `${Math.max(pct, 2)}%` }} />
-                  </span>
-                  <span className="flex items-center gap-2 tabular-nums">
-                    <span className="text-sm font-bold">{fmtNumber(u)}</span>
-                    <span className="w-14 text-right text-[11px] text-muted-fg">{fmtNumber(Number(v.skus) || 0)} SKUs</span>
-                    <ChevronRight size={13} className="text-muted-fg opacity-0 transition group-hover:opacity-100" />
-                  </span>
-                </button>
-              );
-            })}
-          </CardContent>
-        </Card>
+        {/* ═══════════ Top vendors — units vs revenue ═══════════ */}
+        <SectionHeading icon={Truck} title="Top Vendors" hint="Top 10 by units sold vs by revenue · click a vendor for its items" />
+        <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
+          {/* By units sold */}
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="flex items-center gap-2 text-sm"><Boxes size={15} className="text-primary" /> Top 10 · By Units Sold</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-1 p-3 pt-0">
+              {vendorQ.isLoading ? (
+                <div className="py-8 text-center text-xs text-muted-fg">Loading…</div>
+              ) : vendorRows.length === 0 ? (
+                <div className="py-8 text-center text-xs text-muted-fg">No vendor sales this period</div>
+              ) : vendorRows.map((v, i) => {
+                const u = Number(v.units) || 0;
+                const vn = trimStr(v.vendor);
+                const accent = ['primary', 'emerald', 'amber', 'violet', 'sky', 'rose'][i % 6];
+                const pct = vendorMax > 0 ? (u / vendorMax) * 100 : 0;
+                return (
+                  <button key={vn} type="button" onClick={openVendor(vn, u, accent)}
+                    className="group grid w-full grid-cols-[20px_minmax(56px,84px)_1fr_auto] items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition hover:bg-muted/50">
+                    <span className="text-xs font-bold tabular-nums text-muted-fg">{i + 1}</span>
+                    <span className="truncate text-sm font-semibold" title={vn}>{vn}</span>
+                    <span className="relative h-4 overflow-hidden rounded bg-muted/50">
+                      <span className={cn('absolute inset-y-0 left-0 rounded transition-all', BAR_BG[accent] || BAR_BG.sky)} style={{ width: `${Math.max(pct, 2)}%` }} />
+                    </span>
+                    <span className="flex items-center gap-1.5 tabular-nums">
+                      <span className="text-sm font-bold">{fmtNumber(u)}</span>
+                      <span className="hidden w-12 text-right text-[10px] text-muted-fg sm:inline">{fmtNumber(Number(v.skus) || 0)} SKU</span>
+                      <ChevronRight size={12} className="text-muted-fg opacity-0 transition group-hover:opacity-100" />
+                    </span>
+                  </button>
+                );
+              })}
+            </CardContent>
+          </Card>
+
+          {/* By revenue */}
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="flex items-center gap-2 text-sm"><TrendingUp size={15} className="text-emerald-500" /> Top 10 · By Revenue</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-1 p-3 pt-0">
+              {vendorRevQ.isLoading ? (
+                <div className="py-8 text-center text-xs text-muted-fg">Loading…</div>
+              ) : vendorRevRows.length === 0 ? (
+                <div className="py-8 text-center text-xs text-muted-fg">No vendor revenue this period</div>
+              ) : vendorRevRows.map((v, i) => {
+                const rev = Number(v.revenue) || 0;
+                const u = Number(v.units) || 0;
+                const vn = trimStr(v.vendor);
+                const accent = ['emerald', 'primary', 'amber', 'violet', 'sky', 'rose'][i % 6];
+                const pct = vendorRevMax > 0 ? (rev / vendorRevMax) * 100 : 0;
+                return (
+                  <button key={vn} type="button" onClick={openVendor(vn, u, accent)}
+                    className="group grid w-full grid-cols-[20px_minmax(56px,84px)_1fr_auto] items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition hover:bg-muted/50">
+                    <span className="text-xs font-bold tabular-nums text-muted-fg">{i + 1}</span>
+                    <span className="truncate text-sm font-semibold" title={vn}>{vn}</span>
+                    <span className="relative h-4 overflow-hidden rounded bg-muted/50">
+                      <span className={cn('absolute inset-y-0 left-0 rounded transition-all', BAR_BG[accent] || BAR_BG.emerald)} style={{ width: `${Math.max(pct, 2)}%` }} />
+                    </span>
+                    <span className="flex items-center gap-1.5 tabular-nums">
+                      <span className="text-sm font-bold" title={fmtCurrency(rev)}>{fmtCompactCurrency(rev)}</span>
+                      <ChevronRight size={12} className="text-muted-fg opacity-0 transition group-hover:opacity-100" />
+                    </span>
+                  </button>
+                );
+              })}
+            </CardContent>
+          </Card>
+        </div>
 
         {/* ═══════════ Monthly trend + Store comparison ═══════════ */}
         <div className="grid grid-cols-1 gap-5 xl:grid-cols-3">
