@@ -880,6 +880,103 @@ export default function Dashboard() {
             );
           })}
         </div>
+        {/* ─── Top Salespersons (this month, selected store) ─── */}
+        <SectionHeading
+          icon={Award}
+          title={`Top Salespersons · ${store === 'ARDEN' ? 'Arden (S1)' : 'Waynesville (S2)'}`}
+          hint="This month · by revenue · sales count + revenue"
+          action={monthSp.length > 0 ? (
+            <button
+              type="button"
+              onClick={openDetail({
+                title: `All Salespersons · ${monthName} · ${store === 'ARDEN' ? 'Arden (S1)' : 'Waynesville (S2)'}`,
+                icon: Award,
+                accent: 'amber',
+                subtitle: 'Everyone with sales this month, ranked by revenue',
+                detailsDb: 'sql',
+                detailsSql: allMonthSpSql,
+                detailsColumns: [
+                  { key: 'salesperson', label: 'Salesperson', render: (r) => <span className="font-semibold" title={resolveSpFull(r.salesperson)}>{resolveSp(r.salesperson)}</span> },
+                  { key: 'orders',      label: 'Sales', align: 'right', render: (r) => fmtNumber(Number(r.orders) || 0) },
+                  { key: 'revenue',     label: 'Revenue', align: 'right', render: (r) => <span className="font-semibold">{fmtCurrency(Number(r.revenue) || 0)}</span> },
+                ],
+                detailsEmpty: 'No salesperson sales this month',
+              })}
+              className="inline-flex items-center gap-1 rounded-lg border border-border px-2.5 py-1 text-xs font-semibold text-primary transition hover:bg-muted"
+            >
+              See all salespersons <ChevronRight size={13} />
+            </button>
+          ) : null}
+        />
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          {monthSpQ.isLoading ? (
+            <div className="col-span-1 py-6 text-center text-xs text-muted-fg sm:col-span-3">Loading…</div>
+          ) : monthSp.length === 0 ? (
+            <div className="col-span-1 py-6 text-center text-xs text-muted-fg sm:col-span-3">No salesperson sales this month.</div>
+          ) : monthSp.map((s, i) => {
+            const code = String(s.salesperson || '—').trim();
+            const name = resolveSp(code);
+            const fullName = resolveSpFull(code);
+            const spOrders = Number(s.orders) || 0;
+            const spRev    = Number(s.revenue) || 0;
+            const medal = [
+              { grad: 'from-amber-400 to-yellow-500', ring: 'ring-amber-500/30' },
+              { grad: 'from-slate-300 to-slate-400',  ring: 'ring-slate-400/30' },
+              { grad: 'from-orange-400 to-amber-600', ring: 'ring-orange-500/30' },
+            ][i] || { grad: 'from-slate-300 to-slate-400', ring: 'ring-slate-400/30' };
+            return (
+              <button
+                key={code}
+                type="button"
+                onClick={openDetail({
+                  title: `${name} · ${monthName} · ${store === 'ARDEN' ? 'Arden (S1)' : 'Waynesville (S2)'}`,
+                  icon: Award,
+                  accent: 'amber',
+                  headline: fmtCurrency(spRev),
+                  subtitle: `${fmtNumber(spOrders)} sale${spOrders === 1 ? '' : 's'} this month`,
+                  detailsDb: 'sql',
+                  detailsSql: `
+                    WITH m AS (SELECT MAX(SaleDate) AS d FROM SalespersonDaily),
+                         mb AS (SELECT DATEFROMPARTS(YEAR(d), MONTH(d), 1) AS mStart,
+                                       DATEADD(MONTH, 1, DATEFROMPARTS(YEAR(d), MONTH(d), 1)) AS mEnd FROM m)
+                    SELECT sd.SalesNo,
+                           MIN(sd.SaleDate) AS SaleDate,
+                           MAX(sd.CustomerName) AS CustomerName,
+                           SUM(ISNULL(sd.SaleSplitAmt, 0)) AS amount
+                    FROM SalespersonDaily sd CROSS JOIN mb
+                    WHERE sd.SaleDate >= mb.mStart AND sd.SaleDate < mb.mEnd AND ${spdStore}
+                      AND LTRIM(RTRIM(sd.SalesPerson)) = '${code.replace(/'/g, "''")}'
+                    GROUP BY sd.SalesNo
+                    ORDER BY MIN(sd.SaleDate) DESC
+                  `,
+                  detailsColumns: [
+                    { key: 'SaleDate',     label: 'Date', render: (r) => r.SaleDate ? new Date(r.SaleDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' }) : '—' },
+                    { key: 'SalesNo',      label: 'Sale #' },
+                    { key: 'CustomerName', label: 'Customer' },
+                    { key: 'amount',       label: 'Amount', align: 'right', render: (r) => <span className="font-semibold">{fmtCurrency(Number(r.amount) || 0)}</span> },
+                  ],
+                  detailsEmpty: `No sales for ${name} this month`,
+                })}
+                className="group relative flex items-center gap-3 overflow-hidden rounded-xl border border-border bg-card p-4 text-left transition hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-md"
+              >
+                <span className={cn('grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-gradient-to-br text-base font-extrabold text-white shadow ring-2', medal.grad, medal.ring)}>
+                  {i + 1}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-sm font-bold text-fg" title={fullName}>{name}</div>
+                  <div className="truncate text-xs text-muted-fg">
+                    {fmtNumber(spOrders)} sale{spOrders === 1 ? '' : 's'}{name !== code ? ` · ${code}` : ''}
+                  </div>
+                </div>
+                <div className="text-right">
+                  <div className="text-lg font-extrabold tabular-nums text-fg">{fmtCurrency(spRev)}</div>
+                  <div className="text-[10px] uppercase tracking-wider text-muted-fg">revenue</div>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+
         {/* ─── Company Snapshot ─── */}
         <SectionHeading icon={Sparkles} title="Company Snapshot" hint="Click any tile to see the details" />
         {/* YTD vs Last Year — full-width horizontal comparison card */}
@@ -1320,103 +1417,6 @@ export default function Dashboard() {
               fullReportLabel: 'Open Prospective Buyer report',
             })}
           />
-        </div>
-
-        {/* ─── Top Salespersons (this month, selected store) ─── */}
-        <SectionHeading
-          icon={Award}
-          title={`Top Salespersons · ${store === 'ARDEN' ? 'Arden (S1)' : 'Waynesville (S2)'}`}
-          hint="This month · by revenue · sales count + revenue"
-          action={monthSp.length > 0 ? (
-            <button
-              type="button"
-              onClick={openDetail({
-                title: `All Salespersons · ${monthName} · ${store === 'ARDEN' ? 'Arden (S1)' : 'Waynesville (S2)'}`,
-                icon: Award,
-                accent: 'amber',
-                subtitle: 'Everyone with sales this month, ranked by revenue',
-                detailsDb: 'sql',
-                detailsSql: allMonthSpSql,
-                detailsColumns: [
-                  { key: 'salesperson', label: 'Salesperson', render: (r) => <span className="font-semibold" title={resolveSpFull(r.salesperson)}>{resolveSp(r.salesperson)}</span> },
-                  { key: 'orders',      label: 'Sales', align: 'right', render: (r) => fmtNumber(Number(r.orders) || 0) },
-                  { key: 'revenue',     label: 'Revenue', align: 'right', render: (r) => <span className="font-semibold">{fmtCurrency(Number(r.revenue) || 0)}</span> },
-                ],
-                detailsEmpty: 'No salesperson sales this month',
-              })}
-              className="inline-flex items-center gap-1 rounded-lg border border-border px-2.5 py-1 text-xs font-semibold text-primary transition hover:bg-muted"
-            >
-              See all salespersons <ChevronRight size={13} />
-            </button>
-          ) : null}
-        />
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-          {monthSpQ.isLoading ? (
-            <div className="col-span-1 py-6 text-center text-xs text-muted-fg sm:col-span-3">Loading…</div>
-          ) : monthSp.length === 0 ? (
-            <div className="col-span-1 py-6 text-center text-xs text-muted-fg sm:col-span-3">No salesperson sales this month.</div>
-          ) : monthSp.map((s, i) => {
-            const code = String(s.salesperson || '—').trim();
-            const name = resolveSp(code);
-            const fullName = resolveSpFull(code);
-            const spOrders = Number(s.orders) || 0;
-            const spRev    = Number(s.revenue) || 0;
-            const medal = [
-              { grad: 'from-amber-400 to-yellow-500', ring: 'ring-amber-500/30' },
-              { grad: 'from-slate-300 to-slate-400',  ring: 'ring-slate-400/30' },
-              { grad: 'from-orange-400 to-amber-600', ring: 'ring-orange-500/30' },
-            ][i] || { grad: 'from-slate-300 to-slate-400', ring: 'ring-slate-400/30' };
-            return (
-              <button
-                key={code}
-                type="button"
-                onClick={openDetail({
-                  title: `${name} · ${monthName} · ${store === 'ARDEN' ? 'Arden (S1)' : 'Waynesville (S2)'}`,
-                  icon: Award,
-                  accent: 'amber',
-                  headline: fmtCurrency(spRev),
-                  subtitle: `${fmtNumber(spOrders)} sale${spOrders === 1 ? '' : 's'} this month`,
-                  detailsDb: 'sql',
-                  detailsSql: `
-                    WITH m AS (SELECT MAX(SaleDate) AS d FROM SalespersonDaily),
-                         mb AS (SELECT DATEFROMPARTS(YEAR(d), MONTH(d), 1) AS mStart,
-                                       DATEADD(MONTH, 1, DATEFROMPARTS(YEAR(d), MONTH(d), 1)) AS mEnd FROM m)
-                    SELECT sd.SalesNo,
-                           MIN(sd.SaleDate) AS SaleDate,
-                           MAX(sd.CustomerName) AS CustomerName,
-                           SUM(ISNULL(sd.SaleSplitAmt, 0)) AS amount
-                    FROM SalespersonDaily sd CROSS JOIN mb
-                    WHERE sd.SaleDate >= mb.mStart AND sd.SaleDate < mb.mEnd AND ${spdStore}
-                      AND LTRIM(RTRIM(sd.SalesPerson)) = '${code.replace(/'/g, "''")}'
-                    GROUP BY sd.SalesNo
-                    ORDER BY MIN(sd.SaleDate) DESC
-                  `,
-                  detailsColumns: [
-                    { key: 'SaleDate',     label: 'Date', render: (r) => r.SaleDate ? new Date(r.SaleDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' }) : '—' },
-                    { key: 'SalesNo',      label: 'Sale #' },
-                    { key: 'CustomerName', label: 'Customer' },
-                    { key: 'amount',       label: 'Amount', align: 'right', render: (r) => <span className="font-semibold">{fmtCurrency(Number(r.amount) || 0)}</span> },
-                  ],
-                  detailsEmpty: `No sales for ${name} this month`,
-                })}
-                className="group relative flex items-center gap-3 overflow-hidden rounded-xl border border-border bg-card p-4 text-left transition hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-md"
-              >
-                <span className={cn('grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-gradient-to-br text-base font-extrabold text-white shadow ring-2', medal.grad, medal.ring)}>
-                  {i + 1}
-                </span>
-                <div className="min-w-0 flex-1">
-                  <div className="truncate text-sm font-bold text-fg" title={fullName}>{name}</div>
-                  <div className="truncate text-xs text-muted-fg">
-                    {fmtNumber(spOrders)} sale{spOrders === 1 ? '' : 's'}{name !== code ? ` · ${code}` : ''}
-                  </div>
-                </div>
-                <div className="text-right">
-                  <div className="text-lg font-extrabold tabular-nums text-fg">{fmtCurrency(spRev)}</div>
-                  <div className="text-[10px] uppercase tracking-wider text-muted-fg">revenue</div>
-                </div>
-              </button>
-            );
-          })}
         </div>
 
         {/* ─── Item Sold Analysis (by showroom category, this month, selected store) ─── */}
