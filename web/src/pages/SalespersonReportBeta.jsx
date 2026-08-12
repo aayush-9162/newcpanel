@@ -248,14 +248,30 @@ export default function SalespersonReportBeta() {
     subtitle: `${fmtNumber(r.orders)} sale${r.orders === 1 ? '' : 's'} today · avg ${fmtCurrency(r.avgTicket)}`,
     detailsDb: 'sql',
     detailsSql: `
-      SELECT CAST(sd.SalesNo AS VARCHAR(20)) AS SalesNo,
-             MAX(sd.CustomerName) AS CustomerName,
-             SUM(ISNULL(sd.SaleSplitAmt, 0)) AS amount
-      FROM SalespersonDaily sd
-      WHERE sd.SaleDate >= '${dayStr}' AND sd.SaleDate < DATEADD(DAY, 1, '${dayStr}')
-        AND LEFT(CAST(sd.SalesNo AS VARCHAR(20)), 1) = '${bldg}'
-        AND LTRIM(RTRIM(sd.SalesPerson)) = '${String(r.code).replace(/'/g, "''")}'
-      GROUP BY CAST(sd.SalesNo AS VARCHAR(20))
+      WITH saleRev AS (
+        SELECT CAST(S.wrt_so_no AS VARCHAR(20)) AS SaleNo, SUM(S.wrt_sls) AS amt
+        FROM SaleWRT S
+        WHERE S.wrt_pft_ctr = ${bldg} AND S.wrt_cng_bdat >= '${dayStr}' AND S.wrt_cng_bdat < DATEADD(DAY, 1, '${dayStr}')
+        GROUP BY CAST(S.wrt_so_no AS VARCHAR(20))
+      ),
+      allsp AS (
+        SELECT CAST(sd.SalesNo AS VARCHAR(20)) AS SaleNo,
+               LTRIM(RTRIM(sd.SalesPerson))    AS salesperson,
+               SUM(ISNULL(sd.SaleSplitAmt, 0)) AS split,
+               MAX(sd.CustomerName)            AS CustomerName
+        FROM SalespersonDaily sd
+        WHERE sd.SaleDate >= '${dayStr}' AND sd.SaleDate < DATEADD(DAY, 1, '${dayStr}')
+          AND LEFT(CAST(sd.SalesNo AS VARCHAR(20)), 1) = '${bldg}'
+          AND sd.SalesPerson IS NOT NULL AND LTRIM(RTRIM(sd.SalesPerson)) <> ''
+        GROUP BY CAST(sd.SalesNo AS VARCHAR(20)), LTRIM(RTRIM(sd.SalesPerson))
+      ),
+      tot AS (SELECT SaleNo, SUM(split) AS totSplit, COUNT(*) AS n FROM allsp GROUP BY SaleNo)
+      SELECT a.SaleNo AS SalesNo, a.CustomerName,
+             ISNULL(sr.amt, 0) * (CASE WHEN t.totSplit > 0 THEN a.split * 1.0 / t.totSplit ELSE 1.0 / t.n END) AS amount
+      FROM allsp a
+      JOIN tot t ON t.SaleNo = a.SaleNo
+      LEFT JOIN saleRev sr ON sr.SaleNo = a.SaleNo
+      WHERE a.salesperson = '${String(r.code).replace(/'/g, "''")}'
       ORDER BY amount DESC
     `,
     detailsColumns: [
