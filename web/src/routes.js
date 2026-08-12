@@ -17,6 +17,7 @@ import {
   Boxes,
   UserCog,
   ShieldAlert,
+  Trophy,
 } from 'lucide-react';
 
 // `home: true` → shown on the cpanel home left panel.
@@ -48,6 +49,7 @@ export const routes = [
 
   // Reports that salesperson IS allowed to see — no roles restriction
   { path: '/sales/performance', label: 'SalesPerson Performance', icon: TrendingUp, group: 'Reports', built: true, home: true },
+  { path: '/sales/report-beta', label: 'Salesperson Report BETA', icon: Trophy, group: 'Reports', built: true, home: true },
   { path: '/fms',               label: 'Floor Sales',             icon: Receipt,    group: 'Reports', built: true, home: true },
   { path: '/disco',             label: 'Discontinued Items',      icon: Slash,      group: 'Reports', built: true, home: true },
 

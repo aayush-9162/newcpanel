@@ -13,6 +13,7 @@ import ItemSoldAnalysis from '@/pages/ItemSoldAnalysis.jsx';
 import TrackerReport from '@/pages/TrackerReport.jsx';
 import ManagerPerformance from '@/pages/ManagerPerformance.jsx';
 import SalesPerformance from '@/pages/SalesPerformance.jsx';
+import SalespersonReportBeta from '@/pages/SalespersonReportBeta.jsx';
 import GrossMargin from '@/pages/GrossMargin.jsx';
 import FloorSales from '@/pages/FloorSales.jsx';
 import DmgSummary from '@/pages/DmgSummary.jsx';
@@ -43,6 +44,7 @@ const built = {
   '/tracker': <TrackerReport />,
   '/mpr': <ManagerPerformance />,
   '/sales/performance': <SalesPerformance />,
+  '/sales/report-beta': <SalespersonReportBeta />,
   '/gmr': <GrossMargin />,
   '/fms': <FloorSales />,
   '/dmgsummary': <DmgSummary />,
