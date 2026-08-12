@@ -37,26 +37,38 @@ export default function SalespersonReportBeta() {
 
   const [drilldown, setDrilldown] = useState(null);
   const dailyOn = period === 'daily';
+  const monthlyOn = period === 'monthly';
 
   // ── Anchor day — the store's most recent business day on file (excl. today).
   // Anchored on SaleWRT (the written-sales truth the Dashboard uses), so totals
-  // reconcile with the rest of the app.
+  // reconcile with the rest of the app. Needed by both views.
   const dayQ = useSqlQuery(`
     SELECT CONVERT(char(10), CAST(MAX(wrt_cng_bdat) AS DATE), 23) AS day
     FROM SaleWRT WHERE wrt_pft_ctr = ${bldg} AND wrt_cng_bdat < CAST(GETDATE() AS DATE)
-  `, [], { enabled: dailyOn });
+  `, [], { enabled: dailyOn || monthlyOn });
   const dayStr = dayQ.data?.rows?.[0]?.day || null;
   const anchor = dayStr ? localDate(dayStr) : null;
   const dateShort = anchor ? `${anchor.getDate()} ${anchor.toLocaleDateString('en-US', { month: 'short' })}` : 'Latest day';
   const weekdayLong = anchor ? anchor.toLocaleDateString('en-US', { weekday: 'long' }) : '';
   const monthName = anchor ? anchor.toLocaleDateString('en-US', { month: 'long' }) : '';
+  const yearNum = anchor ? anchor.getFullYear() : '';
 
   // Calendar-day pace: elapsed / total / remaining days in the anchor month.
   const monthTotalDays = anchor ? new Date(anchor.getFullYear(), anchor.getMonth() + 1, 0).getDate() : 30;
   const daysElapsed    = anchor ? anchor.getDate() : 0;
   const daysRemaining  = Math.max(0, monthTotalDays - daysElapsed);
 
-  const dayReady = dailyOn && !!dayStr;
+  const dayReady   = dailyOn && !!dayStr;
+  const monthReady = monthlyOn && !!dayStr;
+
+  // Reusable SQL date-window fragments (valid when dayStr is set; monthly
+  // queries only run when it is). D = anchor day; m* = this month-to-date;
+  // lm* = same window one month earlier (for the trend comparison).
+  const D       = `CAST('${dayStr}' AS DATE)`;
+  const mStart  = `DATEFROMPARTS(YEAR(${D}), MONTH(${D}), 1)`;
+  const mEnd    = `DATEADD(DAY, 1, ${D})`;
+  const lmStart = `DATEADD(MONTH, -1, ${mStart})`;
+  const lmEnd   = `DATEADD(DAY, 1, DATEADD(MONTH, -1, ${D}))`;
 
   // ── Team totals for the day — from the SaleWRT truth (revenue + orders) and
   // SalesItemDetail (items), plus distinct customers / new customers. These are
@@ -156,6 +168,64 @@ export default function SalespersonReportBeta() {
     GROUP BY sp.salesperson
   `, [], { enabled: dayReady });
 
+  // ═══════════════ MONTHLY queries (month-to-date) ═══════════════
+
+  // Monthly team totals (MTD) from the SaleWRT truth + last-month MTD for trend.
+  const teamMonthQ = useSqlQuery(`
+    SELECT
+      (SELECT SUM(S.wrt_sls) FROM SaleWRT S WHERE S.wrt_pft_ctr = ${bldg} AND S.wrt_cng_bdat >= ${mStart} AND S.wrt_cng_bdat < ${mEnd}) AS revenue,
+      (SELECT COUNT(*) FROM (SELECT S.wrt_so_no FROM SaleWRT S WHERE S.wrt_pft_ctr = ${bldg} AND S.wrt_cng_bdat >= ${mStart} AND S.wrt_cng_bdat < ${mEnd} GROUP BY S.wrt_so_no HAVING SUM(S.wrt_sls) > 0) t) AS orders,
+      (SELECT COUNT(*) FROM SalesItemDetail sid WHERE LEFT(CAST(sid.SaleNo AS VARCHAR(20)), 1) = '${bldg}' AND sid.SaleDate >= ${mStart} AND sid.SaleDate < ${mEnd}) AS items,
+      (SELECT COUNT(DISTINCT sd.CustomerId) FROM SalespersonDaily sd WHERE sd.SaleDate >= ${mStart} AND sd.SaleDate < ${mEnd} AND LEFT(CAST(sd.SalesNo AS VARCHAR(20)), 1) = '${bldg}' AND sd.CustomerId IS NOT NULL AND LTRIM(RTRIM(sd.CustomerId)) <> '') AS customers,
+      (SELECT COUNT(*) FROM (SELECT DISTINCT sd.CustomerId FROM SalespersonDaily sd WHERE sd.SaleDate >= ${mStart} AND sd.SaleDate < ${mEnd} AND LEFT(CAST(sd.SalesNo AS VARCHAR(20)), 1) = '${bldg}' AND sd.CustomerId IS NOT NULL AND LTRIM(RTRIM(sd.CustomerId)) <> '' AND NOT EXISTS (SELECT 1 FROM SalespersonDaily p WHERE p.CustomerId = sd.CustomerId AND p.SaleDate < ${mStart})) x) AS newCustomers,
+      (SELECT SUM(S.wrt_sls) FROM SaleWRT S WHERE S.wrt_pft_ctr = ${bldg} AND S.wrt_cng_bdat >= ${lmStart} AND S.wrt_cng_bdat < ${lmEnd}) AS lastRevenue
+  `, [], { enabled: monthReady });
+
+  // Per-salesperson month-to-date attribution (same proportional method).
+  const boardMonthQ = useSqlQuery(`
+    WITH saleRev AS (
+      SELECT CAST(S.wrt_so_no AS VARCHAR(20)) AS SaleNo, SUM(S.wrt_sls) AS amt
+      FROM SaleWRT S WHERE S.wrt_pft_ctr = ${bldg} AND S.wrt_cng_bdat >= ${mStart} AND S.wrt_cng_bdat < ${mEnd}
+      GROUP BY CAST(S.wrt_so_no AS VARCHAR(20))
+    ),
+    sp AS (
+      SELECT LTRIM(RTRIM(sd.SalesPerson)) AS salesperson, CAST(sd.SalesNo AS VARCHAR(20)) AS SaleNo, sd.CustomerId, ISNULL(sd.SaleSplitAmt, 0) AS split,
+             CASE WHEN NOT EXISTS (SELECT 1 FROM SalespersonDaily p WHERE p.CustomerId = sd.CustomerId AND p.SaleDate < ${mStart}) THEN 1 ELSE 0 END AS isNew
+      FROM SalespersonDaily sd
+      WHERE sd.SaleDate >= ${mStart} AND sd.SaleDate < ${mEnd} AND LEFT(CAST(sd.SalesNo AS VARCHAR(20)), 1) = '${bldg}'
+        AND sd.SalesPerson IS NOT NULL AND LTRIM(RTRIM(sd.SalesPerson)) <> ''
+    ),
+    tot AS (SELECT SaleNo, SUM(split) AS totSplit, COUNT(*) AS n FROM sp GROUP BY SaleNo),
+    attr AS (
+      SELECT sp.salesperson, sp.SaleNo, sp.CustomerId, sp.isNew,
+             ISNULL(sr.amt, 0) * (CASE WHEN t.totSplit > 0 THEN sp.split * 1.0 / t.totSplit ELSE 1.0 / t.n END) AS rev
+      FROM sp JOIN tot t ON t.SaleNo = sp.SaleNo LEFT JOIN saleRev sr ON sr.SaleNo = sp.SaleNo
+    )
+    SELECT salesperson, COUNT(DISTINCT SaleNo) AS orders, SUM(rev) AS revenue,
+           COUNT(DISTINCT CustomerId) AS customers,
+           COUNT(DISTINCT CASE WHEN isNew = 1 THEN CustomerId END) AS newCustomers,
+           MAX(rev) AS maxTicket
+    FROM attr GROUP BY salesperson ORDER BY revenue DESC
+  `, [], { enabled: monthReady });
+
+  // Per-salesperson LAST-month-to-date revenue (for the trend arrow).
+  const lastMonthQ = useSqlQuery(`
+    WITH saleRev AS (
+      SELECT CAST(S.wrt_so_no AS VARCHAR(20)) AS SaleNo, SUM(S.wrt_sls) AS amt
+      FROM SaleWRT S WHERE S.wrt_pft_ctr = ${bldg} AND S.wrt_cng_bdat >= ${lmStart} AND S.wrt_cng_bdat < ${lmEnd}
+      GROUP BY CAST(S.wrt_so_no AS VARCHAR(20))
+    ),
+    sp AS (
+      SELECT LTRIM(RTRIM(sd.SalesPerson)) AS salesperson, CAST(sd.SalesNo AS VARCHAR(20)) AS SaleNo, ISNULL(sd.SaleSplitAmt, 0) AS split
+      FROM SalespersonDaily sd WHERE sd.SaleDate >= ${lmStart} AND sd.SaleDate < ${lmEnd} AND LEFT(CAST(sd.SalesNo AS VARCHAR(20)), 1) = '${bldg}'
+        AND sd.SalesPerson IS NOT NULL AND LTRIM(RTRIM(sd.SalesPerson)) <> ''
+    ),
+    tot AS (SELECT SaleNo, SUM(split) AS totSplit, COUNT(*) AS n FROM sp GROUP BY SaleNo)
+    SELECT sp.salesperson, SUM(ISNULL(sr.amt, 0) * (CASE WHEN t.totSplit > 0 THEN sp.split * 1.0 / t.totSplit ELSE 1.0 / t.n END)) AS revenue
+    FROM sp JOIN tot t ON t.SaleNo = sp.SaleNo LEFT JOIN saleRev sr ON sr.SaleNo = sp.SaleNo
+    GROUP BY sp.salesperson
+  `, [], { enabled: monthReady });
+
   // ── Employees — code → name + monthly target (MySQL). Split sales like
   // "BJT / CAT" resolve each part; the target is the sum of the parts.
   const empQ = useMysqlQuery('SELECT rv_code, name, default_target FROM employees', []);
@@ -240,6 +310,72 @@ export default function SalespersonReportBeta() {
   const loading = boardQ.isLoading || dayQ.isLoading || teamQ.isLoading;
   const top = rows[0] || null;
 
+  // ── MONTHLY derived data (month-to-date leaderboard + pace + trend).
+  const monthRows = useMemo(() => {
+    const lastMap = {};
+    for (const r of (lastMonthQ.data?.rows ?? [])) lastMap[String(r.salesperson)] = Number(r.revenue) || 0;
+    return (boardMonthQ.data?.rows ?? []).map((r) => {
+      const revenue   = Number(r.revenue) || 0;
+      const orders    = Number(r.orders) || 0;
+      const customers = Number(r.customers) || 0;
+      const newC      = Number(r.newCustomers) || 0;
+      const target    = resolveTarget(r.salesperson);
+      const lastRev   = lastMap[String(r.salesperson)] || 0;
+      const currAvg   = daysElapsed > 0 ? revenue / daysElapsed : 0;
+      const reqAvg    = target > 0 && daysRemaining > 0 ? Math.max(0, (target - revenue) / daysRemaining) : 0;
+      const forecast  = currAvg * monthTotalDays;
+      return {
+        code: r.salesperson,
+        name: resolveSp(r.salesperson),
+        fullName: resolveSpFull(r.salesperson),
+        revenue, orders, customers,
+        newCustomers: newC,
+        returning: Math.max(0, customers - newC),
+        maxTicket: Number(r.maxTicket) || 0,
+        avgTicket: orders ? revenue / orders : 0,
+        target, currAvg, reqAvg, forecast, lastRev,
+        trend: lastRev > 0 ? ((revenue - lastRev) / lastRev) * 100 : null,
+        pctAchieved: target > 0 ? (revenue / target) * 100 : null,
+        onPace: target > 0 ? forecast >= target : null,
+      };
+    });
+  }, [boardMonthQ.data, lastMonthQ.data, empMap, daysElapsed, daysRemaining, monthTotalDays]);
+
+  const teamMonth = useMemo(() => {
+    const t = teamMonthQ.data?.rows?.[0] ?? {};
+    const revenue = Number(t.revenue) || 0;
+    const orders  = Number(t.orders) || 0;
+    const lastRevenue = Number(t.lastRevenue) || 0;
+    return {
+      revenue, orders,
+      items: Number(t.items) || 0,
+      customers: Number(t.customers) || 0,
+      newCustomers: Number(t.newCustomers) || 0,
+      lastRevenue,
+      people: monthRows.length,
+      avgTicket: orders ? revenue / orders : 0,
+      trend: lastRevenue > 0 ? ((revenue - lastRevenue) / lastRevenue) * 100 : null,
+    };
+  }, [teamMonthQ.data, monthRows.length]);
+
+  const monthStandouts = useMemo(() => {
+    if (!monthRows.length) return [];
+    const pick = (fn) => monthRows.reduce((a, b) => (fn(b) > fn(a) ? b : a), monthRows[0]);
+    const bigSale = pick((r) => r.maxTicket);
+    const bestAvg = monthRows.filter((r) => r.orders > 0).sort((a, b) => b.avgTicket - a.avgTicket)[0];
+    const newChamp = pick((r) => r.newCustomers);
+    const climber = monthRows.filter((r) => r.trend != null).sort((a, b) => b.trend - a.trend)[0];
+    const out = [];
+    if (bigSale && bigSale.maxTicket > 0) out.push({ icon: Flame, tint: 'amber', title: 'Biggest sale this month', name: bigSale.name, full: bigSale.fullName, detail: fmtCurrency(bigSale.maxTicket) });
+    if (bestAvg && bestAvg.avgTicket > 0) out.push({ icon: Gem, tint: 'violet', title: 'Best average sale', name: bestAvg.name, full: bestAvg.fullName, detail: `${fmtCurrency(bestAvg.avgTicket)} / sale` });
+    if (climber && climber.trend > 0) out.push({ icon: TrendingUp, tint: 'emerald', title: 'Top climber vs last month', name: climber.name, full: climber.fullName, detail: `+${climber.trend.toFixed(0)}%` });
+    else if (newChamp && newChamp.newCustomers > 0) out.push({ icon: UserPlus, tint: 'emerald', title: 'Most new customers', name: newChamp.name, full: newChamp.fullName, detail: `${fmtNumber(newChamp.newCustomers)} new` });
+    return out;
+  }, [monthRows]);
+
+  const monthLoading = boardMonthQ.isLoading || dayQ.isLoading || teamMonthQ.isLoading;
+  const monthTop = monthRows[0] || null;
+
   const openSp = (r) => setDrilldown({
     title: `${r.fullName} · ${dateShort} · ${storeLabel}`,
     icon: Receipt,
@@ -282,9 +418,53 @@ export default function SalespersonReportBeta() {
     detailsEmpty: 'No sales that day',
   });
 
+  // Monthly drilldown — that salesperson's attributed sales across the month.
+  const openSpMonth = (r) => setDrilldown({
+    title: `${r.fullName} · ${monthName} ${yearNum} · ${storeLabel}`,
+    icon: Receipt,
+    accent: 'violet',
+    headline: fmtCurrency(r.revenue),
+    subtitle: `${fmtNumber(r.orders)} sale${r.orders === 1 ? '' : 's'} this month · avg ${fmtCurrency(r.avgTicket)}`,
+    detailsDb: 'sql',
+    detailsSql: `
+      WITH saleRev AS (
+        SELECT CAST(S.wrt_so_no AS VARCHAR(20)) AS SaleNo, SUM(S.wrt_sls) AS amt, MIN(CAST(S.wrt_cng_bdat AS DATE)) AS d
+        FROM SaleWRT S
+        WHERE S.wrt_pft_ctr = ${bldg} AND S.wrt_cng_bdat >= ${mStart} AND S.wrt_cng_bdat < ${mEnd}
+        GROUP BY CAST(S.wrt_so_no AS VARCHAR(20))
+      ),
+      allsp AS (
+        SELECT CAST(sd.SalesNo AS VARCHAR(20)) AS SaleNo,
+               LTRIM(RTRIM(sd.SalesPerson))    AS salesperson,
+               SUM(ISNULL(sd.SaleSplitAmt, 0)) AS split,
+               MAX(sd.CustomerName)            AS CustomerName
+        FROM SalespersonDaily sd
+        WHERE sd.SaleDate >= ${mStart} AND sd.SaleDate < ${mEnd}
+          AND LEFT(CAST(sd.SalesNo AS VARCHAR(20)), 1) = '${bldg}'
+          AND sd.SalesPerson IS NOT NULL AND LTRIM(RTRIM(sd.SalesPerson)) <> ''
+        GROUP BY CAST(sd.SalesNo AS VARCHAR(20)), LTRIM(RTRIM(sd.SalesPerson))
+      ),
+      tot AS (SELECT SaleNo, SUM(split) AS totSplit, COUNT(*) AS n FROM allsp GROUP BY SaleNo)
+      SELECT a.SaleNo AS SalesNo, a.CustomerName, sr.d AS SaleDate,
+             ISNULL(sr.amt, 0) * (CASE WHEN t.totSplit > 0 THEN a.split * 1.0 / t.totSplit ELSE 1.0 / t.n END) AS amount
+      FROM allsp a
+      JOIN tot t ON t.SaleNo = a.SaleNo
+      LEFT JOIN saleRev sr ON sr.SaleNo = a.SaleNo
+      WHERE a.salesperson = '${String(r.code).replace(/'/g, "''")}'
+      ORDER BY amount DESC
+    `,
+    detailsColumns: [
+      { key: 'SaleDate', label: 'Date', render: (x) => x.SaleDate ? new Date(x.SaleDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' }) : '—' },
+      { key: 'SalesNo', label: 'Sale #' },
+      { key: 'CustomerName', label: 'Customer', render: (x) => x.CustomerName || '—' },
+      { key: 'amount', label: 'Amount', align: 'right', render: (x) => <span className="font-semibold">{fmtCurrency(Number(x.amount) || 0)}</span> },
+    ],
+    detailsEmpty: 'No sales this month',
+  });
+
   return (
     <>
-      <Topbar title="Salesperson Report" subtitle={`BETA · ${store === 'ARDEN' ? 'S1 · Arden' : 'S2 · Waynesville'} · ${dailyOn ? dateShort : 'Monthly'}`} />
+      <Topbar title="Salesperson Report" subtitle={`BETA · ${store === 'ARDEN' ? 'S1 · Arden' : 'S2 · Waynesville'} · ${dailyOn ? dateShort : `${monthName} ${yearNum}`}`} />
 
       <div className="flex flex-1 flex-col gap-4 p-5 animate-fade-in">
         {/* ═══════════════ Filters ═══════════════ */}
@@ -302,17 +482,26 @@ export default function SalespersonReportBeta() {
               <Pill active={period === 'daily'}   onClick={() => setPeriod('daily')}   title="Yesterday view">Daily</Pill>
               <Pill active={period === 'monthly'} onClick={() => setPeriod('monthly')} title="This-month view (coming soon)">Monthly</Pill>
             </div>
-            {dailyOn && dayStr && (
+            {dayStr && (
               <div className="ml-auto text-xs text-muted-fg">
-                Latest day · <span className="font-semibold text-fg">{weekdayLong}, {dateShort}</span>
-                <span className="ml-2 text-[11px]">Day {daysElapsed}/{monthTotalDays} of {monthName}</span>
+                {dailyOn ? (
+                  <>Latest day · <span className="font-semibold text-fg">{weekdayLong}, {dateShort}</span></>
+                ) : (
+                  <>Month to date · <span className="font-semibold text-fg">{monthName} {yearNum}</span></>
+                )}
+                <span className="ml-2 text-[11px]">Day {daysElapsed}/{monthTotalDays}</span>
               </div>
             )}
           </CardContent>
         </Card>
 
         {period === 'monthly' ? (
-          <MonthlySoon />
+          <MonthlyView
+            monthName={monthName} yearNum={yearNum} storeLabel={storeLabel}
+            loading={monthLoading} rows={monthRows} team={teamMonth} top={monthTop}
+            standouts={monthStandouts} daysElapsed={daysElapsed} monthTotalDays={monthTotalDays}
+            daysRemaining={daysRemaining} onRowClick={openSpMonth}
+          />
         ) : (
           <>
             {/* ═══════════════ Day hero — team summary ═══════════════ */}
@@ -409,7 +598,7 @@ const PODIUM = [
   { icon: Award, label: '3rd', rail: 'bg-orange-400', card: 'border-orange-500/40 bg-gradient-to-br from-orange-500/10 via-orange-500/5 to-transparent', chip: 'bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-200', bar: 'from-orange-400 to-amber-500' },
 ];
 
-function PodiumCard({ rank, row, teamRev, onClick }) {
+function PodiumCard({ rank, row, teamRev, onClick, shareLabel = 'of day' }) {
   const p = PODIUM[rank] || PODIUM[2];
   const Icon = p.icon;
   const share = teamRev > 0 ? Math.min(100, (row.revenue / teamRev) * 100) : 0;
@@ -433,7 +622,7 @@ function PodiumCard({ rank, row, teamRev, onClick }) {
           <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
             <div className={cn('h-full rounded-full bg-gradient-to-r', p.bar)} style={{ width: `${share}%` }} />
           </div>
-          <span className="w-14 shrink-0 text-right text-[10px] font-medium text-muted-fg">{share.toFixed(0)}% of day</span>
+          <span className="w-16 shrink-0 text-right text-[10px] font-medium text-muted-fg">{share.toFixed(0)}% {shareLabel}</span>
         </div>
       </div>
     </button>
@@ -539,17 +728,147 @@ function Leaderboard({ rows, teamRev, onRowClick }) {
   );
 }
 
-function MonthlySoon() {
+// ═══════════════ Monthly view (month-to-date) ═══════════════
+function MonthlyView({ monthName, yearNum, storeLabel, loading, rows, team, top, standouts, daysElapsed, monthTotalDays, daysRemaining, onRowClick }) {
   return (
-    <Card>
-      <CardContent className="grid place-items-center gap-2 py-16 text-center">
-        <Calendar size={28} className="text-muted-fg" />
-        <div className="text-sm font-semibold">Monthly view is coming next</div>
-        <div className="max-w-md text-xs text-muted-fg">
-          The full monthly leaderboard (target progress, average-sale trend, customer mix) will land here.
-          For now, switch to <span className="font-semibold text-fg">Daily</span> for the team's day report.
+    <>
+      {/* Month hero — team month-to-date summary + trend */}
+      <HeroBanner icon={Trophy} decorIcon={Calendar} accent="violet">
+        <div className="text-[11px] font-bold uppercase tracking-widest text-violet-700 dark:text-violet-300">
+          {storeLabel} · {monthName} {yearNum} · Month to date
         </div>
-      </CardContent>
-    </Card>
+        <div className="mt-1 flex items-baseline gap-2.5 flex-wrap">
+          <span className="text-3xl font-extrabold tabular-nums tracking-tight text-violet-700 dark:text-violet-200">
+            {loading ? '…' : fmtCurrency(team.revenue)}
+          </span>
+          <span className="text-sm font-medium text-muted-fg">this month</span>
+          {team.trend != null && (
+            <span className={cn('inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold',
+              team.trend >= 0 ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-200' : 'bg-rose-100 text-rose-600 dark:bg-rose-900/40 dark:text-rose-200')}>
+              {team.trend >= 0 ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
+              {team.trend >= 0 ? '+' : ''}{team.trend.toFixed(0)}% vs last month
+            </span>
+          )}
+        </div>
+        <div className="mt-2.5 flex flex-wrap gap-x-5 gap-y-1.5 text-xs">
+          <Meta label="Orders" value={fmtNumber(team.orders)} />
+          <Meta label="Items sold" value={fmtNumber(team.items)} />
+          <Meta label="Avg sale" value={fmtCurrency(team.avgTicket)} />
+          <Meta label="Customers" value={`${fmtNumber(team.customers)} · ${fmtNumber(team.newCustomers)} new`} />
+          <Meta label="On the floor" value={fmtNumber(team.people)} />
+          {top && <Meta label="Leader" value={`${top.name} · ${fmtCurrency(top.revenue)}`} highlight />}
+        </div>
+      </HeroBanner>
+
+      {loading ? (
+        <Card><CardContent className="grid place-items-center py-20 text-sm text-muted-fg">
+          <div className="flex flex-col items-center gap-3"><div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />Loading month report…</div>
+        </CardContent></Card>
+      ) : rows.length === 0 ? (
+        <Card><CardContent className="grid place-items-center py-20 text-sm text-muted-fg">No sales for {storeLabel} in {monthName} {yearNum}.</CardContent></Card>
+      ) : (
+        <>
+          {/* Top 3 for the month */}
+          <div className="grid gap-3 sm:grid-cols-3">
+            {rows.slice(0, 3).map((r, i) => (
+              <PodiumCard key={r.code} rank={i} row={r} teamRev={team.revenue} shareLabel="of month" onClick={() => onRowClick(r)} />
+            ))}
+          </div>
+
+          {/* Standouts */}
+          {standouts.length > 0 && (
+            <div className="grid gap-3 sm:grid-cols-3">
+              {standouts.map((s) => <Standout key={s.title} {...s} />)}
+            </div>
+          )}
+
+          {/* Target-pace leaderboard (month) */}
+          <Card>
+            <CardContent className="p-0">
+              <div className="flex items-center gap-2 border-b border-border bg-gradient-to-r from-violet-500/10 via-transparent to-transparent px-4 py-3">
+                <Trophy size={16} className="text-violet-500" />
+                <span className="text-sm font-semibold">Team pace · {monthName} {yearNum}</span>
+                <span className="ml-auto text-[11px] text-muted-fg">Month-to-date &amp; target progress · Day {daysElapsed}/{monthTotalDays} · {daysRemaining} left</span>
+              </div>
+              <MonthLeaderboard rows={rows} teamRev={team.revenue} onRowClick={onRowClick} />
+            </CardContent>
+          </Card>
+        </>
+      )}
+    </>
+  );
+}
+
+function MonthLeaderboard({ rows, teamRev, onRowClick }) {
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead className="bg-muted/40 text-[10px] uppercase tracking-wider text-muted-fg">
+          <tr className="border-b border-border">
+            <th className="px-3 py-2.5 text-left w-9">#</th>
+            <th className="px-3 py-2.5 text-left">Salesperson</th>
+            <th className="px-3 py-2.5 text-right">This Month</th>
+            <th className="px-3 py-2.5 text-right">Share</th>
+            <th className="px-3 py-2.5 text-right">vs Last Mo</th>
+            <th className="px-3 py-2.5 text-right">Target</th>
+            <th className="px-3 py-2.5 text-left w-40">% to Target</th>
+            <th className="px-3 py-2.5 text-right">Need / Day</th>
+            <th className="px-3 py-2.5 text-right">Forecast</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r, i) => {
+            const RankIcon = RANK_ICON[i];
+            const share = teamRev > 0 ? (r.revenue / teamRev) * 100 : 0;
+            return (
+              <tr key={r.code} onClick={() => onRowClick(r)}
+                className="group cursor-pointer border-b border-border last:border-0 hover:bg-muted/30">
+                <td className="px-3 py-2.5">
+                  {RankIcon ? <RankIcon size={15} className={RANK_COLOR[i]} /> : <span className="text-muted-fg tabular-nums">{i + 1}</span>}
+                </td>
+                <td className="px-3 py-2.5 font-semibold" title={r.fullName}>
+                  {r.name}
+                  {r.code !== r.name && <span className="ml-1.5 text-[10px] font-normal text-muted-fg">{r.code}</span>}
+                </td>
+                <td className="px-3 py-2.5 text-right font-bold tabular-nums">{fmtCurrency(r.revenue)}</td>
+                <td className="px-3 py-2.5 text-right tabular-nums text-muted-fg">{share.toFixed(0)}%</td>
+                <td className="px-3 py-2.5 text-right">
+                  {r.trend == null ? <span className="text-muted-fg">—</span> : (
+                    <span className={cn('inline-flex items-center gap-0.5 tabular-nums font-medium',
+                      r.trend >= 0 ? 'text-emerald-600 dark:text-emerald-300' : 'text-rose-500 dark:text-rose-300')}>
+                      {r.trend >= 0 ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
+                      {r.trend >= 0 ? '+' : ''}{r.trend.toFixed(0)}%
+                    </span>
+                  )}
+                </td>
+                <td className="px-3 py-2.5 text-right tabular-nums text-muted-fg">{r.target > 0 ? fmtCompactCurrency(r.target) : '—'}</td>
+                <td className="px-3 py-2.5">
+                  {r.target > 0 ? (
+                    <div className="flex items-center gap-2">
+                      <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
+                        <div className={cn('h-full rounded-full bg-gradient-to-r',
+                          r.pctAchieved >= 100 ? 'from-emerald-500 to-teal-500' : r.pctAchieved >= 60 ? 'from-sky-500 to-cyan-500' : 'from-amber-500 to-orange-500')}
+                          style={{ width: `${Math.min(100, r.pctAchieved)}%` }} />
+                      </div>
+                      <span className="w-9 shrink-0 text-right text-[10px] font-semibold tabular-nums">{r.pctAchieved.toFixed(0)}%</span>
+                    </div>
+                  ) : <span className="text-[11px] text-muted-fg">no target</span>}
+                </td>
+                <td className="px-3 py-2.5 text-right tabular-nums text-muted-fg">{r.reqAvg > 0 ? fmtCompactCurrency(r.reqAvg) : '—'}</td>
+                <td className="px-3 py-2.5 text-right">
+                  <span className={cn('inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold tabular-nums',
+                    r.onPace == null ? 'bg-muted text-muted-fg'
+                      : r.onPace ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-200'
+                      : 'bg-rose-100 text-rose-600 dark:bg-rose-900/40 dark:text-rose-200')}>
+                    {r.onPace != null && (r.onPace ? <TrendingUp size={12} /> : <TrendingDown size={12} />)}
+                    {fmtCompactCurrency(r.forecast)}
+                  </span>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
   );
 }
