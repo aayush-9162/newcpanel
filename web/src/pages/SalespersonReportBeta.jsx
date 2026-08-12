@@ -39,10 +39,11 @@ export default function SalespersonReportBeta() {
   const dailyOn = period === 'daily';
 
   // ── Anchor day — the store's most recent business day on file (excl. today).
+  // Anchored on SaleWRT (the written-sales truth the Dashboard uses), so totals
+  // reconcile with the rest of the app.
   const dayQ = useSqlQuery(`
-    SELECT CONVERT(char(10), CAST(MAX(sd.SaleDate) AS DATE), 23) AS day
-    FROM SalespersonDaily sd
-    WHERE LEFT(CAST(sd.SalesNo AS VARCHAR(20)), 1) = '${bldg}' AND sd.SaleDate < CAST(GETDATE() AS DATE)
+    SELECT CONVERT(char(10), CAST(MAX(wrt_cng_bdat) AS DATE), 23) AS day
+    FROM SaleWRT WHERE wrt_pft_ctr = ${bldg} AND wrt_cng_bdat < CAST(GETDATE() AS DATE)
   `, [], { enabled: dailyOn });
   const dayStr = dayQ.data?.rows?.[0]?.day || null;
   const anchor = dayStr ? localDate(dayStr) : null;
@@ -57,14 +58,46 @@ export default function SalespersonReportBeta() {
 
   const dayReady = dailyOn && !!dayStr;
 
-  // ── Today's numbers per salesperson: revenue / tickets / customers (+new) +
-  // biggest single sale. isNew via NOT EXISTS anti-join on earlier sales.
+  // ── Team totals for the day — from the SaleWRT truth (revenue + orders) and
+  // SalesItemDetail (items), plus distinct customers / new customers. These are
+  // the numbers that must match the Dashboard.
+  const teamQ = useSqlQuery(`
+    SELECT
+      (SELECT SUM(S.wrt_sls) FROM SaleWRT S
+         WHERE S.wrt_pft_ctr = ${bldg} AND S.wrt_cng_bdat >= '${dayStr}' AND S.wrt_cng_bdat < DATEADD(DAY, 1, '${dayStr}')) AS revenue,
+      (SELECT COUNT(*) FROM (
+         SELECT S.wrt_so_no FROM SaleWRT S
+           WHERE S.wrt_pft_ctr = ${bldg} AND S.wrt_cng_bdat >= '${dayStr}' AND S.wrt_cng_bdat < DATEADD(DAY, 1, '${dayStr}')
+           GROUP BY S.wrt_so_no HAVING SUM(S.wrt_sls) > 0) t) AS orders,
+      (SELECT COUNT(*) FROM SalesItemDetail sid
+         WHERE LEFT(CAST(sid.SaleNo AS VARCHAR(20)), 1) = '${bldg}' AND sid.SaleDate >= '${dayStr}' AND sid.SaleDate < DATEADD(DAY, 1, '${dayStr}')) AS items,
+      (SELECT COUNT(DISTINCT sd.CustomerId) FROM SalespersonDaily sd
+         WHERE sd.SaleDate >= '${dayStr}' AND sd.SaleDate < DATEADD(DAY, 1, '${dayStr}')
+           AND LEFT(CAST(sd.SalesNo AS VARCHAR(20)), 1) = '${bldg}' AND sd.CustomerId IS NOT NULL AND LTRIM(RTRIM(sd.CustomerId)) <> '') AS customers,
+      (SELECT COUNT(*) FROM (
+         SELECT DISTINCT sd.CustomerId FROM SalespersonDaily sd
+           WHERE sd.SaleDate >= '${dayStr}' AND sd.SaleDate < DATEADD(DAY, 1, '${dayStr}')
+             AND LEFT(CAST(sd.SalesNo AS VARCHAR(20)), 1) = '${bldg}' AND sd.CustomerId IS NOT NULL AND LTRIM(RTRIM(sd.CustomerId)) <> ''
+             AND NOT EXISTS (SELECT 1 FROM SalespersonDaily p WHERE p.CustomerId = sd.CustomerId AND p.SaleDate < '${dayStr}')) x) AS newCustomers
+  `, [], { enabled: dayReady });
+
+  // ── Per-salesperson attribution (today). Each sale's REAL revenue (SaleWRT)
+  // is split across its salespeople in proportion to their SaleSplitAmt share
+  // (falls back to an equal split). Because SaleSplitAmt is used only as a
+  // within-sale weight and then scaled to the SaleWRT amount, any systematic
+  // scaling in SaleSplitAmt cancels out — the totals reconcile to SaleWRT.
   const boardQ = useSqlQuery(`
-    WITH dayrows AS (
+    WITH saleRev AS (
+      SELECT CAST(S.wrt_so_no AS VARCHAR(20)) AS SaleNo, SUM(S.wrt_sls) AS amt
+      FROM SaleWRT S
+      WHERE S.wrt_pft_ctr = ${bldg} AND S.wrt_cng_bdat >= '${dayStr}' AND S.wrt_cng_bdat < DATEADD(DAY, 1, '${dayStr}')
+      GROUP BY CAST(S.wrt_so_no AS VARCHAR(20))
+    ),
+    sp AS (
       SELECT LTRIM(RTRIM(sd.SalesPerson)) AS salesperson,
-             CAST(sd.SalesNo AS VARCHAR(20)) AS SalesNo,
+             CAST(sd.SalesNo AS VARCHAR(20)) AS SaleNo,
              sd.CustomerId,
-             ISNULL(sd.SaleSplitAmt, 0) AS amt,
+             ISNULL(sd.SaleSplitAmt, 0) AS split,
              CASE WHEN NOT EXISTS (
                     SELECT 1 FROM SalespersonDaily p
                     WHERE p.CustomerId = sd.CustomerId AND p.SaleDate < '${dayStr}'
@@ -74,29 +107,53 @@ export default function SalespersonReportBeta() {
         AND LEFT(CAST(sd.SalesNo AS VARCHAR(20)), 1) = '${bldg}'
         AND sd.SalesPerson IS NOT NULL AND LTRIM(RTRIM(sd.SalesPerson)) <> ''
     ),
-    tickets AS (
-      SELECT salesperson, SalesNo, SUM(amt) AS ticketAmt FROM dayrows GROUP BY salesperson, SalesNo
+    tot AS (SELECT SaleNo, SUM(split) AS totSplit, COUNT(*) AS n FROM sp GROUP BY SaleNo),
+    attr AS (
+      SELECT sp.salesperson, sp.SaleNo, sp.CustomerId, sp.isNew,
+             ISNULL(sr.amt, 0) * (CASE WHEN t.totSplit > 0 THEN sp.split * 1.0 / t.totSplit ELSE 1.0 / t.n END) AS rev
+      FROM sp
+      JOIN tot t ON t.SaleNo = sp.SaleNo
+      LEFT JOIN saleRev sr ON sr.SaleNo = sp.SaleNo
     )
-    SELECT r.salesperson,
-           COUNT(DISTINCT r.SalesNo)    AS orders,
-           SUM(r.amt)                   AS revenue,
-           COUNT(DISTINCT r.CustomerId) AS customers,
-           COUNT(DISTINCT CASE WHEN r.isNew = 1 THEN r.CustomerId END) AS newCustomers,
-           (SELECT MAX(t.ticketAmt) FROM tickets t WHERE t.salesperson = r.salesperson) AS maxTicket
-    FROM dayrows r
-    GROUP BY r.salesperson
+    SELECT salesperson,
+           COUNT(DISTINCT SaleNo)    AS orders,
+           SUM(rev)                  AS revenue,
+           COUNT(DISTINCT CustomerId) AS customers,
+           COUNT(DISTINCT CASE WHEN isNew = 1 THEN CustomerId END) AS newCustomers,
+           MAX(rev)                  AS maxTicket
+    FROM attr
+    GROUP BY salesperson
     ORDER BY revenue DESC
   `, [], { enabled: dayReady });
 
-  // ── Month-to-date revenue per salesperson (month start → anchor day).
+  // ── Month-to-date revenue per salesperson — same proportional attribution
+  // over the month-start → anchor-day window.
   const mtdQ = useSqlQuery(`
-    SELECT LTRIM(RTRIM(sd.SalesPerson)) AS salesperson, SUM(ISNULL(sd.SaleSplitAmt, 0)) AS mtd
-    FROM SalespersonDaily sd
-    WHERE sd.SaleDate >= DATEFROMPARTS(YEAR(CAST('${dayStr}' AS DATE)), MONTH(CAST('${dayStr}' AS DATE)), 1)
-      AND sd.SaleDate < DATEADD(DAY, 1, CAST('${dayStr}' AS DATE))
-      AND LEFT(CAST(sd.SalesNo AS VARCHAR(20)), 1) = '${bldg}'
-      AND sd.SalesPerson IS NOT NULL AND LTRIM(RTRIM(sd.SalesPerson)) <> ''
-    GROUP BY LTRIM(RTRIM(sd.SalesPerson))
+    WITH saleRev AS (
+      SELECT CAST(S.wrt_so_no AS VARCHAR(20)) AS SaleNo, SUM(S.wrt_sls) AS amt
+      FROM SaleWRT S
+      WHERE S.wrt_pft_ctr = ${bldg}
+        AND S.wrt_cng_bdat >= DATEFROMPARTS(YEAR(CAST('${dayStr}' AS DATE)), MONTH(CAST('${dayStr}' AS DATE)), 1)
+        AND S.wrt_cng_bdat < DATEADD(DAY, 1, CAST('${dayStr}' AS DATE))
+      GROUP BY CAST(S.wrt_so_no AS VARCHAR(20))
+    ),
+    sp AS (
+      SELECT LTRIM(RTRIM(sd.SalesPerson)) AS salesperson,
+             CAST(sd.SalesNo AS VARCHAR(20)) AS SaleNo,
+             ISNULL(sd.SaleSplitAmt, 0) AS split
+      FROM SalespersonDaily sd
+      WHERE sd.SaleDate >= DATEFROMPARTS(YEAR(CAST('${dayStr}' AS DATE)), MONTH(CAST('${dayStr}' AS DATE)), 1)
+        AND sd.SaleDate < DATEADD(DAY, 1, CAST('${dayStr}' AS DATE))
+        AND LEFT(CAST(sd.SalesNo AS VARCHAR(20)), 1) = '${bldg}'
+        AND sd.SalesPerson IS NOT NULL AND LTRIM(RTRIM(sd.SalesPerson)) <> ''
+    ),
+    tot AS (SELECT SaleNo, SUM(split) AS totSplit, COUNT(*) AS n FROM sp GROUP BY SaleNo)
+    SELECT sp.salesperson,
+           SUM(ISNULL(sr.amt, 0) * (CASE WHEN t.totSplit > 0 THEN sp.split * 1.0 / t.totSplit ELSE 1.0 / t.n END)) AS mtd
+    FROM sp
+    JOIN tot t ON t.SaleNo = sp.SaleNo
+    LEFT JOIN saleRev sr ON sr.SaleNo = sp.SaleNo
+    GROUP BY sp.salesperson
   `, [], { enabled: dayReady });
 
   // ── Employees — code → name + monthly target (MySQL). Split sales like
@@ -150,12 +207,21 @@ export default function SalespersonReportBeta() {
     });
   }, [boardQ.data, mtdQ.data, empMap, daysElapsed, daysRemaining, monthTotalDays]);
 
-  // ── Team totals (today).
+  // ── Team totals (today) — from the SaleWRT/SalesItemDetail truth (teamQ), so
+  // they reconcile with the Dashboard. People count comes from the board.
   const team = useMemo(() => {
-    let revenue = 0, orders = 0, customers = 0, newC = 0;
-    for (const r of rows) { revenue += r.revenue; orders += r.orders; customers += r.customers; newC += r.newCustomers; }
-    return { revenue, orders, customers, newCustomers: newC, people: rows.length, avgTicket: orders ? revenue / orders : 0 };
-  }, [rows]);
+    const t = teamQ.data?.rows?.[0] ?? {};
+    const revenue = Number(t.revenue) || 0;
+    const orders  = Number(t.orders) || 0;
+    return {
+      revenue, orders,
+      items: Number(t.items) || 0,
+      customers: Number(t.customers) || 0,
+      newCustomers: Number(t.newCustomers) || 0,
+      people: rows.length,
+      avgTicket: orders ? revenue / orders : 0,
+    };
+  }, [teamQ.data, rows.length]);
 
   // ── Standouts — the day's highlights (friendly labels, no items/ticket).
   const standouts = useMemo(() => {
@@ -171,7 +237,7 @@ export default function SalespersonReportBeta() {
     return out;
   }, [rows]);
 
-  const loading = boardQ.isLoading || dayQ.isLoading;
+  const loading = boardQ.isLoading || dayQ.isLoading || teamQ.isLoading;
   const top = rows[0] || null;
 
   const openSp = (r) => setDrilldown({
@@ -245,7 +311,8 @@ export default function SalespersonReportBeta() {
                 <span className="text-sm font-medium text-muted-fg">total sales</span>
               </div>
               <div className="mt-2.5 flex flex-wrap gap-x-5 gap-y-1.5 text-xs">
-                <Meta label="Sales" value={fmtNumber(team.orders)} />
+                <Meta label="Orders" value={fmtNumber(team.orders)} />
+                <Meta label="Items sold" value={fmtNumber(team.items)} />
                 <Meta label="Avg sale" value={fmtCurrency(team.avgTicket)} />
                 <Meta label="Customers" value={`${fmtNumber(team.customers)} · ${fmtNumber(team.newCustomers)} new`} />
                 <Meta label="On the floor" value={fmtNumber(team.people)} />
