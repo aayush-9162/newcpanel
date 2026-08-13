@@ -19,7 +19,7 @@ import {
   MapPin, DollarSign, TrendingUp, TrendingDown, Target, Search,
   Download, RefreshCw, ArrowUpRight, ArrowDownRight, Minus, X, Sparkles,
   Building2, BarChart3, ChevronRight, ArrowLeft, Layers, Globe2,
-  Map as MapIcon,
+  Map as MapIcon, Wallet,
 } from 'lucide-react';
 import { Topbar } from '@/components/Topbar';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/Card';
@@ -216,6 +216,22 @@ const AREA_WEEKLY_SQL = `
 `;
 
 const MONTH_SHORT_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+// Average buying capacity — per zip/city, the average revenue per order
+// ("typical spend per purchase"). Written sales joined to the RV header for the
+// delivery/billing geography. Current year, both stores.
+const CAPACITY_ZIP_EXPR  = `LTRIM(RTRIM(COALESCE(NULLIF(LTRIM(RTRIM(SR.DeliveryZip)),''),  NULLIF(LTRIM(RTRIM(SR.BillingZip)),''),  'Unknown')))`;
+const CAPACITY_CITY_EXPR = `LTRIM(RTRIM(COALESCE(NULLIF(LTRIM(RTRIM(SR.DeliveryCity)),''), NULLIF(LTRIM(RTRIM(SR.BillingCity)),''), 'Unknown')))`;
+const CAPACITY_SQL = `
+  SELECT ${CAPACITY_ZIP_EXPR} AS Zip, ${CAPACITY_CITY_EXPR} AS City,
+         SUM(S.wrt_sls)              AS revenue,
+         COUNT(DISTINCT S.wrt_so_no) AS orders
+  FROM SaleWRT S
+  LEFT JOIN SaleRV SR ON S.wrt_so_no = SR.sales_no
+  WHERE S.wrt_pft_ctr IN (1, 2) AND YEAR(S.wrt_cng_bdat) = YEAR(GETDATE())
+  GROUP BY ${CAPACITY_ZIP_EXPR}, ${CAPACITY_CITY_EXPR}
+  HAVING SUM(S.wrt_sls) > 0 AND COUNT(DISTINCT S.wrt_so_no) > 0
+`;
 
 // ─── drill-down modal ────────────────────────────────────────────────────────
 
@@ -434,6 +450,140 @@ function PerformanceFilter({ value, onChange, counts }) {
         );
       })}
     </div>
+  );
+}
+
+// ─── average buying capacity report ───────────────────────────────────────────
+// Self-contained: fetches per-zip revenue + order counts and ranks areas (and
+// zipcodes) by average spend per order — a proxy for the buying power of each
+// market. Higher avg = customers there write bigger tickets.
+function AvgBuyingCapacity() {
+  const [view, setView] = useState('areas'); // 'areas' | 'zips'
+  const q = useSqlQuery(CAPACITY_SQL, []);
+
+  const zips = useMemo(() => {
+    const rows = q.data?.rows ?? [];
+    return rows.map((r) => {
+      const revenue = parseNumber(r.revenue);
+      const orders  = parseNumber(r.orders);
+      return {
+        zip: String(r.Zip || 'Unknown'),
+        city: String(r.City || '—'),
+        revenue, orders,
+        avg: orders > 0 ? revenue / orders : 0,
+      };
+    });
+  }, [q.data]);
+
+  const areas = useMemo(() => {
+    const map = new Map();
+    for (const z of zips) {
+      const primary = (z.city || '').split(',').map((s) => s.trim()).filter(Boolean)[0] || 'Unknown';
+      if (!map.has(primary)) map.set(primary, { name: primary, revenue: 0, orders: 0, zipcodes: 0 });
+      const a = map.get(primary);
+      a.revenue += z.revenue; a.orders += z.orders; a.zipcodes += 1;
+    }
+    return [...map.values()].map((a) => ({ ...a, avg: a.orders > 0 ? a.revenue / a.orders : 0 }));
+  }, [zips]);
+
+  // Team-wide average for context (total revenue / total orders).
+  const overall = useMemo(() => {
+    let revenue = 0, orders = 0;
+    for (const z of zips) { revenue += z.revenue; orders += z.orders; }
+    return { avg: orders > 0 ? revenue / orders : 0, orders };
+  }, [zips]);
+
+  const list = useMemo(() => {
+    const base = view === 'areas' ? areas : zips;
+    return [...base].sort((a, b) => b.avg - a.avg);
+  }, [view, areas, zips]);
+
+  const maxAvg = Math.max(...list.map((r) => r.avg), 1);
+
+  return (
+    <Card>
+      <CardHeader className="flex-row flex-wrap items-center gap-3 space-y-0">
+        <div className="grid h-9 w-9 place-items-center rounded-xl bg-emerald-500/10 text-emerald-500">
+          <Wallet size={18} />
+        </div>
+        <div className="min-w-0">
+          <CardTitle className="text-sm">Average Buying Capacity · {CURRENT_YEAR}</CardTitle>
+          <CardDescription className="text-[11px]">
+            Average spend per order by market · store-wide avg {fmtCurrency(overall.avg)} across {fmtNumber(overall.orders)} orders
+          </CardDescription>
+        </div>
+        <div className="ml-auto flex gap-1 rounded-lg border border-border bg-muted/30 p-0.5">
+          <button onClick={() => setView('areas')}
+            className={cn('rounded-md px-3 py-1 text-xs font-semibold transition', view === 'areas' ? 'bg-primary text-primary-fg shadow' : 'text-muted-fg hover:text-fg')}>
+            Areas
+          </button>
+          <button onClick={() => setView('zips')}
+            className={cn('rounded-md px-3 py-1 text-xs font-semibold transition', view === 'zips' ? 'bg-primary text-primary-fg shadow' : 'text-muted-fg hover:text-fg')}>
+            Zipcodes
+          </button>
+        </div>
+      </CardHeader>
+      <CardContent className="p-0">
+        {q.isLoading ? (
+          <div className="grid place-items-center py-12 text-sm text-muted-fg">
+            <div className="flex flex-col items-center gap-3"><div className="h-7 w-7 animate-spin rounded-full border-2 border-primary border-t-transparent" />Loading…</div>
+          </div>
+        ) : list.length === 0 ? (
+          <div className="grid place-items-center py-12 text-sm text-muted-fg">No data for {CURRENT_YEAR} yet.</div>
+        ) : (
+          <div className="max-h-[460px] overflow-y-auto">
+            <table className="w-full text-sm">
+              <thead className="sticky top-0 bg-muted/60 text-[10px] uppercase tracking-wider text-muted-fg backdrop-blur">
+                <tr className="border-b border-border">
+                  <th className="px-3 py-2.5 text-left w-9">#</th>
+                  <th className="px-3 py-2.5 text-left">{view === 'areas' ? 'Area / City' : 'Zipcode'}</th>
+                  <th className="px-3 py-2.5 text-right">Orders</th>
+                  <th className="px-3 py-2.5 text-right">Revenue</th>
+                  <th className="px-3 py-2.5 text-left w-52">Avg / Order (buying capacity)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {list.map((r, i) => {
+                  const width = (r.avg / maxAvg) * 100;
+                  const aboveAvg = r.avg >= overall.avg;
+                  return (
+                    <tr key={view === 'areas' ? r.name : r.zip} className="border-b border-border last:border-0 hover:bg-muted/30">
+                      <td className="px-3 py-2.5 tabular-nums text-muted-fg">{i + 1}</td>
+                      <td className="px-3 py-2.5">
+                        {view === 'areas' ? (
+                          <div className="flex flex-col">
+                            <span className="font-semibold">{r.name}</span>
+                            <span className="text-[10px] text-muted-fg">{fmtNumber(r.zipcodes)} zipcode{r.zipcodes === 1 ? '' : 's'}</span>
+                          </div>
+                        ) : (
+                          <div className="flex flex-col">
+                            <span className="font-mono font-semibold">{r.zip}</span>
+                            <span className="text-[10px] text-muted-fg truncate max-w-[200px]" title={r.city}>{r.city}</span>
+                          </div>
+                        )}
+                      </td>
+                      <td className="px-3 py-2.5 text-right tabular-nums text-muted-fg">{fmtNumber(r.orders)}</td>
+                      <td className="px-3 py-2.5 text-right tabular-nums text-muted-fg">{fmtCompactCurrency(r.revenue)}</td>
+                      <td className="px-3 py-2.5">
+                        <div className="flex items-center gap-2">
+                          <div className="h-2 flex-1 overflow-hidden rounded-full bg-muted">
+                            <div className={cn('h-full rounded-full bg-gradient-to-r', aboveAvg ? 'from-emerald-500 to-teal-500' : 'from-sky-500 to-cyan-500')}
+                              style={{ width: `${width}%` }} />
+                          </div>
+                          <span className={cn('w-20 shrink-0 text-right font-bold tabular-nums', aboveAvg ? 'text-emerald-600 dark:text-emerald-300' : 'text-fg')}>
+                            {fmtCurrency(r.avg)}
+                          </span>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 
@@ -1314,6 +1464,9 @@ export default function ZipAnalysis() {
             </CardContent>
           </Card>
         </div>
+
+        {/* ── average buying capacity by area / zipcode ── */}
+        <AvgBuyingCapacity />
 
         {/* ── top 10 zipcodes by revenue ── */}
         <Card>
