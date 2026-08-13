@@ -459,6 +459,7 @@ function PerformanceFilter({ value, onChange, counts }) {
 // market. Higher avg = customers there write bigger tickets.
 function AvgBuyingCapacity() {
   const [expanded, setExpanded] = useState(() => new Set()); // area names expanded
+  const [showAll, setShowAll]   = useState(false);
   const q = useSqlQuery(CAPACITY_SQL, []);
 
   const zips = useMemo(() => {
@@ -488,9 +489,10 @@ function AvgBuyingCapacity() {
     const out = [...map.values()].map((a) => ({
       ...a,
       avg: a.orders > 0 ? a.revenue / a.orders : 0,
-      zipcodes: [...a.zipcodes].sort((x, y) => y.avg - x.avg),
+      zipcodes: [...a.zipcodes].sort((x, y) => y.orders - x.orders),
     }));
-    return out.sort((a, b) => b.avg - a.avg);
+    // Ranked by total orders (volume) first.
+    return out.sort((a, b) => b.orders - a.orders);
   }, [zips]);
 
   // Store-wide average for context + the colour threshold.
@@ -532,7 +534,7 @@ function AvgBuyingCapacity() {
         <div className="min-w-0">
           <CardTitle className="text-sm">Average Buying Capacity · {CURRENT_YEAR}</CardTitle>
           <CardDescription className="text-[11px]">
-            Avg spend per order by area · click an area to see its zipcodes · store-wide avg {fmtCurrency(overall.avg)} over {fmtNumber(overall.orders)} orders
+            Areas by order volume · click an area to see its zipcodes · store-wide avg {fmtCurrency(overall.avg)} over {fmtNumber(overall.orders)} orders
           </CardDescription>
         </div>
       </CardHeader>
@@ -556,7 +558,7 @@ function AvgBuyingCapacity() {
                 </tr>
               </thead>
               <tbody>
-                {areas.map((a, i) => {
+                {(showAll ? areas : areas.slice(0, 10)).map((a, i) => {
                   const isOpen = expanded.has(a.name);
                   return (
                     <Fragment key={a.name}>
@@ -595,6 +597,15 @@ function AvgBuyingCapacity() {
                 })}
               </tbody>
             </table>
+            {areas.length > 10 && (
+              <div className="border-t border-border p-2 text-center">
+                <button onClick={() => setShowAll((v) => !v)}
+                  className="inline-flex items-center gap-1 rounded-lg px-3 py-1.5 text-xs font-semibold text-primary transition hover:bg-muted">
+                  {showAll ? 'Show top 10' : `See all ${fmtNumber(areas.length)} areas`}
+                  <ChevronRight size={13} className={cn('transition-transform', showAll && '-rotate-90')} />
+                </button>
+              </div>
+            )}
           </div>
         )}
       </CardContent>
