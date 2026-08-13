@@ -10,7 +10,7 @@
 // The headline year is auto-detected: we take the most recent year that has
 // any revenue, so the page still works in early-Jan when the current year
 // is mostly empty.
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, Fragment } from 'react';
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid,
   Tooltip as RechartsTooltip, LineChart, Line, Cell, Legend,
@@ -458,7 +458,7 @@ function PerformanceFilter({ value, onChange, counts }) {
 // zipcodes) by average spend per order — a proxy for the buying power of each
 // market. Higher avg = customers there write bigger tickets.
 function AvgBuyingCapacity() {
-  const [view, setView] = useState('areas'); // 'areas' | 'zips'
+  const [expanded, setExpanded] = useState(() => new Set()); // area names expanded
   const q = useSqlQuery(CAPACITY_SQL, []);
 
   const zips = useMemo(() => {
@@ -475,30 +475,53 @@ function AvgBuyingCapacity() {
     });
   }, [q.data]);
 
+  // Group zipcodes under their primary area (city), each area ranked by its
+  // average spend per order; its zipcodes are nested and sorted the same way.
   const areas = useMemo(() => {
     const map = new Map();
     for (const z of zips) {
       const primary = (z.city || '').split(',').map((s) => s.trim()).filter(Boolean)[0] || 'Unknown';
-      if (!map.has(primary)) map.set(primary, { name: primary, revenue: 0, orders: 0, zipcodes: 0 });
+      if (!map.has(primary)) map.set(primary, { name: primary, revenue: 0, orders: 0, zipcodes: [] });
       const a = map.get(primary);
-      a.revenue += z.revenue; a.orders += z.orders; a.zipcodes += 1;
+      a.revenue += z.revenue; a.orders += z.orders; a.zipcodes.push(z);
     }
-    return [...map.values()].map((a) => ({ ...a, avg: a.orders > 0 ? a.revenue / a.orders : 0 }));
+    const out = [...map.values()].map((a) => ({
+      ...a,
+      avg: a.orders > 0 ? a.revenue / a.orders : 0,
+      zipcodes: [...a.zipcodes].sort((x, y) => y.avg - x.avg),
+    }));
+    return out.sort((a, b) => b.avg - a.avg);
   }, [zips]);
 
-  // Team-wide average for context (total revenue / total orders).
+  // Store-wide average for context + the colour threshold.
   const overall = useMemo(() => {
     let revenue = 0, orders = 0;
     for (const z of zips) { revenue += z.revenue; orders += z.orders; }
     return { avg: orders > 0 ? revenue / orders : 0, orders };
   }, [zips]);
 
-  const list = useMemo(() => {
-    const base = view === 'areas' ? areas : zips;
-    return [...base].sort((a, b) => b.avg - a.avg);
-  }, [view, areas, zips]);
+  const maxAvg = Math.max(...areas.map((r) => r.avg), 1);
+  const toggle = (name) => setExpanded((prev) => {
+    const next = new Set(prev);
+    next.has(name) ? next.delete(name) : next.add(name);
+    return next;
+  });
 
-  const maxAvg = Math.max(...list.map((r) => r.avg), 1);
+  const Bar = ({ avg }) => {
+    const width = (avg / maxAvg) * 100;
+    const above = avg >= overall.avg;
+    return (
+      <div className="flex items-center gap-2">
+        <div className="h-2 flex-1 overflow-hidden rounded-full bg-muted">
+          <div className={cn('h-full rounded-full bg-gradient-to-r', above ? 'from-emerald-500 to-teal-500' : 'from-sky-500 to-cyan-500')}
+            style={{ width: `${width}%` }} />
+        </div>
+        <span className={cn('w-20 shrink-0 text-right font-bold tabular-nums', above ? 'text-emerald-600 dark:text-emerald-300' : 'text-fg')}>
+          {fmtCurrency(avg)}
+        </span>
+      </div>
+    );
+  };
 
   return (
     <Card>
@@ -509,18 +532,8 @@ function AvgBuyingCapacity() {
         <div className="min-w-0">
           <CardTitle className="text-sm">Average Buying Capacity · {CURRENT_YEAR}</CardTitle>
           <CardDescription className="text-[11px]">
-            Average spend per order by market · store-wide avg {fmtCurrency(overall.avg)} across {fmtNumber(overall.orders)} orders
+            Avg spend per order by area · click an area to see its zipcodes · store-wide avg {fmtCurrency(overall.avg)} over {fmtNumber(overall.orders)} orders
           </CardDescription>
-        </div>
-        <div className="ml-auto flex gap-1 rounded-lg border border-border bg-muted/30 p-0.5">
-          <button onClick={() => setView('areas')}
-            className={cn('rounded-md px-3 py-1 text-xs font-semibold transition', view === 'areas' ? 'bg-primary text-primary-fg shadow' : 'text-muted-fg hover:text-fg')}>
-            Areas
-          </button>
-          <button onClick={() => setView('zips')}
-            className={cn('rounded-md px-3 py-1 text-xs font-semibold transition', view === 'zips' ? 'bg-primary text-primary-fg shadow' : 'text-muted-fg hover:text-fg')}>
-            Zipcodes
-          </button>
         </div>
       </CardHeader>
       <CardContent className="p-0">
@@ -528,54 +541,56 @@ function AvgBuyingCapacity() {
           <div className="grid place-items-center py-12 text-sm text-muted-fg">
             <div className="flex flex-col items-center gap-3"><div className="h-7 w-7 animate-spin rounded-full border-2 border-primary border-t-transparent" />Loading…</div>
           </div>
-        ) : list.length === 0 ? (
+        ) : areas.length === 0 ? (
           <div className="grid place-items-center py-12 text-sm text-muted-fg">No data for {CURRENT_YEAR} yet.</div>
         ) : (
-          <div className="max-h-[460px] overflow-y-auto">
+          <div className="max-h-[520px] overflow-y-auto">
             <table className="w-full text-sm">
               <thead className="sticky top-0 bg-muted/60 text-[10px] uppercase tracking-wider text-muted-fg backdrop-blur">
                 <tr className="border-b border-border">
                   <th className="px-3 py-2.5 text-left w-9">#</th>
-                  <th className="px-3 py-2.5 text-left">{view === 'areas' ? 'Area / City' : 'Zipcode'}</th>
+                  <th className="px-3 py-2.5 text-left">Area / Zipcode</th>
                   <th className="px-3 py-2.5 text-right">Orders</th>
                   <th className="px-3 py-2.5 text-right">Revenue</th>
                   <th className="px-3 py-2.5 text-left w-52">Avg / Order (buying capacity)</th>
                 </tr>
               </thead>
               <tbody>
-                {list.map((r, i) => {
-                  const width = (r.avg / maxAvg) * 100;
-                  const aboveAvg = r.avg >= overall.avg;
+                {areas.map((a, i) => {
+                  const isOpen = expanded.has(a.name);
                   return (
-                    <tr key={view === 'areas' ? r.name : r.zip} className="border-b border-border last:border-0 hover:bg-muted/30">
-                      <td className="px-3 py-2.5 tabular-nums text-muted-fg">{i + 1}</td>
-                      <td className="px-3 py-2.5">
-                        {view === 'areas' ? (
-                          <div className="flex flex-col">
-                            <span className="font-semibold">{r.name}</span>
-                            <span className="text-[10px] text-muted-fg">{fmtNumber(r.zipcodes)} zipcode{r.zipcodes === 1 ? '' : 's'}</span>
+                    <Fragment key={a.name}>
+                      <tr onClick={() => toggle(a.name)}
+                        className="cursor-pointer border-b border-border hover:bg-muted/30">
+                        <td className="px-3 py-2.5 tabular-nums text-muted-fg">{i + 1}</td>
+                        <td className="px-3 py-2.5">
+                          <div className="flex items-center gap-1.5">
+                            <ChevronRight size={14} className={cn('shrink-0 text-muted-fg transition-transform', isOpen && 'rotate-90')} />
+                            <div className="flex flex-col">
+                              <span className="font-semibold">{a.name}</span>
+                              <span className="text-[10px] text-muted-fg">{fmtNumber(a.zipcodes.length)} zipcode{a.zipcodes.length === 1 ? '' : 's'}</span>
+                            </div>
                           </div>
-                        ) : (
-                          <div className="flex flex-col">
-                            <span className="font-mono font-semibold">{r.zip}</span>
-                            <span className="text-[10px] text-muted-fg truncate max-w-[200px]" title={r.city}>{r.city}</span>
-                          </div>
-                        )}
-                      </td>
-                      <td className="px-3 py-2.5 text-right tabular-nums text-muted-fg">{fmtNumber(r.orders)}</td>
-                      <td className="px-3 py-2.5 text-right tabular-nums text-muted-fg">{fmtCompactCurrency(r.revenue)}</td>
-                      <td className="px-3 py-2.5">
-                        <div className="flex items-center gap-2">
-                          <div className="h-2 flex-1 overflow-hidden rounded-full bg-muted">
-                            <div className={cn('h-full rounded-full bg-gradient-to-r', aboveAvg ? 'from-emerald-500 to-teal-500' : 'from-sky-500 to-cyan-500')}
-                              style={{ width: `${width}%` }} />
-                          </div>
-                          <span className={cn('w-20 shrink-0 text-right font-bold tabular-nums', aboveAvg ? 'text-emerald-600 dark:text-emerald-300' : 'text-fg')}>
-                            {fmtCurrency(r.avg)}
-                          </span>
-                        </div>
-                      </td>
-                    </tr>
+                        </td>
+                        <td className="px-3 py-2.5 text-right tabular-nums text-muted-fg">{fmtNumber(a.orders)}</td>
+                        <td className="px-3 py-2.5 text-right tabular-nums text-muted-fg">{fmtCompactCurrency(a.revenue)}</td>
+                        <td className="px-3 py-2.5"><Bar avg={a.avg} /></td>
+                      </tr>
+                      {isOpen && a.zipcodes.map((z) => (
+                        <tr key={a.name + '_' + z.zip} className="border-b border-border bg-muted/20">
+                          <td className="px-3 py-2" />
+                          <td className="px-3 py-2 pl-9">
+                            <div className="flex flex-col">
+                              <span className="font-mono text-xs font-semibold">{z.zip}</span>
+                              <span className="text-[10px] text-muted-fg truncate max-w-[200px]" title={z.city}>{z.city}</span>
+                            </div>
+                          </td>
+                          <td className="px-3 py-2 text-right tabular-nums text-muted-fg">{fmtNumber(z.orders)}</td>
+                          <td className="px-3 py-2 text-right tabular-nums text-muted-fg">{fmtCompactCurrency(z.revenue)}</td>
+                          <td className="px-3 py-2"><Bar avg={z.avg} /></td>
+                        </tr>
+                      ))}
+                    </Fragment>
                   );
                 })}
               </tbody>
