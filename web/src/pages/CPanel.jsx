@@ -87,7 +87,7 @@ const TOOLS = [
     accent: 'rose',
   },
   {
-    label: 'Form Reports',
+    label: 'Reports (Daily Forms)',
     description: 'Reporting portal for submitted forms',
     href: 'http://192.168.0.211.nip.io:1214/formreport/',
     icon: FileBarChart,
