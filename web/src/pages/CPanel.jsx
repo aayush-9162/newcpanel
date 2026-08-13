@@ -74,13 +74,13 @@ const TOOLS = [
   },
   {
     label: 'New UPS System',
-    description: 'UPS shipping and label system',
+    description: 'UPS Board',
     href: 'http://192.168.0.211:5000/login',
     icon: Package,
     accent: 'sky',
   },
   {
-    label: 'StoreForms',
+    label: 'Daily Forms',
     description: 'Store forms portal',
     href: 'http://192.168.0.211.nip.io:1214/',
     icon: Store,
