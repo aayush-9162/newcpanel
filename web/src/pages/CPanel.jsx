@@ -14,7 +14,7 @@ import { useAuth } from '@/auth/AuthProvider';
 import {
   LayoutGrid, ExternalLink, ClipboardEdit, Sparkles, Search,
   // External tool icons
-  ListChecks, BarChart3, Globe2, Video, Store, FileBarChart, Clock, Truck, FileText, MessagesSquare,
+  ListChecks, BarChart3, Globe2, Video, Store, FileBarChart, Clock, Truck, FileText, MessagesSquare, Package,
 } from 'lucide-react';
 
 // ─── External tools (open in new tab) ────────────────────────────────────────
@@ -71,6 +71,13 @@ const TOOLS = [
     icon: Clock,
     logo: 'adp.com',
     accent: 'amber',
+  },
+  {
+    label: 'New UPS System',
+    description: 'UPS shipping and label system',
+    href: 'http://192.168.0.211:5000/login',
+    icon: Package,
+    accent: 'sky',
   },
   {
     label: 'StoreForms',
