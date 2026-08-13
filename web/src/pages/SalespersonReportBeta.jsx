@@ -520,7 +520,6 @@ export default function SalespersonReportBeta() {
                 <Meta label="Items sold" value={fmtNumber(team.items)} />
                 <Meta label="Avg sale" value={fmtCurrency(team.avgTicket)} />
                 <Meta label="Customers" value={`${fmtNumber(team.customers)} · ${fmtNumber(team.newCustomers)} new`} />
-                <Meta label="On the floor" value={fmtNumber(team.people)} />
                 {top && <Meta label="Leader" value={`${top.name} · ${fmtCurrency(top.revenue)}`} highlight />}
               </div>
             </HeroBanner>
@@ -755,7 +754,6 @@ function MonthlyView({ monthName, yearNum, storeLabel, loading, rows, team, top,
           <Meta label="Items sold" value={fmtNumber(team.items)} />
           <Meta label="Avg sale" value={fmtCurrency(team.avgTicket)} />
           <Meta label="Customers" value={`${fmtNumber(team.customers)} · ${fmtNumber(team.newCustomers)} new`} />
-          <Meta label="On the floor" value={fmtNumber(team.people)} />
           {top && <Meta label="Leader" value={`${top.name} · ${fmtCurrency(top.revenue)}`} highlight />}
         </div>
       </HeroBanner>
