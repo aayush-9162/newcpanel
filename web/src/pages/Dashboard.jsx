@@ -664,7 +664,7 @@ export default function Dashboard() {
     loadRows: () => a.zips.map((z) => ({ zip: z.zip, orders: z.orders, revenue: z.revenue })),
     detailsColumns: [
       { key: 'zip', label: 'Zip Code', render: (r) => <span className="font-mono font-semibold">{r.zip}</span> },
-      { key: 'orders', label: 'Orders', align: 'right', render: (r) => fmtNumber(r.orders) },
+      { key: 'orders', label: 'Sales', align: 'right', render: (r) => fmtNumber(r.orders) },
       { key: 'revenue', label: 'Revenue', align: 'right', render: (r) => <span className="font-semibold">{fmtCurrency(r.revenue)}</span> },
     ],
     detailsEmpty: 'No zip codes',
@@ -846,7 +846,7 @@ export default function Dashboard() {
                 detailsColumns: [
                   { key: 'name', label: 'Area' },
                   { key: 'zips', label: 'Zip Codes', align: 'right', render: (r) => fmtNumber(r.zips) },
-                  { key: 'orders', label: 'Orders', align: 'right', render: (r) => fmtNumber(r.orders) },
+                  { key: 'orders', label: 'Sales', align: 'right', render: (r) => fmtNumber(r.orders) },
                   { key: 'revenue', label: 'Revenue', align: 'right', render: (r) => <span className="font-semibold">{fmtCurrency(r.revenue)}</span> },
                 ],
                 onRowClick: (row) => monthAreaZipConfig(row._area),
@@ -1321,14 +1321,14 @@ export default function Dashboard() {
             })}
           />
           <HeroStat
-            label="Orders · This Month"
+            label="Sales · This Month"
             value={fmtNumber(thisMonthOrders)}
             icon={ShoppingCart}
             accent="sky"
-            subtitle={last7Orders ? `${fmtNumber(last7Orders)} in last 7 days` : 'Order count'}
+            subtitle={last7Orders ? `${fmtNumber(last7Orders)} in last 7 days` : 'Sale count'}
             loading={orderCountQ.isLoading}
             onClick={openDetail({
-              title: `Orders · This Month · ${store === 'ARDEN' ? 'Arden (S1)' : 'Waynesville (S2)'}`,
+              title: `Sales · This Month · ${store === 'ARDEN' ? 'Arden (S1)' : 'Waynesville (S2)'}`,
               icon: ShoppingCart,
               accent: 'sky',
               headline: fmtNumber(thisMonthOrders),
@@ -1409,7 +1409,7 @@ export default function Dashboard() {
                 )},
                 { key: 'CustomerName', label: 'Customer' },
                 { key: 'firstSale',    label: 'First Sale', render: (r) => r.firstSale ? new Date(r.firstSale).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' }) : '—' },
-                { key: 'orders',       label: 'Orders', align: 'right', render: (r) => fmtNumber(Number(r.orders) || 0) },
+                { key: 'orders',       label: 'Sales', align: 'right', render: (r) => fmtNumber(Number(r.orders) || 0) },
                 { key: 'spent',        label: 'Spent', align: 'right', render: (r) => <span className="font-semibold">{fmtCurrency(Number(r.spent) || 0)}</span> },
               ],
               detailsEmpty: 'No customers this month yet',
@@ -1525,7 +1525,7 @@ export default function Dashboard() {
         {/* ─── Vendor Wise Analysis (top 5 vendors this month, selected store) ─── */}
         <SectionHeading
           icon={Truck}
-          title={`Vendor Wise Analysis · ${store === 'ARDEN' ? 'Arden (S1)' : 'Waynesville (S2)'}`}
+          title={`Vendor Insights · ${store === 'ARDEN' ? 'Arden (S1)' : 'Waynesville (S2)'}`}
           hint={topVendorsRevTotal > 0
             ? `Top 5 · ${fmtCurrency(topVendorsRevTotal)} revenue`
             : 'Top 5 vendors by revenue'}

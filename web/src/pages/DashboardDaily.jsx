@@ -275,7 +275,7 @@ export default function DashboardDaily({ store, selectedBldg }) {
     loadRows: () => a.zips.map((z) => ({ zip: z.zip, orders: z.orders, revenue: z.revenue })),
     detailsColumns: [
       { key: 'zip', label: 'Zip Code', render: (r) => <span className="font-mono font-semibold">{r.zip}</span> },
-      { key: 'orders', label: 'Orders', align: 'right', render: (r) => fmtNumber(r.orders) },
+      { key: 'orders', label: 'Sales', align: 'right', render: (r) => fmtNumber(r.orders) },
       { key: 'revenue', label: 'Revenue', align: 'right', render: (r) => <span className="font-semibold">{fmtCurrency(r.revenue)}</span> },
     ],
     detailsEmpty: 'No zip codes',
@@ -292,7 +292,7 @@ export default function DashboardDaily({ store, selectedBldg }) {
     detailsColumns: [
       { key: 'name', label: 'Area' },
       { key: 'zips', label: 'Zip Codes', align: 'right', render: (r) => fmtNumber(r.zips) },
-      { key: 'orders', label: 'Orders', align: 'right', render: (r) => fmtNumber(r.orders) },
+      { key: 'orders', label: 'Sales', align: 'right', render: (r) => fmtNumber(r.orders) },
       { key: 'revenue', label: 'Revenue', align: 'right', render: (r) => <span className="font-semibold">{fmtCurrency(r.revenue)}</span> },
     ],
     onRowClick: (row) => areaZipConfig(row._area),
@@ -327,14 +327,14 @@ export default function DashboardDaily({ store, selectedBldg }) {
       {/* ═══════════════ KPI tiles (compact) ═══════════════ */}
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <StatCard
-          label={`Orders · ${dateShort}`}
+          label={`Sales · ${dateShort}`}
           value={fmtNumber(orders)}
           caption={weekdayLong || 'Latest day'}
           icon={ShoppingCart}
           accent="sky"
           loading={kpiQ.isLoading}
           onClick={openDetail({
-            title: `Orders · ${dateShort} · ${storeLabel}`,
+            title: `Sales · ${dateShort} · ${storeLabel}`,
             icon: ShoppingCart,
             accent: 'sky',
             headline: fmtNumber(orders),
@@ -352,13 +352,13 @@ export default function DashboardDaily({ store, selectedBldg }) {
               { key: 'SaleNo', label: 'Sale #' },
               { key: 'amount', label: 'Amount', align: 'right', render: (r) => <span className="font-semibold">{fmtCurrency(Number(r.amount) || 0)}</span> },
             ],
-            detailsEmpty: 'No orders yesterday',
+            detailsEmpty: 'No sales yesterday',
           })}
         />
         <StatCard
           label={`Items Sold · ${dateShort}`}
           value={fmtNumber(units)}
-          caption={orders ? `${(units / orders).toFixed(1)} per order` : 'units sold'}
+          caption={orders ? `${(units / orders).toFixed(1)} per sale` : 'units sold'}
           icon={Boxes}
           accent="primary"
           loading={unitsQ.isLoading}
@@ -443,14 +443,14 @@ export default function DashboardDaily({ store, selectedBldg }) {
               )},
               { key: 'CustomerName', label: 'Customer' },
               { key: 'firstSale',    label: 'First Sale', render: (r) => r.firstSale ? new Date(r.firstSale).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' }) : '—' },
-              { key: 'orders',       label: 'Orders', align: 'right', render: (r) => fmtNumber(Number(r.orders) || 0) },
+              { key: 'orders',       label: 'Sales', align: 'right', render: (r) => fmtNumber(Number(r.orders) || 0) },
               { key: 'spent',        label: 'Spent', align: 'right', render: (r) => <span className="font-semibold">{fmtCurrency(Number(r.spent) || 0)}</span> },
             ],
             detailsEmpty: 'No customers yesterday',
           })}
         />
         <StatCard
-          label={`Top Area · ${dateShort}`}
+          label={`Prime Market · ${dateShort}`}
           value={topArea ? fmtCompactCurrency(topArea.revenue) : '—'}
           caption={topArea ? `${topArea.name} · ${topAreaShare}% of day` : 'no sales'}
           icon={MapPin}
@@ -582,7 +582,7 @@ export default function DashboardDaily({ store, selectedBldg }) {
       {/* ═══════════════ Top 5 vendors (yesterday) ═══════════════ */}
       <SectionHeading
         icon={Truck}
-        title={`Vendor Wise Analysis · ${dateShort} · ${storeLabel}`}
+        title={`Vendor Insights · ${dateShort} · ${storeLabel}`}
         hint={topVendorsRevTotal > 0
           ? `Top 5 · ${fmtCurrency(topVendorsRevTotal)} revenue`
           : 'Top 5 vendors by revenue'}
@@ -678,7 +678,7 @@ export default function DashboardDaily({ store, selectedBldg }) {
                 value={fmtNumber(runits)}
                 icon={room.icon}
                 accent={room.accent}
-                subtitle={runits ? `${fmtNumber(runits)} item${runits === 1 ? '' : 's'} sold yesterday` : 'None sold yesterday'}
+                subtitle={runits ? `${fmtNumber(runits)} item${runits === 1 ? '' : 's'} sold ${dateShort}` : `None sold ${dateShort}`}
                 loading={itemCatQ.isLoading}
                 onClick={openDetail({
                   title: `${room.key} · Items Sold · ${dateShort} · ${storeLabel}`,
@@ -706,13 +706,13 @@ export default function DashboardDaily({ store, selectedBldg }) {
                     { key: 'item_type', label: 'Item Type' },
                     { key: 'units', label: 'Total Sold', align: 'right', render: (r) => <span className="font-semibold">{fmtNumber(Number(r.units) || 0)}</span> },
                   ],
-                  detailsEmpty: `No ${room.key.toLowerCase()} items sold yesterday`,
+                  detailsEmpty: `No ${room.key.toLowerCase()} items sold ${dateShort}`,
                   onRowClick: (row) => ({
                     title: `${room.key} · ${row.item_type} · ${storeLabel}`,
                     icon: room.icon,
                     accent: room.accent,
                     headline: `${fmtNumber(Number(row.units) || 0)} ${row.item_type}`,
-                    subtitle: `Individual ${row.item_type} pieces sold yesterday · same item on one sale is grouped with a Qty`,
+                    subtitle: `Individual ${row.item_type} pieces sold ${dateShort} · same item on one sale is grouped with a Qty`,
                     detailsDb: 'sql',
                     detailsSql: `
                       WITH m AS (SELECT MAX(SaleDate) AS d FROM SalesItemDetail WHERE LEFT(CAST(SaleNo AS VARCHAR(20)), 1) = '${selectedBldg}' AND SaleDate < CAST(GETDATE() AS DATE)),
@@ -746,7 +746,7 @@ export default function DashboardDaily({ store, selectedBldg }) {
                           : <span className="text-muted-fg">1</span>;
                       }},
                     ],
-                    detailsEmpty: `No ${row.item_type} sold yesterday`,
+                    detailsEmpty: `No ${row.item_type} sold ${dateShort}`,
                   }),
                 })}
               />
