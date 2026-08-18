@@ -10,7 +10,7 @@
 // sale + month-to-date) + SalesItemDetail (items); codes → names + monthly
 // targets via MySQL employees (rv_code, name, default_target).
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Topbar } from '@/components/Topbar';
 import { Card, CardContent } from '@/components/ui/Card';
 import { HeroBanner } from '@/components/HeroStat';
@@ -19,7 +19,7 @@ import { useSqlQuery, useMysqlQuery, useAnalyticsQuery } from '@/lib/api';
 import { fmtCurrency, fmtNumber, fmtCompactCurrency } from '@/lib/format';
 import {
   Trophy, Receipt, Crown, Medal, Award, Calendar, Sparkles,
-  Flame, Gem, UserPlus, TrendingUp, TrendingDown,
+  Flame, Gem, UserPlus, TrendingUp, TrendingDown, Mail, ShieldCheck, ChevronRight,
 } from 'lucide-react';
 import { cn } from '@/lib/cn';
 
@@ -508,6 +508,7 @@ export default function SalespersonReportBeta() {
           <>
             <FloorHero store={store} fromDate={dayStr} toDate={dayStr} label={dateShort} weekday={weekdayLong} periodLabel="Team day" />
             <FloorConversion store={store} fromDate={dayStr} toDate={dayStr} label={dateShort} />
+            <TopSalespeople store={store} fromDate={dayStr} toDate={dayStr} />
           </>
         )}
       </div>
@@ -851,6 +852,103 @@ function FloorConversion({ store, fromDate, toDate, label }) {
   );
 }
 
+// ═══════════════ Top salespeople by a behavior metric ═══════════════
+// Ranks salespeople by Email Capture or Care-Plan (Comprehensive Care) with the
+// total count each, top-5 + See all. Email count is derived from tickets × rate
+// when the feed doesn't expose a raw count.
+function TopSalespeople({ store, fromDate, toDate }) {
+  const sbStore = store === 'ARDEN' ? 'S1' : 'S2';
+  const ready = !!fromDate && !!toDate;
+  const opts = { retry: 0, enabled: ready, staleTime: 5 * 60 * 1000 };
+  const emailQ = useAnalyticsQuery('sb/email-capture', { store: sbStore, from: fromDate, to: toDate }, opts);
+  const careQ  = useAnalyticsQuery('sb/care-plan',      { store: sbStore, from: fromDate, to: toDate }, opts);
+  const [metric, setMetric] = useState('email');   // 'email' | 'care'
+  const [showAll, setShowAll] = useState(false);
+
+  // TEMP: log the email-capture shape once so the count field is confirmed.
+  useEffect(() => { if (emailQ.data) { try { console.log('%c[SB] email-capture', 'color:#0ea5e9;font-weight:bold', emailQ.data?.rows?.[0]); } catch { /* ignore */ } } }, [emailQ.data]);
+
+  const emailRows = useMemo(() => (emailQ.data?.rows ?? []).map((r) => {
+    const rate = numF(r.captureRate ?? r.emailRate ?? r.emailCaptureRate ?? r.rate);
+    const tickets = numF(r.tickets);
+    let count = numF(r.emailsCaptured ?? r.withEmail ?? r.emails ?? r.captured ?? r.emailCount ?? r.count);
+    if (count == null && rate != null && tickets != null) count = Math.round((tickets * rate) / 100);
+    return { name: r.name || '—', store: r.storeName || '', count, rate };
+  }).filter((r) => r.count != null || r.rate != null).sort((a, b) => (b.count ?? 0) - (a.count ?? 0)), [emailQ.data]);
+
+  const careRows = useMemo(() => (careQ.data?.rows ?? []).map((r) => ({
+    name: r.name || '—', store: r.storeName || '', count: numF(r.carePlansSold), rate: numF(r.attachRate),
+  })).filter((r) => (r.count ?? 0) > 0 || (r.rate ?? 0) > 0).sort((a, b) => (b.count ?? 0) - (a.count ?? 0)), [careQ.data]);
+
+  const cfg = metric === 'email'
+    ? { rows: emailRows, unit: 'emails', icon: Mail, tint: 'text-sky-500', accent: 'from-sky-500/10' }
+    : { rows: careRows, unit: 'care plans', icon: ShieldCheck, tint: 'text-violet-500', accent: 'from-violet-500/10' };
+  const Icon = cfg.icon;
+  const total = cfg.rows.reduce((s, r) => s + (r.count || 0), 0);
+  const list = showAll ? cfg.rows : cfg.rows.slice(0, 5);
+  const loading = emailQ.isLoading || careQ.isLoading;
+
+  const Rank = ({ i }) => {
+    const RankIcon = [Crown, Medal, Award][i];
+    const color = ['text-amber-500', 'text-slate-400', 'text-orange-400'][i];
+    return RankIcon ? <RankIcon size={15} className={color} /> : <span className="text-muted-fg tabular-nums">{i + 1}</span>;
+  };
+
+  return (
+    <Card>
+      <CardContent className="p-0">
+        <div className={cn('flex flex-wrap items-center gap-2 border-b border-border bg-gradient-to-r via-transparent to-transparent px-4 py-3', cfg.accent)}>
+          <Icon size={16} className={cfg.tint} />
+          <span className="text-sm font-semibold">Top Salespeople</span>
+          <div className="ml-1 flex gap-1 rounded-lg border border-border bg-muted/30 p-0.5">
+            <Pill active={metric === 'email'} onClick={() => { setMetric('email'); setShowAll(false); }} title="By email capture">Email Capture</Pill>
+            <Pill active={metric === 'care'}  onClick={() => { setMetric('care');  setShowAll(false); }} title="By Comprehensive Care attach">Care Plans</Pill>
+          </div>
+          {cfg.rows.length > 0 && <span className="ml-auto text-[11px] text-muted-fg">{fmtNumber(total)} {cfg.unit} total</span>}
+        </div>
+        {loading ? (
+          <div className="grid place-items-center py-10 text-sm text-muted-fg">
+            <div className="flex flex-col items-center gap-3"><div className="h-7 w-7 animate-spin rounded-full border-2 border-primary border-t-transparent" />Loading…</div>
+          </div>
+        ) : cfg.rows.length === 0 ? (
+          <div className="grid place-items-center py-10 text-sm text-muted-fg">No data for this period.</div>
+        ) : (
+          <>
+            <div className="divide-y divide-border">
+              {list.map((r, i) => (
+                <div key={r.name + i} className="flex items-center gap-3 px-4 py-2.5">
+                  <span className="w-5 text-center"><Rank i={i} /></span>
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-sm font-semibold">{r.name}</div>
+                    {r.store && <div className="text-[10px] text-muted-fg">{r.store}</div>}
+                  </div>
+                  <div className="text-right">
+                    <div className="text-base font-extrabold tabular-nums">
+                      {r.count == null ? '—' : fmtNumber(r.count)} <span className="text-[10px] font-medium text-muted-fg">{cfg.unit}</span>
+                    </div>
+                    {r.rate != null && (
+                      <span className="inline-flex rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-muted-fg">{Number(r.rate).toFixed(1)}%</span>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+            {cfg.rows.length > 5 && (
+              <div className="border-t border-border p-2 text-center">
+                <button onClick={() => setShowAll((v) => !v)}
+                  className="inline-flex items-center gap-1 rounded-lg px-3 py-1.5 text-xs font-semibold text-primary transition hover:bg-muted">
+                  {showAll ? 'Show top 5' : `See all ${fmtNumber(cfg.rows.length)}`}
+                  <ChevronRight size={13} className={cn('transition-transform', showAll && '-rotate-90')} />
+                </button>
+              </div>
+            )}
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 // ═══════════════ Monthly view (month-to-date) ═══════════════
 function MonthlyView({ store, monthName, yearNum, fromDate, toDate }) {
   const label = `${monthName} ${yearNum}`;
@@ -858,6 +956,7 @@ function MonthlyView({ store, monthName, yearNum, fromDate, toDate }) {
     <>
       <FloorHero store={store} fromDate={fromDate} toDate={toDate} label={label} periodLabel="Month to date" />
       <FloorConversion store={store} fromDate={fromDate} toDate={toDate} label={label} />
+      <TopSalespeople store={store} fromDate={fromDate} toDate={toDate} />
     </>
   );
 }
