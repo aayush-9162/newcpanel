@@ -509,9 +509,7 @@ export default function SalespersonReportBeta() {
             fromDate={anchor ? `${anchor.getFullYear()}-${String(anchor.getMonth() + 1).padStart(2, '0')}-01` : ''}
             toDate={dayStr} label={`${monthName} ${yearNum}`} periodLabel="Month to date" />
         ) : (
-          <PeriodView store={store}
-            fromDate={anchor ? `${anchor.getFullYear()}-01-01` : ''}
-            toDate={dayStr} label={`${yearNum}`} periodLabel="Year to date" />
+          <PeriodView store={store} year={yearNum} label={`${yearNum}`} periodLabel="Year to date" />
         )}
       </div>
 
@@ -698,14 +696,17 @@ const normNameF = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '')
 // UPS ← sb/customer-capture · tickets+care-plan ← sb/care-plan · sales$ ←
 // /sales bySeller · store KPIs ← sb/executive. React Query dedupes identical
 // requests, so calling this twice triggers one set of fetches.
-function useFloorData(store, fromDate, toDate) {
+function useFloorData(store, fromDate, toDate, year) {
   const sbStore = store === 'ARDEN' ? 'S1' : 'S2';
-  const ready = !!fromDate && !!toDate;
+  // Yearly uses the API's `year` filter (calendar-year scoped + indexed);
+  // daily/monthly use an explicit from/to window.
+  const params = year ? { store: sbStore, year } : { store: sbStore, from: fromDate, to: toDate };
+  const ready = year ? true : (!!fromDate && !!toDate);
   const opts = { retry: 0, enabled: ready, staleTime: 5 * 60 * 1000 };
-  const capQ   = useAnalyticsQuery('sb/customer-capture', { store: sbStore, from: fromDate, to: toDate }, opts);
-  const execQ  = useAnalyticsQuery('sb/executive',        { store: sbStore, from: fromDate, to: toDate }, opts);
-  const careQ  = useAnalyticsQuery('sb/care-plan',        { store: sbStore, from: fromDate, to: toDate }, opts);
-  const salesQ = useAnalyticsQuery('sales',               { store: sbStore, from: fromDate, to: toDate }, opts);
+  const capQ   = useAnalyticsQuery('sb/customer-capture', params, opts);
+  const execQ  = useAnalyticsQuery('sb/executive',        params, opts);
+  const careQ  = useAnalyticsQuery('sb/care-plan',        params, opts);
+  const salesQ = useAnalyticsQuery('sales',               params, opts);
 
   const rows = useMemo(() => {
     const byName = new Map();
@@ -750,9 +751,9 @@ function HeroChip({ label, value, highlight }) {
 }
 
 // Attractive summary hero driven by the live UPS-system floor data.
-function FloorHero({ store, fromDate, toDate, label, weekday, periodLabel }) {
+function FloorHero({ store, fromDate, toDate, year, label, weekday, periodLabel }) {
   const storeLabel = store === 'ARDEN' ? 'Arden (S1)' : 'Waynesville (S2)';
-  const f = useFloorData(store, fromDate, toDate);
+  const f = useFloorData(store, fromDate, toDate, year);
   const firstName = f.leader ? String(f.leader.name).split(' ')[0] : '';
   return (
     <HeroBanner icon={Trophy} decorIcon={Trophy} accent="emerald">
@@ -777,9 +778,9 @@ function FloorHero({ store, fromDate, toDate, label, weekday, periodLabel }) {
   );
 }
 
-function FloorConversion({ store, fromDate, toDate, label }) {
+function FloorConversion({ store, fromDate, toDate, year, label }) {
   const storeLabel = store === 'ARDEN' ? 'Arden' : 'Waynesville';
-  const { rows, loading, error, totUps } = useFloorData(store, fromDate, toDate);
+  const { rows, loading, error, totUps } = useFloorData(store, fromDate, toDate, year);
   const pct = pctF;
   const money = moneyF;
 
@@ -858,12 +859,13 @@ function FloorConversion({ store, fromDate, toDate, label }) {
 // Ranks salespeople by Email Capture or Care-Plan (Comprehensive Care) with the
 // total count each, top-5 + See all. Email count is derived from tickets × rate
 // when the feed doesn't expose a raw count.
-function TopSalespeople({ store, fromDate, toDate }) {
+function TopSalespeople({ store, fromDate, toDate, year }) {
   const sbStore = store === 'ARDEN' ? 'S1' : 'S2';
-  const ready = !!fromDate && !!toDate;
+  const params = year ? { store: sbStore, year } : { store: sbStore, from: fromDate, to: toDate };
+  const ready = year ? true : (!!fromDate && !!toDate);
   const opts = { retry: 0, enabled: ready, staleTime: 5 * 60 * 1000 };
-  const emailQ = useAnalyticsQuery('sb/email-capture', { store: sbStore, from: fromDate, to: toDate }, opts);
-  const careQ  = useAnalyticsQuery('sb/care-plan',      { store: sbStore, from: fromDate, to: toDate }, opts);
+  const emailQ = useAnalyticsQuery('sb/email-capture', params, opts);
+  const careQ  = useAnalyticsQuery('sb/care-plan',      params, opts);
   const [metric, setMetric] = useState('email');   // 'email' | 'care'
   const [showAll, setShowAll] = useState(false);
 
@@ -952,12 +954,12 @@ function TopSalespeople({ store, fromDate, toDate }) {
 }
 
 // ═══════════════ Period view (month-to-date or year-to-date) ═══════════════
-function PeriodView({ store, fromDate, toDate, label, periodLabel }) {
+function PeriodView({ store, fromDate, toDate, year, label, periodLabel }) {
   return (
     <>
-      <FloorHero store={store} fromDate={fromDate} toDate={toDate} label={label} periodLabel={periodLabel} />
-      <FloorConversion store={store} fromDate={fromDate} toDate={toDate} label={label} />
-      <TopSalespeople store={store} fromDate={fromDate} toDate={toDate} />
+      <FloorHero store={store} fromDate={fromDate} toDate={toDate} year={year} label={label} periodLabel={periodLabel} />
+      <FloorConversion store={store} fromDate={fromDate} toDate={toDate} year={year} label={label} />
+      <TopSalespeople store={store} fromDate={fromDate} toDate={toDate} year={year} />
     </>
   );
 }
