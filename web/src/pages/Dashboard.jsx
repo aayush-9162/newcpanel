@@ -751,6 +751,12 @@ export default function Dashboard() {
                 ))}
               </div>
             )}
+            <MiniCumulative
+              data={dailyChart}
+              monthName={monthName}
+              total={thisYearMonthTotal}
+              className={period === 'monthly' ? '' : 'ml-auto'}
+            />
           </CardContent>
         </Card>
 
@@ -1656,6 +1662,50 @@ function FilterPill({ active, onClick, children, title, small }) {
     >
       {children}
     </button>
+  );
+}
+
+// MiniCumulative — a compact header widget showing the month's cumulative
+// written sales (this year vs last year) as a tiny two-line spark, plus the
+// current total and vs-LY delta. Sized to sit inside the filter row height.
+function MiniCumulative({ data, monthName, total, className }) {
+  const { chart, lastLy } = useMemo(() => {
+    let lastReal = -1;
+    for (let i = 0; i < data.length; i++) if ((Number(data[i].ty) || 0) > 0) lastReal = i;
+    const c = data.map((r, i) => ({
+      day: r.day,
+      lyRun: Number(r.lyRun) || 0,
+      tyRun: (lastReal >= 0 && i <= lastReal) ? (Number(r.tyRun) || 0) : null,
+    }));
+    return { chart: c, lastLy: lastReal >= 0 ? (Number(data[lastReal].lyRun) || 0) : 0 };
+  }, [data]);
+
+  const deltaPct = lastLy > 0 ? ((total - lastLy) / lastLy) * 100 : null;
+  const up = deltaPct != null && deltaPct >= 0;
+
+  if (!data.length) return null;
+  return (
+    <div className={cn('flex items-center gap-2 rounded-xl border border-primary/25 bg-gradient-to-br from-primary/10 via-primary/5 to-transparent px-2.5 py-1 shadow-sm', className)}>
+      <div className="text-right leading-tight">
+        <div className="text-[9px] font-bold uppercase tracking-wider text-muted-fg whitespace-nowrap">Cumulative · {monthName.slice(0, 3)}</div>
+        <div className="flex items-center justify-end gap-1">
+          <span className="text-sm font-extrabold tabular-nums leading-none text-primary">{fmtCompactCurrency(total)}</span>
+          {deltaPct != null && (
+            <span className={cn('text-[9px] font-bold tabular-nums', up ? 'text-emerald-600 dark:text-emerald-300' : 'text-rose-500 dark:text-rose-300')}>
+              {up ? '▲' : '▼'}{Math.abs(deltaPct).toFixed(0)}%
+            </span>
+          )}
+        </div>
+      </div>
+      <div className="h-8 w-24">
+        <ResponsiveContainer width="100%" height="100%">
+          <LineChart data={chart} margin={{ top: 3, right: 2, bottom: 0, left: 2 }}>
+            <Line type="monotone" dataKey="lyRun" stroke="hsl(var(--muted-fg))" strokeOpacity={0.45} strokeWidth={1.5} dot={false} isAnimationActive={false} />
+            <Line type="monotone" dataKey="tyRun" stroke="hsl(var(--primary))" strokeWidth={2} dot={false} connectNulls={false} isAnimationActive={false} />
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
+    </div>
   );
 }
 
