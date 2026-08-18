@@ -765,6 +765,10 @@ function FloorConversion({ store, fromDate, toDate, label }) {
 
   const cur = execQ.data?.current || {};
   const dlt = execQ.data?.delta || {};
+  // Written-sales total from the sales dashboard (full store total, not the
+  // SB primary-attributed figure which can understate).
+  const salesSummary = salesQ.data?.summary || {};
+  const writtenSales = numF(salesSummary.totalRevenue ?? salesSummary.totalSales ?? salesSummary.totalSubtotal);
   const loading = capQ.isLoading || execQ.isLoading || careQ.isLoading || salesQ.isLoading;
   const error   = capQ.error || execQ.error || careQ.error || salesQ.error;
   const totUps  = rows.reduce((s, r) => s + (r.ups || 0), 0);
@@ -823,7 +827,7 @@ function FloorConversion({ store, fromDate, toDate, label }) {
                   <Kpi l="Tickets"      value={fmtNumber(cur.totalTickets ?? 0)} delta={dlt.totalTickets} unit="%" />
                   <Kpi l="Conversion"   value={pct(cur.conversionRate)}          delta={dlt.conversionRate} unit="pp" />
                   <Kpi l="Avg Ticket"   value={cur.avgTicket == null ? '—' : fmtCurrency(cur.avgTicket)} delta={dlt.avgTicket} unit="%" />
-                  <Kpi l="Revenue"      value={fmtCompactCurrency(cur.totalRevenue ?? 0)} delta={dlt.totalRevenue} unit="%" />
+                  <Kpi l="Written Sales" value={fmtCompactCurrency(writtenSales ?? 0)} delta={dlt.totalRevenue} unit="%" />
                   <Kpi l="UPS (floor)"  value={fmtNumber(totUps)} />
                   <Kpi l="Email Capture" value={pct(cur.emailCaptureRate)}      delta={dlt.emailCaptureRate} unit="pp" />
                   <Kpi l="Care-Plan Attach" value={pct(cur.carePlanAttachRate)} delta={dlt.carePlanAttachRate} unit="pp" />
