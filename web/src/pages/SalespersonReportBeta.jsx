@@ -765,14 +765,14 @@ function FloorConversion({ store, fromDate, toDate, label }) {
 
   const cur = execQ.data?.current || {};
   const dlt = execQ.data?.delta || {};
-  // Written-sales total from the sales dashboard (full store total, not the
-  // SB primary-attributed figure which can understate).
-  const salesSummary = salesQ.data?.summary || {};
-  const writtenSales = numF(salesSummary.totalRevenue ?? salesSummary.totalSales ?? salesSummary.totalSubtotal);
+  // Written Sales = sum of the per-salesperson Sales column, so the total always
+  // reconciles with the rows below it.
+  const sumSales = rows.reduce((s, r) => s + (r.sales || 0), 0);
   const loading = capQ.isLoading || execQ.isLoading || careQ.isLoading || salesQ.isLoading;
   const error   = capQ.error || execQ.error || careQ.error || salesQ.error;
   const totUps  = rows.reduce((s, r) => s + (r.ups || 0), 0);
   const pct = (v) => (v == null ? '—' : `${Number(v).toFixed(1)}%`);
+  const money = (v) => (v == null ? '—' : `$${Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
 
   const DeltaPill = ({ v, unit }) => {
     if (v == null) return null;
@@ -827,7 +827,7 @@ function FloorConversion({ store, fromDate, toDate, label }) {
                   <Kpi l="Tickets"      value={fmtNumber(cur.totalTickets ?? 0)} delta={dlt.totalTickets} unit="%" />
                   <Kpi l="Conversion"   value={pct(cur.conversionRate)}          delta={dlt.conversionRate} unit="pp" />
                   <Kpi l="Avg Ticket"   value={cur.avgTicket == null ? '—' : fmtCurrency(cur.avgTicket)} delta={dlt.avgTicket} unit="%" />
-                  <Kpi l="Written Sales" value={fmtCompactCurrency(writtenSales ?? 0)} delta={dlt.totalRevenue} unit="%" />
+                  <Kpi l="Written Sales" value={money(sumSales)} />
                   <Kpi l="UPS (floor)"  value={fmtNumber(totUps)} />
                   <Kpi l="Email Capture" value={pct(cur.emailCaptureRate)}      delta={dlt.emailCaptureRate} unit="pp" />
                   <Kpi l="Care-Plan Attach" value={pct(cur.carePlanAttachRate)} delta={dlt.carePlanAttachRate} unit="pp" />
@@ -870,7 +870,7 @@ function FloorConversion({ store, fromDate, toDate, label }) {
                         <td className="px-3 py-2.5 text-right tabular-nums text-muted-fg">{pct(r.burning)}</td>
                         <td className="px-3 py-2.5 text-right tabular-nums text-muted-fg">{r.carePlans == null ? '—' : fmtNumber(r.carePlans)}</td>
                         <td className="px-3 py-2.5 text-right tabular-nums">{r.attach == null ? '—' : pct(r.attach)}</td>
-                        <td className="px-3 py-2.5 text-right tabular-nums font-bold">{r.sales == null ? '—' : fmtCurrency(r.sales)}</td>
+                        <td className="px-3 py-2.5 text-right tabular-nums font-bold">{money(r.sales)}</td>
                       </tr>
                     ))}
                   </tbody>
