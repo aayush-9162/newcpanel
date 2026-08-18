@@ -38,7 +38,6 @@ export default function SalespersonReportBeta() {
   const [drilldown, setDrilldown] = useState(null);
   const dailyOn = period === 'daily';
   const monthlyOn = period === 'monthly';
-  const yearlyOn = period === 'yearly';
 
   // ── Anchor day — the store's most recent business day on file (excl. today).
   // Anchored on SaleWRT (the written-sales truth the Dashboard uses), so totals
@@ -46,7 +45,7 @@ export default function SalespersonReportBeta() {
   const dayQ = useSqlQuery(`
     SELECT CONVERT(char(10), CAST(MAX(wrt_cng_bdat) AS DATE), 23) AS day
     FROM SaleWRT WHERE wrt_pft_ctr = ${bldg} AND wrt_cng_bdat < CAST(GETDATE() AS DATE)
-  `, [], { enabled: dailyOn || monthlyOn || yearlyOn });
+  `, [], { enabled: dailyOn || monthlyOn });
   const dayStr = dayQ.data?.rows?.[0]?.day || null;
   const anchor = dayStr ? localDate(dayStr) : null;
   const dateShort = anchor ? `${anchor.getDate()} ${anchor.toLocaleDateString('en-US', { month: 'short' })}` : 'Latest day';
@@ -482,16 +481,13 @@ export default function SalespersonReportBeta() {
             <div className="flex gap-1 rounded-lg border border-border bg-muted/30 p-0.5">
               <Pill active={period === 'daily'}   onClick={() => setPeriod('daily')}   title="Latest-day view">Daily</Pill>
               <Pill active={period === 'monthly'} onClick={() => setPeriod('monthly')} title="Month-to-date view">Monthly</Pill>
-              <Pill active={period === 'yearly'}  onClick={() => setPeriod('yearly')}  title="Year-to-date view">Yearly</Pill>
             </div>
             {dayStr && (
               <div className="ml-auto text-xs text-muted-fg">
                 {dailyOn ? (
                   <>Latest day · <span className="font-semibold text-fg">{weekdayLong}, {dateShort}</span></>
-                ) : monthlyOn ? (
-                  <>Month to date · <span className="font-semibold text-fg">{monthName} {yearNum}</span></>
                 ) : (
-                  <>Year to date · <span className="font-semibold text-fg">{yearNum}</span></>
+                  <>Month to date · <span className="font-semibold text-fg">{monthName} {yearNum}</span></>
                 )}
               </div>
             )}
@@ -504,12 +500,10 @@ export default function SalespersonReportBeta() {
             <FloorConversion store={store} fromDate={dayStr} toDate={dayStr} label={dateShort} />
             <TopSalespeople store={store} fromDate={dayStr} toDate={dayStr} />
           </>
-        ) : period === 'monthly' ? (
+        ) : (
           <PeriodView store={store}
             fromDate={anchor ? `${anchor.getFullYear()}-${String(anchor.getMonth() + 1).padStart(2, '0')}-01` : ''}
             toDate={dayStr} label={`${monthName} ${yearNum}`} periodLabel="Month to date" />
-        ) : (
-          <PeriodView store={store} year={yearNum} label={`${yearNum}`} periodLabel="Year to date" />
         )}
       </div>
 
