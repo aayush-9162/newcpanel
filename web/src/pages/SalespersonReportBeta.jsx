@@ -753,6 +753,11 @@ function extractRows(payload) {
   const data = payload?.data ?? payload;
   if (Array.isArray(data)) return data;
   if (data && typeof data === 'object') {
+    // conversion/salesperson: the full seller list is `all`; otherwise combine
+    // the top/low closer arrays.
+    if (Array.isArray(data.all) && data.all.length) return data.all;
+    const closers = [...(data.topClosers || []), ...(data.lowClosers || [])];
+    if (closers.length) return closers;
     for (const k of ['rows', 'salespeople', 'sellers', 'closers', 'top', 'list', 'items', 'salesPeople']) {
       if (Array.isArray(data[k]) && data[k].length && typeof data[k][0] === 'object') return data[k];
     }
