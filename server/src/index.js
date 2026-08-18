@@ -160,7 +160,7 @@ app.get('/api/tracker/suspicious', async (req, res) => {
 // Scoped to /api/admin/analytics/* on the upstream; our own requireAuth (applied
 // on /api) already ensures only signed-in CFC Hub users can call it.
 const ANALYTICS_URL     = (process.env.ANALYTICS_URL || 'http://192.168.0.211:5000').replace(/\/+$/, '');
-const ANALYTICS_USER_ID = process.env.ANALYTICS_USER_ID || '';   // numeric cfc_users.id, if a gated endpoint needs it
+const ANALYTICS_USER_ID = process.env.ANALYTICS_USER_ID || '58'; // numeric cfc_users.id (admin/manager) for gated SB/Delivery/Group-ID endpoints; override in .env
 const ANALYTICS_TOKEN   = process.env.ANALYTICS_TOKEN   || '';   // x-admin-token for Legacy UPS strict mode, if enabled
 app.get('/api/analytics/*', async (req, res) => {
   const sub = req.params[0] || '';                    // path after /api/analytics/

@@ -10,7 +10,7 @@
 // sale + month-to-date) + SalesItemDetail (items); codes → names + monthly
 // targets via MySQL employees (rv_code, name, default_target).
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Topbar } from '@/components/Topbar';
 import { Card, CardContent } from '@/components/ui/Card';
 import { HeroBanner } from '@/components/HeroStat';
@@ -782,6 +782,22 @@ function FloorConversion({ store, range, rangeLabel }) {
     { store: storeLabel, range: 'this-year', top: 200, min_ups: 0 },
     { retry: 0, enabled: emptyPrimary, staleTime: 5 * 60 * 1000 });
   const fallbackRows = useMemo(() => normalizeFloorRows(fallback.data), [fallback.data]);
+
+  // TEMP DISCOVERY — probe the NEW-system SB endpoints (needs user id 58) to
+  // reveal their response shapes for the current month. Remove once mapped.
+  const sbStore = store === 'ARDEN' ? 'S1' : 'S2';
+  const today = new Date();
+  const iso = (d) => d.toISOString().slice(0, 10);
+  const mFrom = iso(new Date(today.getFullYear(), today.getMonth(), 1));
+  const mTo = iso(today);
+  const sbCap  = useAnalyticsQuery('sb/customer-capture', { store: sbStore, from: mFrom, to: mTo }, { retry: 0 });
+  const sbExec = useAnalyticsQuery('sb/executive',        { store: sbStore, from: mFrom, to: mTo }, { retry: 0 });
+  useEffect(() => {
+    if (sbCap.data)  { console.log('%c[SB] customer-capture ' + sbStore, 'color:#16a34a;font-weight:bold'); try { console.log(JSON.stringify(sbCap.data, null, 2)); } catch {} }
+    if (sbCap.error) console.log('[SB] customer-capture error:', sbCap.error);
+    if (sbExec.data) { console.log('%c[SB] executive ' + sbStore, 'color:#16a34a;font-weight:bold'); try { console.log(JSON.stringify(sbExec.data, null, 2)); } catch {} }
+    if (sbExec.error) console.log('[SB] executive error:', sbExec.error);
+  }, [sbCap.data, sbCap.error, sbExec.data, sbExec.error, sbStore]);
 
   const usedFallback = emptyPrimary && fallbackRows.length > 0;
   const rows    = primaryRows.length ? primaryRows : fallbackRows;
