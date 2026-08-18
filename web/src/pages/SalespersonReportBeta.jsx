@@ -759,29 +759,26 @@ function FloorConversion({ store, fromDate, toDate, label }) {
 
   const normName = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
   const rows = useMemo(() => {
-    const byId = new Map();
-    // UPS from customer-capture (per userId)
-    for (const r of (capQ.data?.rows ?? [])) {
-      byId.set(r.userId, {
-        userId: r.userId, name: r.name || '—', store: r.storeName || '', unresolved: !!r.unresolved,
-        ups: numF(r.upsTaken), tickets: null, sales: null,
-      });
+    // Union everyone across the three feeds, keyed by name — so absent people
+    // (who appear only in /sales) are never dropped.
+    const byName = new Map();
+    const ensure = (nm) => {
+      const k = normName(nm);
+      if (!byName.has(k)) byName.set(k, { name: nm || '—', store: '', unresolved: false, ups: null, tickets: null, sales: null });
+      return byName.get(k);
+    };
+    for (const r of (capQ.data?.rows ?? [])) {         // UPS
+      const e = ensure(r.name); e.ups = numF(r.upsTaken);
+      if (r.storeName) e.store = r.storeName; if (r.unresolved) e.unresolved = true;
     }
-    // Tickets from care-plan (primary attribution, per userId)
-    for (const c of (careQ.data?.rows ?? [])) {
-      const ex = byId.get(c.userId);
-      const tickets = numF(c.tickets);
-      if (ex) ex.tickets = tickets;
-      else byId.set(c.userId, { userId: c.userId, name: c.name || '—', store: c.storeName || '', unresolved: !!c.unresolved, ups: null, tickets, sales: null });
+    for (const c of (careQ.data?.rows ?? [])) {        // Tickets (primary)
+      const e = ensure(c.name); e.tickets = numF(c.tickets);
+      if (!e.store && c.storeName) e.store = c.storeName;
     }
-    // Sales$ from /sales bySeller (split-credit), matched by name
-    const salesByName = new Map();
-    for (const s of (salesQ.data?.bySeller ?? [])) salesByName.set(normName(s.sellerName ?? s.name), numF(s.revenue ?? s.sales ?? s.totalRevenue));
-    for (const r of byId.values()) {
-      const sv = salesByName.get(normName(r.name));
-      if (sv != null) r.sales = sv;
+    for (const s of (salesQ.data?.bySeller ?? [])) {   // Sales$ (split-credit)
+      const e = ensure(s.sellerName ?? s.name); e.sales = numF(s.revenue ?? s.sales ?? s.totalRevenue);
     }
-    return [...byId.values()].map((r) => {
+    return [...byName.values()].map((r) => {
       const closing = (r.ups && r.ups > 0) ? ((r.tickets || 0) / r.ups) * 100 : null;
       return { ...r, closing, burning: closing == null ? null : Math.max(0, 100 - closing) };
     }).sort((a, b) => (b.sales ?? 0) - (a.sales ?? 0) || (b.ups ?? 0) - (a.ups ?? 0));
@@ -794,15 +791,24 @@ function FloorConversion({ store, fromDate, toDate, label }) {
   const totUps  = rows.reduce((s, r) => s + (r.ups || 0), 0);
   const pct = (v) => (v == null ? '—' : `${Number(v).toFixed(1)}%`);
 
-  const Delta = ({ v, unit }) => {
+  const DeltaPill = ({ v, unit }) => {
     if (v == null) return null;
     const up = v >= 0;
-    return <span className={cn('ml-1 text-[10px] font-semibold', up ? 'text-emerald-600 dark:text-emerald-300' : 'text-rose-500 dark:text-rose-300')}>{up ? '▲' : '▼'}{Math.abs(v).toFixed(1)}{unit}</span>;
+    return (
+      <span className={cn('inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[10px] font-bold leading-none',
+        up ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-200'
+           : 'bg-rose-100 text-rose-600 dark:bg-rose-900/40 dark:text-rose-200')}>
+        {up ? '▲' : '▼'}{Math.abs(v).toFixed(1)}{unit}
+      </span>
+    );
   };
-  const Kpi = ({ label: l, value, delta, unit }) => (
-    <div className="rounded-lg border border-border bg-card px-3 py-2">
-      <div className="text-[9px] font-bold uppercase tracking-wider text-muted-fg">{l}</div>
-      <div className="mt-0.5 text-lg font-extrabold tabular-nums leading-tight">{value}{delta != null && <Delta v={delta} unit={unit} />}</div>
+  const Kpi = ({ l, value, delta, unit }) => (
+    <div className="rounded-xl border border-border bg-gradient-to-br from-muted/40 via-transparent to-transparent px-3.5 py-2.5">
+      <div className="text-[10px] font-bold uppercase tracking-wider text-muted-fg">{l}</div>
+      <div className="mt-1.5 flex flex-wrap items-baseline gap-1.5">
+        <span className="text-xl font-extrabold tabular-nums leading-none">{value}</span>
+        {delta != null && <DeltaPill v={delta} unit={unit} />}
+      </div>
     </div>
   );
 
@@ -830,12 +836,17 @@ function FloorConversion({ store, fromDate, toDate, label }) {
           <>
             {/* Store-level KPIs (with prior-period trend) */}
             {execQ.data && (
-              <div className="grid grid-cols-2 gap-2 p-3 sm:grid-cols-3 lg:grid-cols-5">
-                <Kpi l="Tickets"     value={fmtNumber(cur.totalTickets ?? 0)} delta={dlt.totalTickets} unit="%" />
-                <Kpi l="Conversion"  value={pct(cur.conversionRate)}          delta={dlt.conversionRate} unit="pp" />
-                <Kpi l="Avg Ticket"  value={cur.avgTicket == null ? '—' : fmtCurrency(cur.avgTicket)} delta={dlt.avgTicket} unit="%" />
-                <Kpi l="Revenue"     value={fmtCompactCurrency(cur.totalRevenue ?? 0)} delta={dlt.totalRevenue} unit="%" />
-                <Kpi l="UPS (floor)" value={fmtNumber(totUps)} />
+              <div className="p-3">
+                <div className="mb-2 text-[10px] font-bold uppercase tracking-wider text-muted-fg">
+                  Store totals · {label} <span className="font-normal normal-case">(vs previous period)</span>
+                </div>
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
+                  <Kpi l="Tickets"     value={fmtNumber(cur.totalTickets ?? 0)} delta={dlt.totalTickets} unit="%" />
+                  <Kpi l="Conversion"  value={pct(cur.conversionRate)}          delta={dlt.conversionRate} unit="pp" />
+                  <Kpi l="Avg Ticket"  value={cur.avgTicket == null ? '—' : fmtCurrency(cur.avgTicket)} delta={dlt.avgTicket} unit="%" />
+                  <Kpi l="Revenue"     value={fmtCompactCurrency(cur.totalRevenue ?? 0)} delta={dlt.totalRevenue} unit="%" />
+                  <Kpi l="UPS (floor)" value={fmtNumber(totUps)} />
+                </div>
               </div>
             )}
 
