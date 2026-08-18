@@ -506,40 +506,8 @@ export default function SalespersonReportBeta() {
           />
         ) : (
           <>
-            {/* ═══════════════ Day hero — team summary ═══════════════ */}
-            <HeroBanner icon={Trophy} decorIcon={Trophy} accent="emerald">
-              <div className="text-[11px] font-bold uppercase tracking-widest text-emerald-700 dark:text-emerald-300">
-                {storeLabel} · {weekdayLong ? `${weekdayLong}, ` : ''}{dateShort} · Team day
-              </div>
-              <div className="mt-1 flex items-baseline gap-2.5 flex-wrap">
-                <span className="text-3xl font-extrabold tabular-nums tracking-tight text-emerald-700 dark:text-emerald-200">
-                  {loading ? '…' : fmtCurrency(team.revenue)}
-                </span>
-                <span className="text-sm font-medium text-muted-fg">total sales</span>
-              </div>
-              <div className="mt-2.5 flex flex-wrap gap-x-5 gap-y-1.5 text-xs">
-                <Meta label="Orders" value={fmtNumber(team.orders)} />
-                <Meta label="Items sold" value={fmtNumber(team.items)} />
-                <Meta label="Avg sale" value={fmtCurrency(team.avgTicket)} />
-                <Meta label="Customers" value={`${fmtNumber(team.customers)} · ${fmtNumber(team.newCustomers)} new`} />
-                {top && <Meta label="Leader" value={`${top.name} · ${fmtCurrency(top.revenue)}`} highlight />}
-              </div>
-            </HeroBanner>
-
-            {loading ? (
-              <Card><CardContent className="grid place-items-center py-20 text-sm text-muted-fg">
-                <div className="flex flex-col items-center gap-3"><div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />Loading team report…</div>
-              </CardContent></Card>
-            ) : rows.length === 0 ? (
-              <Card><CardContent className="grid place-items-center py-20 text-sm text-muted-fg">No salesperson sales for {storeLabel} on {dateShort}.</CardContent></Card>
-            ) : (
-              <>
-
-
-                {/* Floor & Conversion (live from the new UPS system) */}
-                <FloorConversion store={store} fromDate={dayStr} toDate={dayStr} label={dateShort} />
-              </>
-            )}
+            <FloorHero store={store} fromDate={dayStr} toDate={dayStr} label={dateShort} weekday={weekdayLong} periodLabel="Team day" />
+            <FloorConversion store={store} fromDate={dayStr} toDate={dayStr} label={dateShort} />
           </>
         )}
       </div>
@@ -719,44 +687,33 @@ const numF = (v) => {
   const n = parseFloat(String(v).replace(/[^0-9.\-]/g, ''));
   return Number.isFinite(n) ? n : null;
 };
+const pctF = (v) => (v == null ? '—' : `${Number(v).toFixed(1)}%`);
+const moneyF = (v) => (v == null ? '—' : `$${Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
+const normNameF = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
 
-function FloorConversion({ store, fromDate, toDate, label }) {
-  const storeLabel = store === 'ARDEN' ? 'Arden' : 'Waynesville';
+// Shared live-floor data (used by the hero AND the board so they always match).
+// UPS ← sb/customer-capture · tickets+care-plan ← sb/care-plan · sales$ ←
+// /sales bySeller · store KPIs ← sb/executive. React Query dedupes identical
+// requests, so calling this twice triggers one set of fetches.
+function useFloorData(store, fromDate, toDate) {
   const sbStore = store === 'ARDEN' ? 'S1' : 'S2';
   const ready = !!fromDate && !!toDate;
-  const capQ  = useAnalyticsQuery('sb/customer-capture', { store: sbStore, from: fromDate, to: toDate }, { retry: 0, enabled: ready, staleTime: 5 * 60 * 1000 });
-  const execQ = useAnalyticsQuery('sb/executive',        { store: sbStore, from: fromDate, to: toDate }, { retry: 0, enabled: ready, staleTime: 5 * 60 * 1000 });
+  const opts = { retry: 0, enabled: ready, staleTime: 5 * 60 * 1000 };
+  const capQ   = useAnalyticsQuery('sb/customer-capture', { store: sbStore, from: fromDate, to: toDate }, opts);
+  const execQ  = useAnalyticsQuery('sb/executive',        { store: sbStore, from: fromDate, to: toDate }, opts);
+  const careQ  = useAnalyticsQuery('sb/care-plan',        { store: sbStore, from: fromDate, to: toDate }, opts);
+  const salesQ = useAnalyticsQuery('sales',               { store: sbStore, from: fromDate, to: toDate }, opts);
 
-  // Tickets (primary-attributed, like the UPS board) come from sb/care-plan,
-  // keyed by userId; per-seller sales$ (split-credit, matching the board's Sales
-  // column) come from /sales bySeller, matched by name.
-  const careQ  = useAnalyticsQuery('sb/care-plan', { store: sbStore, from: fromDate, to: toDate }, { retry: 0, enabled: ready, staleTime: 5 * 60 * 1000 });
-  const salesQ = useAnalyticsQuery('sales',        { store: sbStore, from: fromDate, to: toDate }, { retry: 0, enabled: ready, staleTime: 5 * 60 * 1000 });
-
-  const normName = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
   const rows = useMemo(() => {
-    // Union everyone across the three feeds, keyed by name — so absent people
-    // (who appear only in /sales) are never dropped.
     const byName = new Map();
     const ensure = (nm) => {
-      const k = normName(nm);
+      const k = normNameF(nm);
       if (!byName.has(k)) byName.set(k, { name: nm || '—', store: '', unresolved: false, ups: null, tickets: null, sales: null, carePlans: null, attach: null });
       return byName.get(k);
     };
-    for (const r of (capQ.data?.rows ?? [])) {         // UPS
-      const e = ensure(r.name); e.ups = numF(r.upsTaken);
-      if (r.storeName) e.store = r.storeName; if (r.unresolved) e.unresolved = true;
-    }
-    for (const c of (careQ.data?.rows ?? [])) {        // Tickets (primary) + care-plan attach
-      const e = ensure(c.name);
-      e.tickets = numF(c.tickets);
-      e.carePlans = numF(c.carePlansSold);
-      e.attach = numF(c.attachRate);
-      if (!e.store && c.storeName) e.store = c.storeName;
-    }
-    for (const s of (salesQ.data?.bySeller ?? [])) {   // Sales$ (split-credit)
-      const e = ensure(s.sellerName ?? s.name); e.sales = numF(s.revenue ?? s.sales ?? s.totalRevenue);
-    }
+    for (const r of (capQ.data?.rows ?? [])) { const e = ensure(r.name); e.ups = numF(r.upsTaken); if (r.storeName) e.store = r.storeName; if (r.unresolved) e.unresolved = true; }
+    for (const c of (careQ.data?.rows ?? [])) { const e = ensure(c.name); e.tickets = numF(c.tickets); e.carePlans = numF(c.carePlansSold); e.attach = numF(c.attachRate); if (!e.store && c.storeName) e.store = c.storeName; }
+    for (const s of (salesQ.data?.bySeller ?? [])) { const e = ensure(s.sellerName ?? s.name); e.sales = numF(s.revenue ?? s.sales ?? s.totalRevenue); }
     return [...byName.values()].map((r) => {
       const closing = (r.ups && r.ups > 0) ? ((r.tickets || 0) / r.ups) * 100 : null;
       return { ...r, closing, burning: closing == null ? null : Math.max(0, 100 - closing) };
@@ -765,35 +722,63 @@ function FloorConversion({ store, fromDate, toDate, label }) {
 
   const cur = execQ.data?.current || {};
   const dlt = execQ.data?.delta || {};
-  // Written Sales = sum of the per-salesperson Sales column, so the total always
-  // reconciles with the rows below it.
   const sumSales = rows.reduce((s, r) => s + (r.sales || 0), 0);
-  const loading = capQ.isLoading || execQ.isLoading || careQ.isLoading || salesQ.isLoading;
-  const error   = capQ.error || execQ.error || careQ.error || salesQ.error;
-  const totUps  = rows.reduce((s, r) => s + (r.ups || 0), 0);
-  const pct = (v) => (v == null ? '—' : `${Number(v).toFixed(1)}%`);
-  const money = (v) => (v == null ? '—' : `$${Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
-
-  const DeltaPill = ({ v, unit }) => {
-    if (v == null) return null;
-    const up = v >= 0;
-    return (
-      <span className={cn('inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[10px] font-bold leading-none',
-        up ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-200'
-           : 'bg-rose-100 text-rose-600 dark:bg-rose-900/40 dark:text-rose-200')}>
-        {up ? '▲' : '▼'}{Math.abs(v).toFixed(1)}{unit}
-      </span>
-    );
+  const totUps   = rows.reduce((s, r) => s + (r.ups || 0), 0);
+  const tickets  = (numF(cur.totalTickets) ?? rows.reduce((s, r) => s + (r.tickets || 0), 0)) || 0;
+  const avgSale  = tickets ? sumSales / tickets : null;
+  const leader   = rows[0] || null;                    // rows already sorted by sales desc
+  return {
+    rows, cur, dlt, sumSales, totUps, tickets, avgSale, leader,
+    hasExec: !!execQ.data,
+    loading: capQ.isLoading || execQ.isLoading || careQ.isLoading || salesQ.isLoading,
+    error:   capQ.error || execQ.error || careQ.error || salesQ.error,
   };
-  const Kpi = ({ l, value, delta, unit }) => (
-    <div className="rounded-xl border border-border bg-gradient-to-br from-muted/40 via-transparent to-transparent px-3.5 py-2.5">
-      <div className="text-[10px] font-bold uppercase tracking-wider text-muted-fg">{l}</div>
-      <div className="mt-1.5 flex flex-wrap items-baseline gap-1.5">
-        <span className="text-xl font-extrabold tabular-nums leading-none">{value}</span>
-        {delta != null && <DeltaPill v={delta} unit={unit} />}
-      </div>
+}
+
+function HeroChip({ label, value, highlight }) {
+  return (
+    <div className={cn('rounded-xl border px-3 py-2', highlight
+      ? 'border-emerald-500/50 bg-emerald-500/15'
+      : 'border-emerald-500/20 bg-white/50 dark:bg-white/5')}>
+      <div className="text-[9px] font-bold uppercase tracking-wider text-emerald-800/70 dark:text-emerald-200/70">{label}</div>
+      <div className="mt-0.5 truncate text-sm font-extrabold tabular-nums leading-tight text-emerald-900 dark:text-emerald-100">{value}</div>
     </div>
   );
+}
+
+// Attractive summary hero driven by the live UPS-system floor data.
+function FloorHero({ store, fromDate, toDate, label, weekday, periodLabel }) {
+  const storeLabel = store === 'ARDEN' ? 'Arden (S1)' : 'Waynesville (S2)';
+  const f = useFloorData(store, fromDate, toDate);
+  const firstName = f.leader ? String(f.leader.name).split(' ')[0] : '';
+  return (
+    <HeroBanner icon={Trophy} decorIcon={Trophy} accent="emerald">
+      <div className="text-[11px] font-bold uppercase tracking-widest text-emerald-700 dark:text-emerald-300">
+        {storeLabel} · {weekday ? `${weekday}, ` : ''}{label} · {periodLabel} · UPS system (live)
+      </div>
+      <div className="mt-1 flex items-baseline gap-2.5 flex-wrap">
+        <span className="text-4xl font-extrabold tabular-nums tracking-tight text-emerald-700 dark:text-emerald-200">
+          {f.loading ? '…' : moneyF(f.sumSales)}
+        </span>
+        <span className="text-sm font-medium text-muted-fg">written sales</span>
+      </div>
+      <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
+        <HeroChip label="Tickets"    value={fmtNumber(f.tickets)} />
+        <HeroChip label="UPS"        value={fmtNumber(f.totUps)} />
+        <HeroChip label="Conversion" value={pctF(f.cur.conversionRate)} />
+        <HeroChip label="Avg Sale"   value={f.avgSale == null ? '—' : fmtCurrency(f.avgSale)} />
+        <HeroChip label="Care-Plan"  value={pctF(f.cur.carePlanAttachRate)} />
+        <HeroChip label="Leader"     value={f.leader ? `${firstName} · ${fmtCompactCurrency(f.leader.sales || 0)}` : '—'} highlight />
+      </div>
+    </HeroBanner>
+  );
+}
+
+function FloorConversion({ store, fromDate, toDate, label }) {
+  const storeLabel = store === 'ARDEN' ? 'Arden' : 'Waynesville';
+  const { rows, loading, error, totUps } = useFloorData(store, fromDate, toDate);
+  const pct = pctF;
+  const money = moneyF;
 
   return (
     <Card>
@@ -813,29 +798,10 @@ function FloorConversion({ store, fromDate, toDate, label }) {
           <div className="m-4 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-xs text-amber-700 dark:text-amber-300">
             Couldn't reach the UPS system: {error.message}
           </div>
-        ) : rows.length === 0 && !execQ.data ? (
+        ) : rows.length === 0 ? (
           <div className="grid place-items-center py-12 text-sm text-muted-fg">No floor data for {label}.</div>
         ) : (
           <>
-            {/* Store-level KPIs (with prior-period trend) */}
-            {execQ.data && (
-              <div className="p-3">
-                <div className="mb-2 text-[10px] font-bold uppercase tracking-wider text-muted-fg">
-                  Store totals · {label} <span className="font-normal normal-case">(vs previous period)</span>
-                </div>
-                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-8">
-                  <Kpi l="Tickets"      value={fmtNumber(cur.totalTickets ?? 0)} delta={dlt.totalTickets} unit="%" />
-                  <Kpi l="Conversion"   value={pct(cur.conversionRate)}          delta={dlt.conversionRate} unit="pp" />
-                  <Kpi l="Avg Ticket"   value={cur.avgTicket == null ? '—' : fmtCurrency(cur.avgTicket)} delta={dlt.avgTicket} unit="%" />
-                  <Kpi l="Written Sales" value={money(sumSales)} />
-                  <Kpi l="UPS (floor)"  value={fmtNumber(totUps)} />
-                  <Kpi l="Email Capture" value={pct(cur.emailCaptureRate)}      delta={dlt.emailCaptureRate} unit="pp" />
-                  <Kpi l="Care-Plan Attach" value={pct(cur.carePlanAttachRate)} delta={dlt.carePlanAttachRate} unit="pp" />
-                  <Kpi l="Reminders"    value={pct(cur.reminderRate)}            delta={dlt.reminderRate} unit="pp" />
-                </div>
-              </div>
-            )}
-
             {/* Per-salesperson board — UPS / Tickets / Closing / Burning / Sales */}
             {rows.length > 0 && (
               <div className="overflow-x-auto border-t border-border">
@@ -888,50 +854,12 @@ function FloorConversion({ store, fromDate, toDate, label }) {
 }
 
 // ═══════════════ Monthly view (month-to-date) ═══════════════
-function MonthlyView({ store, monthName, yearNum, storeLabel, fromDate, toDate, loading, rows, team, top, standouts, daysElapsed, monthTotalDays, daysRemaining, onRowClick }) {
+function MonthlyView({ store, monthName, yearNum, fromDate, toDate }) {
+  const label = `${monthName} ${yearNum}`;
   return (
     <>
-      {/* Month hero — team month-to-date summary + trend */}
-      <HeroBanner icon={Trophy} decorIcon={Calendar} accent="violet">
-        <div className="text-[11px] font-bold uppercase tracking-widest text-violet-700 dark:text-violet-300">
-          {storeLabel} · {monthName} {yearNum} · Month to date
-        </div>
-        <div className="mt-1 flex items-baseline gap-2.5 flex-wrap">
-          <span className="text-3xl font-extrabold tabular-nums tracking-tight text-violet-700 dark:text-violet-200">
-            {loading ? '…' : fmtCurrency(team.revenue)}
-          </span>
-          <span className="text-sm font-medium text-muted-fg">this month</span>
-          {team.trend != null && (
-            <span className={cn('inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold',
-              team.trend >= 0 ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-200' : 'bg-rose-100 text-rose-600 dark:bg-rose-900/40 dark:text-rose-200')}>
-              {team.trend >= 0 ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
-              {team.trend >= 0 ? '+' : ''}{team.trend.toFixed(0)}% vs last month
-            </span>
-          )}
-        </div>
-        <div className="mt-2.5 flex flex-wrap gap-x-5 gap-y-1.5 text-xs">
-          <Meta label="Orders" value={fmtNumber(team.orders)} />
-          <Meta label="Items sold" value={fmtNumber(team.items)} />
-          <Meta label="Avg sale" value={fmtCurrency(team.avgTicket)} />
-          <Meta label="Customers" value={`${fmtNumber(team.customers)} · ${fmtNumber(team.newCustomers)} new`} />
-          {top && <Meta label="Leader" value={`${top.name} · ${fmtCurrency(top.revenue)}`} highlight />}
-        </div>
-      </HeroBanner>
-
-      {loading ? (
-        <Card><CardContent className="grid place-items-center py-20 text-sm text-muted-fg">
-          <div className="flex flex-col items-center gap-3"><div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />Loading month report…</div>
-        </CardContent></Card>
-      ) : rows.length === 0 ? (
-        <Card><CardContent className="grid place-items-center py-20 text-sm text-muted-fg">No sales for {storeLabel} in {monthName} {yearNum}.</CardContent></Card>
-      ) : (
-        <>
-
-
-          {/* Floor & Conversion (live from the new UPS system) */}
-          <FloorConversion store={store} fromDate={fromDate} toDate={toDate} label={`${monthName} ${yearNum}`} />
-        </>
-      )}
+      <FloorHero store={store} fromDate={fromDate} toDate={toDate} label={label} periodLabel="Month to date" />
+      <FloorConversion store={store} fromDate={fromDate} toDate={toDate} label={label} />
     </>
   );
 }
