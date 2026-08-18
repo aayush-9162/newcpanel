@@ -812,6 +812,22 @@ function FloorConversion({ store, range, rangeLabel }) {
     }
     if (q.error) console.log('[Floor&Conversion] error:', q.error);
   }, [q.data, q.error, storeLabel, range]);
+
+  // TEMP (BETA): when the selected range has no rows, query a wide window
+  // (this-year, both stores) purely to reveal the seller-row field names.
+  const empty = !q.isLoading && !q.error && list.length === 0;
+  const discover = useAnalyticsQuery('legacy-ups/conversion/salesperson',
+    { store: 'Combined', range: 'this-year', top: 50, min_ups: 0 },
+    { retry: 0, enabled: empty, staleTime: 5 * 60 * 1000 });
+  useEffect(() => {
+    if (discover.data) {
+      const rows = extractRows(discover.data);
+      console.log('%c[Floor&Conversion] DISCOVERY (Combined / this-year) — ' + rows.length + ' rows', 'color:#f59e0b;font-weight:bold');
+      console.log('First row keys:', rows[0] ? Object.keys(rows[0]) : '(no rows)');
+      try { console.log(JSON.stringify(discover.data, null, 2)); } catch { /* ignore */ }
+    }
+    if (discover.error) console.log('[Floor&Conversion] DISCOVERY error:', discover.error);
+  }, [discover.data, discover.error]);
   const pct = (v) => (v == null ? '—' : `${Number(v).toFixed(1)}%`);
 
   return (
