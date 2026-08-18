@@ -10,7 +10,7 @@
 // sale + month-to-date) + SalesItemDetail (items); codes → names + monthly
 // targets via MySQL employees (rv_code, name, default_target).
 
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Topbar } from '@/components/Topbar';
 import { Card, CardContent } from '@/components/ui/Card';
 import { HeroBanner } from '@/components/HeroStat';
@@ -782,21 +782,6 @@ function FloorConversion({ store, range, rangeLabel }) {
     { store: storeLabel, range: 'this-year', top: 200, min_ups: 0 },
     { retry: 0, enabled: emptyPrimary, staleTime: 5 * 60 * 1000 });
   const fallbackRows = useMemo(() => normalizeFloorRows(fallback.data), [fallback.data]);
-
-  // TEMP DIAGNOSTIC — probe recent ranges to find where the UPS feed stops.
-  const dToday = useAnalyticsQuery('legacy-ups/conversion/salesperson', { store: storeLabel, range: 'today' }, { retry: 0, enabled: true });
-  const dWeek  = useAnalyticsQuery('legacy-ups/conversion/salesperson', { store: storeLabel, range: 'this-week' }, { retry: 0, enabled: true });
-  const dMonth = useAnalyticsQuery('legacy-ups/conversion/salesperson', { store: storeLabel, range: 'this-month' }, { retry: 0, enabled: true });
-  useEffect(() => {
-    const probe = (label, d) => {
-      if (!d.data) return;
-      const rows = extractFloorRows(d.data);
-      console.log(`%c[FeedCheck] ${storeLabel} · ${label}: ${rows.length} rows`, 'color:#0ea5e9;font-weight:bold',
-        '| window:', d.data?.range?.from, '→', d.data?.range?.to);
-    };
-    probe('today', dToday); probe('yesterday', primary);
-    probe('this-week', dWeek); probe('this-month', dMonth);
-  }, [dToday.data, dWeek.data, dMonth.data, primary.data, storeLabel]);
 
   const usedFallback = emptyPrimary && fallbackRows.length > 0;
   const rows    = primaryRows.length ? primaryRows : fallbackRows;
