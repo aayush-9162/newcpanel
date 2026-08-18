@@ -548,17 +548,6 @@ export default function SalespersonReportBeta() {
                   </div>
                 )}
 
-                {/* ═══════════════ Target-pace leaderboard ═══════════════ */}
-                <Card>
-                  <CardContent className="p-0">
-                    <div className="flex items-center gap-2 border-b border-border bg-gradient-to-r from-amber-500/10 via-transparent to-transparent px-4 py-3">
-                      <Trophy size={16} className="text-amber-500" />
-                      <span className="text-sm font-semibold">Team pace · {monthName}</span>
-                      <span className="ml-auto text-[11px] text-muted-fg">Today's sales &amp; monthly target progress · {daysRemaining} day{daysRemaining === 1 ? '' : 's'} left</span>
-                    </div>
-                    <Leaderboard rows={rows} teamRev={team.revenue} onRowClick={openSp} />
-                  </CardContent>
-                </Card>
 
                 {/* Floor & Conversion (live from the new UPS system) */}
                 <FloorConversion store={store} fromDate={dayStr} toDate={dayStr} label={dateShort} />
@@ -871,9 +860,7 @@ function FloorConversion({ store, fromDate, toDate, label }) {
                         <td className="px-3 py-2.5 tabular-nums text-muted-fg">{i + 1}</td>
                         <td className="px-3 py-2.5 font-semibold">
                           {r.name}
-                          {(r.ups === 0 || r.ups == null) && (r.sales > 0)
-                            ? <span className="ml-2 rounded bg-rose-100 px-1.5 py-0.5 text-[9px] font-bold uppercase text-rose-600 dark:bg-rose-900/40 dark:text-rose-300">Absent</span>
-                            : r.unresolved ? <span className="ml-1.5 text-[10px] font-normal text-amber-600 dark:text-amber-300">unresolved</span> : null}
+                          {r.unresolved && <span className="ml-1.5 text-[10px] font-normal text-amber-600 dark:text-amber-300">unresolved</span>}
                         </td>
                         <td className="px-3 py-2.5 text-right tabular-nums text-muted-fg">{r.ups == null ? '—' : fmtNumber(r.ups)}</td>
                         <td className="px-3 py-2.5 text-right tabular-nums font-medium">{r.tickets == null ? '—' : fmtNumber(r.tickets)}</td>
@@ -952,17 +939,6 @@ function MonthlyView({ store, monthName, yearNum, storeLabel, fromDate, toDate, 
             </div>
           )}
 
-          {/* Target-pace leaderboard (month) */}
-          <Card>
-            <CardContent className="p-0">
-              <div className="flex items-center gap-2 border-b border-border bg-gradient-to-r from-violet-500/10 via-transparent to-transparent px-4 py-3">
-                <Trophy size={16} className="text-violet-500" />
-                <span className="text-sm font-semibold">Team pace · {monthName} {yearNum}</span>
-                <span className="ml-auto text-[11px] text-muted-fg">Month-to-date &amp; target progress · Day {daysElapsed}/{monthTotalDays} · {daysRemaining} left</span>
-              </div>
-              <MonthLeaderboard rows={rows} teamRev={team.revenue} onRowClick={onRowClick} />
-            </CardContent>
-          </Card>
 
           {/* Floor & Conversion (live from the new UPS system) */}
           <FloorConversion store={store} fromDate={fromDate} toDate={toDate} label={`${monthName} ${yearNum}`} />
