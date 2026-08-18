@@ -98,6 +98,26 @@ export async function clearServerCache() {
   try { await authFetch('/api/cache/clear', { method: 'POST' }); } catch { /* ignore */ }
 }
 
+// CFC Analytics Module (UPS / floor-conversion) — proxied server-side.
+// `path` is the analytics subpath, e.g. 'legacy-ups/conversion/salesperson'.
+export async function analyticsGet(path, params = {}) {
+  const clean = Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''));
+  const qs = new URLSearchParams(clean).toString();
+  const res = await authFetch(`/api/analytics/${path}${qs ? `?${qs}` : ''}`);
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok || json.ok === false) throw new Error(json.message || json.error || `Analytics request failed (${res.status})`);
+  return json;
+}
+
+// Hook variant — cache key is the path+params pair.
+export function useAnalyticsQuery(path, params = {}, options = {}) {
+  return useQuery({
+    queryKey: ['analytics', path, params],
+    queryFn: () => analyticsGet(path, params),
+    ...options,
+  });
+}
+
 // ─── Admin: manage the email → role access list (admin only) ────────────────
 export async function adminListUsers() {
   const res = await authFetch('/api/admin/users');

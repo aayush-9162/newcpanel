@@ -10,12 +10,12 @@
 // sale + month-to-date) + SalesItemDetail (items); codes → names + monthly
 // targets via MySQL employees (rv_code, name, default_target).
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Topbar } from '@/components/Topbar';
 import { Card, CardContent } from '@/components/ui/Card';
 import { HeroBanner } from '@/components/HeroStat';
 import { MetricDrilldown } from '@/components/MetricDrilldown';
-import { useSqlQuery, useMysqlQuery } from '@/lib/api';
+import { useSqlQuery, useMysqlQuery, useAnalyticsQuery } from '@/lib/api';
 import { fmtCurrency, fmtNumber, fmtCompactCurrency } from '@/lib/format';
 import {
   Trophy, Receipt, Crown, Medal, Award, Calendar, Sparkles,
@@ -497,7 +497,7 @@ export default function SalespersonReportBeta() {
 
         {period === 'monthly' ? (
           <MonthlyView
-            monthName={monthName} yearNum={yearNum} storeLabel={storeLabel}
+            store={store} monthName={monthName} yearNum={yearNum} storeLabel={storeLabel}
             loading={monthLoading} rows={monthRows} team={teamMonth} top={monthTop}
             standouts={monthStandouts} daysElapsed={daysElapsed} monthTotalDays={monthTotalDays}
             daysRemaining={daysRemaining} onRowClick={openSpMonth}
@@ -557,6 +557,9 @@ export default function SalespersonReportBeta() {
                     <Leaderboard rows={rows} teamRev={team.revenue} onRowClick={openSp} />
                   </CardContent>
                 </Card>
+
+                {/* Floor & Conversion (from the UPS system) */}
+                <FloorConversion store={store} range="yesterday" rangeLabel="Yesterday" />
               </>
             )}
           </>
@@ -727,8 +730,163 @@ function Leaderboard({ rows, teamRev, onRowClick }) {
   );
 }
 
+// ═══════════════ Floor & Conversion (BETA) — from the UPS system ═══════════════
+// Pulls the salesperson closing-ratio scoreboard from the CFC Analytics API
+// (Legacy UPS conversion) via our server-side proxy. Field names in that API
+// aren't pinned here yet, so we map them flexibly and fall back to a raw table.
+const num = (v) => {
+  if (v == null) return null;
+  if (typeof v === 'number') return Number.isFinite(v) ? v : null;
+  const n = parseFloat(String(v).replace(/[^0-9.\-]/g, ''));
+  return Number.isFinite(n) ? n : null;
+};
+const pick = (row, aliases) => {
+  const norm = (s) => String(s).toLowerCase().replace(/[_\s]/g, '');
+  const keys = Object.keys(row || {});
+  for (const a of aliases) {
+    const hit = keys.find((k) => norm(k) === a);
+    if (hit !== undefined) return row[hit];
+  }
+  return undefined;
+};
+function extractRows(payload) {
+  const data = payload?.data ?? payload;
+  if (Array.isArray(data)) return data;
+  if (data && typeof data === 'object') {
+    for (const k of ['rows', 'salespeople', 'sellers', 'closers', 'top', 'list', 'items', 'salesPeople']) {
+      if (Array.isArray(data[k]) && data[k].length && typeof data[k][0] === 'object') return data[k];
+    }
+    for (const v of Object.values(data)) {
+      if (Array.isArray(v) && v.length && typeof v[0] === 'object') return v;
+    }
+  }
+  return [];
+}
+function normalizeFloorRows(payload) {
+  const raw = extractRows(payload);
+  if (!raw.length) return { list: [], isRaw: false, rawCols: [] };
+  const mapped = raw.map((r) => {
+    const closing = num(pick(r, ['closing', 'closingratio', 'closingpct', 'closepct', 'closerate', 'conversion', 'conversionrate']));
+    let burning = num(pick(r, ['burning', 'burnpct', 'burningratio', 'burnrate']));
+    if (burning == null && closing != null) burning = Math.max(0, 100 - closing);
+    const a = pick(r, ['absent', 'isabsent', 'attendance', 'status']);
+    return {
+      name: pick(r, ['name', 'salesperson', 'sellername', 'seller', 'employee', 'salespersonname', 'displayname', 'fullname']) || '—',
+      ups: num(pick(r, ['ups', 'upstaken', 'upscount', 'totalups', 'upsreceived', 'greeted'])),
+      tickets: num(pick(r, ['tickets', 'ticketcount', 'closes', 'regulartickets', 'invoices', 'ticketswritten', 'sold'])),
+      bb: num(pick(r, ['bb', 'bebacks', 'bbreceived', 'beback', 'bebackscount', 'bbcount'])),
+      closing, burning,
+      preTax: num(pick(r, ['pretax', 'pretaxsales', 'subtotal', 'pretaxrevenue', 'pretaxtotal'])),
+      sales: num(pick(r, ['sales', 'revenue', 'totalrevenue', 'salesamount', 'saleamount', 'netsales', 'grosssales'])),
+      absent: a == null ? false : (a === true || ['absent', 'true', '1'].includes(String(a).toLowerCase())),
+    };
+  });
+  const known = mapped.some((m) => m.ups != null || m.tickets != null || m.closing != null || m.sales != null);
+  if (known) {
+    const sorted = [...mapped].sort((x, y) => (y.sales ?? y.ups ?? 0) - (x.sales ?? x.ups ?? 0));
+    return { list: sorted, isRaw: false, rawCols: [] };
+  }
+  return { list: raw, isRaw: true, rawCols: Object.keys(raw[0]) };
+}
+
+function FloorConversion({ store, range, rangeLabel }) {
+  const storeLabel = store === 'ARDEN' ? 'Arden' : 'Waynesville';
+  const q = useAnalyticsQuery('legacy-ups/conversion/salesperson',
+    { store: storeLabel, range, top: 200, min_ups: 0 },
+    { retry: 0, staleTime: 5 * 60 * 1000 });
+  const { list, isRaw, rawCols } = useMemo(() => normalizeFloorRows(q.data), [q.data]);
+  const has = (k) => !isRaw && list.some((r) => r[k] != null);
+
+  // TEMP (BETA): dump the raw UPS-system response to the console so we can pin
+  // the exact field names. Remove once the columns are mapped.
+  useEffect(() => {
+    if (q.data) {
+      console.log('%c[Floor&Conversion] raw response for ' + storeLabel + ' / ' + range, 'color:#0ea5e9;font-weight:bold');
+      console.log(q.data);
+      try { console.log(JSON.stringify(q.data, null, 2)); } catch { /* ignore */ }
+    }
+    if (q.error) console.log('[Floor&Conversion] error:', q.error);
+  }, [q.data, q.error, storeLabel, range]);
+  const pct = (v) => (v == null ? '—' : `${Number(v).toFixed(1)}%`);
+
+  return (
+    <Card>
+      <CardContent className="p-0">
+        <div className="flex flex-wrap items-center gap-2 border-b border-border bg-gradient-to-r from-sky-500/10 via-transparent to-transparent px-4 py-3">
+          <TrendingUp size={16} className="text-sky-500" />
+          <span className="text-sm font-semibold">Floor &amp; Conversion</span>
+          <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-amber-700 dark:bg-amber-900/40 dark:text-amber-200">Beta</span>
+          <span className="text-[11px] text-muted-fg">· {rangeLabel} · {storeLabel} · from the UPS system</span>
+        </div>
+        {q.isLoading ? (
+          <div className="grid place-items-center py-12 text-sm text-muted-fg">
+            <div className="flex flex-col items-center gap-3"><div className="h-7 w-7 animate-spin rounded-full border-2 border-primary border-t-transparent" />Loading floor data…</div>
+          </div>
+        ) : q.error ? (
+          <div className="m-4 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-xs text-amber-700 dark:text-amber-300">
+            Couldn't reach the UPS system: {q.error.message}
+          </div>
+        ) : list.length === 0 ? (
+          <div className="grid place-items-center py-12 text-sm text-muted-fg">No floor data for {rangeLabel}.</div>
+        ) : isRaw ? (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-muted/40 text-[10px] uppercase tracking-wider text-muted-fg">
+                <tr className="border-b border-border">{rawCols.map((c) => <th key={c} className="px-3 py-2.5 text-left">{c}</th>)}</tr>
+              </thead>
+              <tbody>
+                {list.map((r, i) => (
+                  <tr key={i} className="border-b border-border last:border-0 hover:bg-muted/30">
+                    {rawCols.map((c) => <td key={c} className="px-3 py-2 tabular-nums">{r[c] == null ? '—' : String(r[c])}</td>)}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-muted/40 text-[10px] uppercase tracking-wider text-muted-fg">
+                <tr className="border-b border-border">
+                  <th className="px-3 py-2.5 text-left w-9">#</th>
+                  <th className="px-3 py-2.5 text-left">Employee</th>
+                  {has('ups')     && <th className="px-3 py-2.5 text-right">UPS</th>}
+                  {has('tickets') && <th className="px-3 py-2.5 text-right">Tickets</th>}
+                  {has('bb')      && <th className="px-3 py-2.5 text-right">BB Received</th>}
+                  {has('closing') && <th className="px-3 py-2.5 text-right">Closing</th>}
+                  {has('burning') && <th className="px-3 py-2.5 text-right">Burning</th>}
+                  {has('preTax')  && <th className="px-3 py-2.5 text-right">Pre-Tax</th>}
+                  {has('sales')   && <th className="px-3 py-2.5 text-right">Sales</th>}
+                </tr>
+              </thead>
+              <tbody>
+                {list.map((r, i) => (
+                  <tr key={i} className="border-b border-border last:border-0 hover:bg-muted/30">
+                    <td className="px-3 py-2.5 tabular-nums text-muted-fg">{i + 1}</td>
+                    <td className="px-3 py-2.5 font-semibold">
+                      {r.name}
+                      {r.absent && <span className="ml-2 rounded bg-rose-100 px-1.5 py-0.5 text-[9px] font-bold uppercase text-rose-600 dark:bg-rose-900/40 dark:text-rose-300">Absent</span>}
+                    </td>
+                    {has('ups')     && <td className="px-3 py-2.5 text-right tabular-nums">{r.ups == null ? '—' : fmtNumber(r.ups)}</td>}
+                    {has('tickets') && <td className="px-3 py-2.5 text-right tabular-nums">{r.tickets == null ? '—' : fmtNumber(r.tickets)}</td>}
+                    {has('bb')      && <td className="px-3 py-2.5 text-right tabular-nums text-muted-fg">{r.bb == null ? '—' : fmtNumber(r.bb)}</td>}
+                    {has('closing') && <td className={cn('px-3 py-2.5 text-right tabular-nums font-semibold', (r.closing ?? 0) >= 50 ? 'text-emerald-600 dark:text-emerald-300' : 'text-rose-500 dark:text-rose-300')}>{pct(r.closing)}</td>}
+                    {has('burning') && <td className="px-3 py-2.5 text-right tabular-nums text-muted-fg">{pct(r.burning)}</td>}
+                    {has('preTax')  && <td className="px-3 py-2.5 text-right tabular-nums text-muted-fg">{r.preTax == null ? '—' : fmtCurrency(r.preTax)}</td>}
+                    {has('sales')   && <td className="px-3 py-2.5 text-right tabular-nums font-bold">{r.sales == null ? '—' : fmtCurrency(r.sales)}</td>}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 // ═══════════════ Monthly view (month-to-date) ═══════════════
-function MonthlyView({ monthName, yearNum, storeLabel, loading, rows, team, top, standouts, daysElapsed, monthTotalDays, daysRemaining, onRowClick }) {
+function MonthlyView({ store, monthName, yearNum, storeLabel, loading, rows, team, top, standouts, daysElapsed, monthTotalDays, daysRemaining, onRowClick }) {
   return (
     <>
       {/* Month hero — team month-to-date summary + trend */}
@@ -791,6 +949,9 @@ function MonthlyView({ monthName, yearNum, storeLabel, loading, rows, team, top,
               <MonthLeaderboard rows={rows} teamRev={team.revenue} onRowClick={onRowClick} />
             </CardContent>
           </Card>
+
+          {/* Floor & Conversion (from the UPS system) */}
+          <FloorConversion store={store} range="this-month" rangeLabel={`${monthName} ${yearNum}`} />
         </>
       )}
     </>

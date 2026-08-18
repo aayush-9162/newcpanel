@@ -152,6 +152,40 @@ app.get('/api/tracker/suspicious', async (req, res) => {
   }
 });
 
+// ─── CFC Analytics Module proxy (UPS / floor-conversion data) ────────────────
+// Forwards read-only GETs to the external Analytics API (the "New UPS System"
+// backend). Browsers can't reach it directly (other host + CORS), and it uses a
+// different identity model (x-user-id / X-CFC-Env), so we proxy server-side and
+// inject the LIVE env plus an optional service identity / strict-mode token.
+// Scoped to /api/admin/analytics/* on the upstream; our own requireAuth (applied
+// on /api) already ensures only signed-in CFC Hub users can call it.
+const ANALYTICS_URL     = (process.env.ANALYTICS_URL || 'http://192.168.0.211:5000').replace(/\/+$/, '');
+const ANALYTICS_USER_ID = process.env.ANALYTICS_USER_ID || '';   // numeric cfc_users.id, if a gated endpoint needs it
+const ANALYTICS_TOKEN   = process.env.ANALYTICS_TOKEN   || '';   // x-admin-token for Legacy UPS strict mode, if enabled
+app.get('/api/analytics/*', async (req, res) => {
+  const sub = req.params[0] || '';                    // path after /api/analytics/
+  const qi  = req.originalUrl.indexOf('?');
+  const qs  = qi >= 0 ? req.originalUrl.slice(qi) : '';
+  const url = `${ANALYTICS_URL}/api/admin/analytics/${sub}${qs}`;
+
+  const headers = { 'X-CFC-Env': 'LIVE', Accept: 'application/json' };
+  if (ANALYTICS_USER_ID) headers['x-user-id']     = ANALYTICS_USER_ID;
+  if (ANALYTICS_TOKEN)   headers['x-admin-token']  = ANALYTICS_TOKEN;
+
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), 20_000);
+  try {
+    const r = await fetch(url, { headers, signal: ac.signal });
+    const text = await r.text();
+    res.status(r.status).type('application/json').send(text);
+  } catch (err) {
+    const msg = err.name === 'AbortError' ? `analytics timeout (${ANALYTICS_URL})` : err.message;
+    res.status(502).json({ ok: false, error: 'analytics unreachable', message: msg });
+  } finally {
+    clearTimeout(timer);
+  }
+});
+
 const cache = new Map();
 const TTL_MS = 5_000;
 
