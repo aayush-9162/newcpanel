@@ -731,103 +731,82 @@ function Leaderboard({ rows, teamRev, onRowClick }) {
 }
 
 // ═══════════════ Floor & Conversion (BETA) — from the UPS system ═══════════════
-// Pulls the salesperson closing-ratio scoreboard from the CFC Analytics API
-// (Legacy UPS conversion) via our server-side proxy. Field names in that API
-// aren't pinned here yet, so we map them flexibly and fall back to a raw table.
-const num = (v) => {
+// Salesperson closing-ratio scoreboard from the CFC Analytics API
+// (legacy-ups/conversion/salesperson) via our server-side proxy. Each row:
+//   { Store, salesperson_id, name, ups, sales (= closed tickets), closing_ratio (0–1) }
+const numF = (v) => {
   if (v == null) return null;
   if (typeof v === 'number') return Number.isFinite(v) ? v : null;
   const n = parseFloat(String(v).replace(/[^0-9.\-]/g, ''));
   return Number.isFinite(n) ? n : null;
 };
-const pick = (row, aliases) => {
-  const norm = (s) => String(s).toLowerCase().replace(/[_\s]/g, '');
-  const keys = Object.keys(row || {});
-  for (const a of aliases) {
-    const hit = keys.find((k) => norm(k) === a);
-    if (hit !== undefined) return row[hit];
-  }
-  return undefined;
-};
-function extractRows(payload) {
+// "JoeC" → "Joe C"; all-caps codes like "JEFFR" are left as-is.
+const prettyName = (n) => String(n || '—').replace(/([a-z])([A-Z])/g, '$1 $2');
+function extractFloorRows(payload) {
   const data = payload?.data ?? payload;
   if (Array.isArray(data)) return data;
   if (data && typeof data === 'object') {
-    // conversion/salesperson: the full seller list is `all`; otherwise combine
-    // the top/low closer arrays.
     if (Array.isArray(data.all) && data.all.length) return data.all;
     const closers = [...(data.topClosers || []), ...(data.lowClosers || [])];
     if (closers.length) return closers;
-    for (const k of ['rows', 'salespeople', 'sellers', 'closers', 'top', 'list', 'items', 'salesPeople']) {
-      if (Array.isArray(data[k]) && data[k].length && typeof data[k][0] === 'object') return data[k];
-    }
-    for (const v of Object.values(data)) {
-      if (Array.isArray(v) && v.length && typeof v[0] === 'object') return v;
-    }
   }
   return [];
 }
 function normalizeFloorRows(payload) {
-  const raw = extractRows(payload);
-  if (!raw.length) return { list: [], isRaw: false, rawCols: [] };
-  const mapped = raw.map((r) => {
-    const closing = num(pick(r, ['closing', 'closingratio', 'closingpct', 'closepct', 'closerate', 'conversion', 'conversionrate']));
-    let burning = num(pick(r, ['burning', 'burnpct', 'burningratio', 'burnrate']));
-    if (burning == null && closing != null) burning = Math.max(0, 100 - closing);
-    const a = pick(r, ['absent', 'isabsent', 'attendance', 'status']);
+  const raw = extractFloorRows(payload);
+  if (!raw.length) return [];
+  return raw.map((r) => {
+    const cr = r.closing_ratio != null ? Number(r.closing_ratio) : null;
+    const closing = cr == null || !Number.isFinite(cr) ? null : (cr <= 1 ? cr * 100 : cr);
     return {
-      name: pick(r, ['name', 'salesperson', 'sellername', 'seller', 'employee', 'salespersonname', 'displayname', 'fullname']) || '—',
-      ups: num(pick(r, ['ups', 'upstaken', 'upscount', 'totalups', 'upsreceived', 'greeted'])),
-      tickets: num(pick(r, ['tickets', 'ticketcount', 'closes', 'regulartickets', 'invoices', 'ticketswritten', 'sold'])),
-      bb: num(pick(r, ['bb', 'bebacks', 'bbreceived', 'beback', 'bebackscount', 'bbcount'])),
-      closing, burning,
-      preTax: num(pick(r, ['pretax', 'pretaxsales', 'subtotal', 'pretaxrevenue', 'pretaxtotal'])),
-      sales: num(pick(r, ['sales', 'revenue', 'totalrevenue', 'salesamount', 'saleamount', 'netsales', 'grosssales'])),
-      absent: a == null ? false : (a === true || ['absent', 'true', '1'].includes(String(a).toLowerCase())),
+      name: prettyName(r.name),
+      store: r.Store ?? r.store ?? '',
+      ups: numF(r.ups),
+      tickets: numF(r.sales),        // the API's `sales` field = number of closed tickets
+      closing,
+      burning: closing == null ? null : Math.max(0, 100 - closing),
     };
-  });
-  const known = mapped.some((m) => m.ups != null || m.tickets != null || m.closing != null || m.sales != null);
-  if (known) {
-    const sorted = [...mapped].sort((x, y) => (y.sales ?? y.ups ?? 0) - (x.sales ?? x.ups ?? 0));
-    return { list: sorted, isRaw: false, rawCols: [] };
-  }
-  return { list: raw, isRaw: true, rawCols: Object.keys(raw[0]) };
+  }).sort((a, b) => (b.tickets ?? 0) - (a.tickets ?? 0) || (b.ups ?? 0) - (a.ups ?? 0));
 }
 
 function FloorConversion({ store, range, rangeLabel }) {
   const storeLabel = store === 'ARDEN' ? 'Arden' : 'Waynesville';
-  const q = useAnalyticsQuery('legacy-ups/conversion/salesperson',
-    { store: storeLabel, range, top: 200, min_ups: 0 },
-    { retry: 0, staleTime: 5 * 60 * 1000 });
-  const { list, isRaw, rawCols } = useMemo(() => normalizeFloorRows(q.data), [q.data]);
-  const has = (k) => !isRaw && list.some((r) => r[k] != null);
+  const primary = useAnalyticsQuery('legacy-ups/conversion/salesperson',
+    { store: storeLabel, range, top: 200, min_ups: 0 }, { retry: 0, staleTime: 5 * 60 * 1000 });
+  const primaryRows = useMemo(() => normalizeFloorRows(primary.data), [primary.data]);
 
-  // TEMP (BETA): dump the raw UPS-system response to the console so we can pin
-  // the exact field names. Remove once the columns are mapped.
-  useEffect(() => {
-    if (q.data) {
-      console.log('%c[Floor&Conversion] raw response for ' + storeLabel + ' / ' + range, 'color:#0ea5e9;font-weight:bold');
-      console.log(q.data);
-      try { console.log(JSON.stringify(q.data, null, 2)); } catch { /* ignore */ }
-    }
-    if (q.error) console.log('[Floor&Conversion] error:', q.error);
-  }, [q.data, q.error, storeLabel, range]);
+  // The legacy UPS feed has no recent-day data (it ended at the cutover to the
+  // new system), so if the selected window is empty fall back to this-year.
+  const emptyPrimary = !primary.isLoading && !primary.error && primaryRows.length === 0;
+  const fallback = useAnalyticsQuery('legacy-ups/conversion/salesperson',
+    { store: storeLabel, range: 'this-year', top: 200, min_ups: 0 },
+    { retry: 0, enabled: emptyPrimary, staleTime: 5 * 60 * 1000 });
+  const fallbackRows = useMemo(() => normalizeFloorRows(fallback.data), [fallback.data]);
 
-  // TEMP (BETA): when the selected range has no rows, query a wide window
-  // (this-year, both stores) purely to reveal the seller-row field names.
-  const empty = !q.isLoading && !q.error && list.length === 0;
-  const discover = useAnalyticsQuery('legacy-ups/conversion/salesperson',
-    { store: 'Combined', range: 'this-year', top: 50, min_ups: 0 },
-    { retry: 0, enabled: empty, staleTime: 5 * 60 * 1000 });
+  // TEMP DIAGNOSTIC — probe recent ranges to find where the UPS feed stops.
+  const dToday = useAnalyticsQuery('legacy-ups/conversion/salesperson', { store: storeLabel, range: 'today' }, { retry: 0, enabled: true });
+  const dWeek  = useAnalyticsQuery('legacy-ups/conversion/salesperson', { store: storeLabel, range: 'this-week' }, { retry: 0, enabled: true });
+  const dMonth = useAnalyticsQuery('legacy-ups/conversion/salesperson', { store: storeLabel, range: 'this-month' }, { retry: 0, enabled: true });
   useEffect(() => {
-    if (discover.data) {
-      const rows = extractRows(discover.data);
-      console.log('%c[Floor&Conversion] DISCOVERY (Combined / this-year) — ' + rows.length + ' rows', 'color:#f59e0b;font-weight:bold');
-      console.log('First row keys:', rows[0] ? Object.keys(rows[0]) : '(no rows)');
-      try { console.log(JSON.stringify(discover.data, null, 2)); } catch { /* ignore */ }
-    }
-    if (discover.error) console.log('[Floor&Conversion] DISCOVERY error:', discover.error);
-  }, [discover.data, discover.error]);
+    const probe = (label, d) => {
+      if (!d.data) return;
+      const rows = extractFloorRows(d.data);
+      console.log(`%c[FeedCheck] ${storeLabel} · ${label}: ${rows.length} rows`, 'color:#0ea5e9;font-weight:bold',
+        '| window:', d.data?.range?.from, '→', d.data?.range?.to);
+    };
+    probe('today', dToday); probe('yesterday', primary);
+    probe('this-week', dWeek); probe('this-month', dMonth);
+  }, [dToday.data, dWeek.data, dMonth.data, primary.data, storeLabel]);
+
+  const usedFallback = emptyPrimary && fallbackRows.length > 0;
+  const rows    = primaryRows.length ? primaryRows : fallbackRows;
+  const loading = primary.isLoading || (emptyPrimary && fallback.isLoading);
+  const error   = primary.error || (emptyPrimary ? fallback.error : null);
+
+  const closed = rows.filter((r) => r.closing != null);
+  const avgClosing = closed.length ? closed.reduce((s, r) => s + r.closing, 0) / closed.length : 0;
+  const totUps = rows.reduce((s, r) => s + (r.ups || 0), 0);
+  const totTix = rows.reduce((s, r) => s + (r.tickets || 0), 0);
   const pct = (v) => (v == null ? '—' : `${Number(v).toFixed(1)}%`);
 
   return (
@@ -837,33 +816,28 @@ function FloorConversion({ store, range, rangeLabel }) {
           <TrendingUp size={16} className="text-sky-500" />
           <span className="text-sm font-semibold">Floor &amp; Conversion</span>
           <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-amber-700 dark:bg-amber-900/40 dark:text-amber-200">Beta</span>
-          <span className="text-[11px] text-muted-fg">· {rangeLabel} · {storeLabel} · from the UPS system</span>
+          <span className="text-[11px] text-muted-fg">· {usedFallback ? 'This Year' : rangeLabel} · {storeLabel} · UPS system</span>
+          {rows.length > 0 && (
+            <span className="ml-auto text-[11px] text-muted-fg">
+              {fmtNumber(totUps)} ups · {fmtNumber(totTix)} closes · {pct(avgClosing)} avg closing
+            </span>
+          )}
         </div>
-        {q.isLoading ? (
+        {usedFallback && (
+          <div className="border-b border-border bg-amber-500/5 px-4 py-1.5 text-[11px] text-amber-700 dark:text-amber-300">
+            No UPS data for {rangeLabel} (the legacy feed ends at the new-system cutover) — showing this year to date.
+          </div>
+        )}
+        {loading ? (
           <div className="grid place-items-center py-12 text-sm text-muted-fg">
             <div className="flex flex-col items-center gap-3"><div className="h-7 w-7 animate-spin rounded-full border-2 border-primary border-t-transparent" />Loading floor data…</div>
           </div>
-        ) : q.error ? (
+        ) : error ? (
           <div className="m-4 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-xs text-amber-700 dark:text-amber-300">
-            Couldn't reach the UPS system: {q.error.message}
+            Couldn't reach the UPS system: {error.message}
           </div>
-        ) : list.length === 0 ? (
-          <div className="grid place-items-center py-12 text-sm text-muted-fg">No floor data for {rangeLabel}.</div>
-        ) : isRaw ? (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-muted/40 text-[10px] uppercase tracking-wider text-muted-fg">
-                <tr className="border-b border-border">{rawCols.map((c) => <th key={c} className="px-3 py-2.5 text-left">{c}</th>)}</tr>
-              </thead>
-              <tbody>
-                {list.map((r, i) => (
-                  <tr key={i} className="border-b border-border last:border-0 hover:bg-muted/30">
-                    {rawCols.map((c) => <td key={c} className="px-3 py-2 tabular-nums">{r[c] == null ? '—' : String(r[c])}</td>)}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+        ) : rows.length === 0 ? (
+          <div className="grid place-items-center py-12 text-sm text-muted-fg">No floor data available.</div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
@@ -871,30 +845,27 @@ function FloorConversion({ store, range, rangeLabel }) {
                 <tr className="border-b border-border">
                   <th className="px-3 py-2.5 text-left w-9">#</th>
                   <th className="px-3 py-2.5 text-left">Employee</th>
-                  {has('ups')     && <th className="px-3 py-2.5 text-right">UPS</th>}
-                  {has('tickets') && <th className="px-3 py-2.5 text-right">Tickets</th>}
-                  {has('bb')      && <th className="px-3 py-2.5 text-right">BB Received</th>}
-                  {has('closing') && <th className="px-3 py-2.5 text-right">Closing</th>}
-                  {has('burning') && <th className="px-3 py-2.5 text-right">Burning</th>}
-                  {has('preTax')  && <th className="px-3 py-2.5 text-right">Pre-Tax</th>}
-                  {has('sales')   && <th className="px-3 py-2.5 text-right">Sales</th>}
+                  <th className="px-3 py-2.5 text-right">UPS</th>
+                  <th className="px-3 py-2.5 text-right">Tickets</th>
+                  <th className="px-3 py-2.5 text-right">Closing</th>
+                  <th className="px-3 py-2.5 text-right">Burning</th>
                 </tr>
               </thead>
               <tbody>
-                {list.map((r, i) => (
-                  <tr key={i} className="border-b border-border last:border-0 hover:bg-muted/30">
+                {rows.map((r, i) => (
+                  <tr key={r.name + i} className="border-b border-border last:border-0 hover:bg-muted/30">
                     <td className="px-3 py-2.5 tabular-nums text-muted-fg">{i + 1}</td>
                     <td className="px-3 py-2.5 font-semibold">
                       {r.name}
-                      {r.absent && <span className="ml-2 rounded bg-rose-100 px-1.5 py-0.5 text-[9px] font-bold uppercase text-rose-600 dark:bg-rose-900/40 dark:text-rose-300">Absent</span>}
+                      {r.store && <span className="ml-1.5 text-[10px] font-normal text-muted-fg">{r.store}</span>}
                     </td>
-                    {has('ups')     && <td className="px-3 py-2.5 text-right tabular-nums">{r.ups == null ? '—' : fmtNumber(r.ups)}</td>}
-                    {has('tickets') && <td className="px-3 py-2.5 text-right tabular-nums">{r.tickets == null ? '—' : fmtNumber(r.tickets)}</td>}
-                    {has('bb')      && <td className="px-3 py-2.5 text-right tabular-nums text-muted-fg">{r.bb == null ? '—' : fmtNumber(r.bb)}</td>}
-                    {has('closing') && <td className={cn('px-3 py-2.5 text-right tabular-nums font-semibold', (r.closing ?? 0) >= 50 ? 'text-emerald-600 dark:text-emerald-300' : 'text-rose-500 dark:text-rose-300')}>{pct(r.closing)}</td>}
-                    {has('burning') && <td className="px-3 py-2.5 text-right tabular-nums text-muted-fg">{pct(r.burning)}</td>}
-                    {has('preTax')  && <td className="px-3 py-2.5 text-right tabular-nums text-muted-fg">{r.preTax == null ? '—' : fmtCurrency(r.preTax)}</td>}
-                    {has('sales')   && <td className="px-3 py-2.5 text-right tabular-nums font-bold">{r.sales == null ? '—' : fmtCurrency(r.sales)}</td>}
+                    <td className="px-3 py-2.5 text-right tabular-nums text-muted-fg">{r.ups == null ? '—' : fmtNumber(r.ups)}</td>
+                    <td className="px-3 py-2.5 text-right tabular-nums font-medium">{r.tickets == null ? '—' : fmtNumber(r.tickets)}</td>
+                    <td className={cn('px-3 py-2.5 text-right tabular-nums font-semibold',
+                      r.closing == null ? 'text-muted-fg' : r.closing >= avgClosing ? 'text-emerald-600 dark:text-emerald-300' : 'text-rose-500 dark:text-rose-300')}>
+                      {pct(r.closing)}
+                    </td>
+                    <td className="px-3 py-2.5 text-right tabular-nums text-muted-fg">{pct(r.burning)}</td>
                   </tr>
                 ))}
               </tbody>
