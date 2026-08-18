@@ -785,7 +785,7 @@ function FloorConversion({ store, fromDate, toDate, label }) {
       <CardContent className="p-0">
         <div className="flex flex-wrap items-center gap-2 border-b border-border bg-gradient-to-r from-sky-500/10 via-transparent to-transparent px-4 py-3">
           <TrendingUp size={16} className="text-sky-500" />
-          <span className="text-sm font-semibold">Floor &amp; Conversion</span>
+          <span className="text-sm font-semibold">Salesperson Performance</span>
           <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-amber-700 dark:bg-amber-900/40 dark:text-amber-200">Beta</span>
           <span className="text-[11px] text-muted-fg">· {label} · {storeLabel} · UPS system (live)</span>
           {rows.length > 0 && <span className="ml-auto text-[11px] text-muted-fg">{fmtNumber(totUps)} ups on the floor</span>}
@@ -815,7 +815,6 @@ function FloorConversion({ store, fromDate, toDate, label }) {
                       <th className="px-3 py-2.5 text-right">Closing</th>
                       <th className="px-3 py-2.5 text-right">Burning</th>
                       <th className="px-3 py-2.5 text-right">Care Plans</th>
-                      <th className="px-3 py-2.5 text-right">Attach %</th>
                       <th className="px-3 py-2.5 text-right">Sales</th>
                     </tr>
                   </thead>
@@ -835,7 +834,6 @@ function FloorConversion({ store, fromDate, toDate, label }) {
                         </td>
                         <td className="px-3 py-2.5 text-right tabular-nums text-muted-fg">{pct(r.burning)}</td>
                         <td className="px-3 py-2.5 text-right tabular-nums text-muted-fg">{r.carePlans == null ? '—' : fmtNumber(r.carePlans)}</td>
-                        <td className="px-3 py-2.5 text-right tabular-nums">{r.attach == null ? '—' : pct(r.attach)}</td>
                         <td className="px-3 py-2.5 text-right tabular-nums font-bold">{money(r.sales)}</td>
                       </tr>
                     ))}
