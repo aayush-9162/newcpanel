@@ -534,19 +534,6 @@ export default function SalespersonReportBeta() {
               <Card><CardContent className="grid place-items-center py-20 text-sm text-muted-fg">No salesperson sales for {storeLabel} on {dateShort}.</CardContent></Card>
             ) : (
               <>
-                {/* ═══════════════ Top 3 (compact) ═══════════════ */}
-                <div className="grid gap-3 sm:grid-cols-3">
-                  {rows.slice(0, 3).map((r, i) => (
-                    <PodiumCard key={r.code} rank={i} row={r} teamRev={team.revenue} onClick={() => openSp(r)} />
-                  ))}
-                </div>
-
-                {/* ═══════════════ Standouts ═══════════════ */}
-                {standouts.length > 0 && (
-                  <div className="grid gap-3 sm:grid-cols-3">
-                    {standouts.map((s) => <Standout key={s.title} {...s} />)}
-                  </div>
-                )}
 
 
                 {/* Floor & Conversion (live from the new UPS system) */}
@@ -753,15 +740,18 @@ function FloorConversion({ store, fromDate, toDate, label }) {
     const byName = new Map();
     const ensure = (nm) => {
       const k = normName(nm);
-      if (!byName.has(k)) byName.set(k, { name: nm || '—', store: '', unresolved: false, ups: null, tickets: null, sales: null });
+      if (!byName.has(k)) byName.set(k, { name: nm || '—', store: '', unresolved: false, ups: null, tickets: null, sales: null, carePlans: null, attach: null });
       return byName.get(k);
     };
     for (const r of (capQ.data?.rows ?? [])) {         // UPS
       const e = ensure(r.name); e.ups = numF(r.upsTaken);
       if (r.storeName) e.store = r.storeName; if (r.unresolved) e.unresolved = true;
     }
-    for (const c of (careQ.data?.rows ?? [])) {        // Tickets (primary)
-      const e = ensure(c.name); e.tickets = numF(c.tickets);
+    for (const c of (careQ.data?.rows ?? [])) {        // Tickets (primary) + care-plan attach
+      const e = ensure(c.name);
+      e.tickets = numF(c.tickets);
+      e.carePlans = numF(c.carePlansSold);
+      e.attach = numF(c.attachRate);
       if (!e.store && c.storeName) e.store = c.storeName;
     }
     for (const s of (salesQ.data?.bySeller ?? [])) {   // Sales$ (split-credit)
@@ -829,12 +819,15 @@ function FloorConversion({ store, fromDate, toDate, label }) {
                 <div className="mb-2 text-[10px] font-bold uppercase tracking-wider text-muted-fg">
                   Store totals · {label} <span className="font-normal normal-case">(vs previous period)</span>
                 </div>
-                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
-                  <Kpi l="Tickets"     value={fmtNumber(cur.totalTickets ?? 0)} delta={dlt.totalTickets} unit="%" />
-                  <Kpi l="Conversion"  value={pct(cur.conversionRate)}          delta={dlt.conversionRate} unit="pp" />
-                  <Kpi l="Avg Ticket"  value={cur.avgTicket == null ? '—' : fmtCurrency(cur.avgTicket)} delta={dlt.avgTicket} unit="%" />
-                  <Kpi l="Revenue"     value={fmtCompactCurrency(cur.totalRevenue ?? 0)} delta={dlt.totalRevenue} unit="%" />
-                  <Kpi l="UPS (floor)" value={fmtNumber(totUps)} />
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-8">
+                  <Kpi l="Tickets"      value={fmtNumber(cur.totalTickets ?? 0)} delta={dlt.totalTickets} unit="%" />
+                  <Kpi l="Conversion"   value={pct(cur.conversionRate)}          delta={dlt.conversionRate} unit="pp" />
+                  <Kpi l="Avg Ticket"   value={cur.avgTicket == null ? '—' : fmtCurrency(cur.avgTicket)} delta={dlt.avgTicket} unit="%" />
+                  <Kpi l="Revenue"      value={fmtCompactCurrency(cur.totalRevenue ?? 0)} delta={dlt.totalRevenue} unit="%" />
+                  <Kpi l="UPS (floor)"  value={fmtNumber(totUps)} />
+                  <Kpi l="Email Capture" value={pct(cur.emailCaptureRate)}      delta={dlt.emailCaptureRate} unit="pp" />
+                  <Kpi l="Care-Plan Attach" value={pct(cur.carePlanAttachRate)} delta={dlt.carePlanAttachRate} unit="pp" />
+                  <Kpi l="Reminders"    value={pct(cur.reminderRate)}            delta={dlt.reminderRate} unit="pp" />
                 </div>
               </div>
             )}
@@ -851,6 +844,8 @@ function FloorConversion({ store, fromDate, toDate, label }) {
                       <th className="px-3 py-2.5 text-right">Tickets</th>
                       <th className="px-3 py-2.5 text-right">Closing</th>
                       <th className="px-3 py-2.5 text-right">Burning</th>
+                      <th className="px-3 py-2.5 text-right">Care Plans</th>
+                      <th className="px-3 py-2.5 text-right">Attach %</th>
                       <th className="px-3 py-2.5 text-right">Sales</th>
                     </tr>
                   </thead>
@@ -869,6 +864,8 @@ function FloorConversion({ store, fromDate, toDate, label }) {
                           {pct(r.closing)}
                         </td>
                         <td className="px-3 py-2.5 text-right tabular-nums text-muted-fg">{pct(r.burning)}</td>
+                        <td className="px-3 py-2.5 text-right tabular-nums text-muted-fg">{r.carePlans == null ? '—' : fmtNumber(r.carePlans)}</td>
+                        <td className="px-3 py-2.5 text-right tabular-nums">{r.attach == null ? '—' : pct(r.attach)}</td>
                         <td className="px-3 py-2.5 text-right tabular-nums font-bold">{r.sales == null ? '—' : fmtCurrency(r.sales)}</td>
                       </tr>
                     ))}
@@ -925,19 +922,6 @@ function MonthlyView({ store, monthName, yearNum, storeLabel, fromDate, toDate, 
         <Card><CardContent className="grid place-items-center py-20 text-sm text-muted-fg">No sales for {storeLabel} in {monthName} {yearNum}.</CardContent></Card>
       ) : (
         <>
-          {/* Top 3 for the month */}
-          <div className="grid gap-3 sm:grid-cols-3">
-            {rows.slice(0, 3).map((r, i) => (
-              <PodiumCard key={r.code} rank={i} row={r} teamRev={team.revenue} shareLabel="of month" onClick={() => onRowClick(r)} />
-            ))}
-          </div>
-
-          {/* Standouts */}
-          {standouts.length > 0 && (
-            <div className="grid gap-3 sm:grid-cols-3">
-              {standouts.map((s) => <Standout key={s.title} {...s} />)}
-            </div>
-          )}
 
 
           {/* Floor & Conversion (live from the new UPS system) */}
