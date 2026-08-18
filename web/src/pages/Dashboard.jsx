@@ -751,17 +751,12 @@ export default function Dashboard() {
                 ))}
               </div>
             )}
-            <MiniCumulative
-              data={dailyChart}
-              monthName={monthName}
-              total={thisYearMonthTotal}
-              className={period === 'monthly' ? '' : 'ml-auto'}
-            />
           </CardContent>
         </Card>
 
         {period === 'daily' ? (
-          <DashboardDaily store={store} selectedBldg={selectedBldg} />
+          <DashboardDaily store={store} selectedBldg={selectedBldg}
+            cumulative={<MiniCumulative data={dailyChart} monthName={monthName} total={thisYearMonthTotal} />} />
         ) : (
         <>
         {/* ═══════════════ YESTERDAY (headline) ═══════════════ */}
@@ -770,17 +765,22 @@ export default function Dashboard() {
           decorIcon={Calendar}
           accent={yestRev >= (lastYearMonthTotal / days) ? 'emerald' : 'amber'}
         >
-          <div className="text-[11px] font-bold uppercase tracking-widest text-emerald-700 dark:text-emerald-300">
-            {store === 'ARDEN' ? 'Arden (S1)' : 'Waynesville (S2)'} · {category} · Most recent day on file
-          </div>
-          <div className="mt-1 flex items-baseline gap-3 flex-wrap">
-            <span
-              title={fmtCurrency(yestRev, true)}
-              className="text-5xl font-extrabold tabular-nums tracking-tight bg-gradient-to-br from-emerald-600 to-teal-500 bg-clip-text text-transparent"
-            >
-              {fmtCurrency(yestRev)}
-            </span>
-            <span className="text-sm font-medium text-muted-fg">{yestDayLabel ? `on ${yestDayLabel}` : 'no data yet'}</span>
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div>
+              <div className="text-[11px] font-bold uppercase tracking-widest text-emerald-700 dark:text-emerald-300">
+                {store === 'ARDEN' ? 'Arden (S1)' : 'Waynesville (S2)'} · {category} · Most recent day on file
+              </div>
+              <div className="mt-1 flex items-baseline gap-3 flex-wrap">
+                <span
+                  title={fmtCurrency(yestRev, true)}
+                  className="text-5xl font-extrabold tabular-nums tracking-tight bg-gradient-to-br from-emerald-600 to-teal-500 bg-clip-text text-transparent"
+                >
+                  {fmtCurrency(yestRev)}
+                </span>
+                <span className="text-sm font-medium text-muted-fg">{yestDayLabel ? `on ${yestDayLabel}` : 'no data yet'}</span>
+              </div>
+            </div>
+            <MiniCumulative data={dailyChart} monthName={monthName} total={thisYearMonthTotal} />
           </div>
         </HeroBanner>
 
@@ -1685,23 +1685,24 @@ function MiniCumulative({ data, monthName, total, className }) {
 
   if (!data.length) return null;
   return (
-    <div className={cn('flex items-center gap-2 rounded-xl border border-primary/25 bg-gradient-to-br from-primary/10 via-primary/5 to-transparent px-2.5 py-1 shadow-sm', className)}>
-      <div className="text-right leading-tight">
+    <div className={cn('flex items-center gap-3 rounded-xl border border-emerald-500/30 bg-card/70 px-3 py-2 shadow-sm backdrop-blur-sm', className)}>
+      <div className="leading-tight">
         <div className="text-[9px] font-bold uppercase tracking-wider text-muted-fg whitespace-nowrap">Cumulative · {monthName.slice(0, 3)}</div>
-        <div className="flex items-center justify-end gap-1">
-          <span className="text-sm font-extrabold tabular-nums leading-none text-primary">{fmtCompactCurrency(total)}</span>
+        <div className="flex items-baseline gap-1.5">
+          <span className="text-base font-extrabold tabular-nums leading-none text-emerald-700 dark:text-emerald-300">{fmtCompactCurrency(total)}</span>
           {deltaPct != null && (
-            <span className={cn('text-[9px] font-bold tabular-nums', up ? 'text-emerald-600 dark:text-emerald-300' : 'text-rose-500 dark:text-rose-300')}>
+            <span className={cn('text-[10px] font-bold tabular-nums', up ? 'text-emerald-600 dark:text-emerald-300' : 'text-rose-500 dark:text-rose-300')}>
               {up ? '▲' : '▼'}{Math.abs(deltaPct).toFixed(0)}%
             </span>
           )}
         </div>
+        <div className="text-[9px] text-muted-fg">vs last year</div>
       </div>
-      <div className="h-8 w-24">
+      <div className="h-11 w-32">
         <ResponsiveContainer width="100%" height="100%">
-          <LineChart data={chart} margin={{ top: 3, right: 2, bottom: 0, left: 2 }}>
+          <LineChart data={chart} margin={{ top: 4, right: 2, bottom: 0, left: 2 }}>
             <Line type="monotone" dataKey="lyRun" stroke="hsl(var(--muted-fg))" strokeOpacity={0.45} strokeWidth={1.5} dot={false} isAnimationActive={false} />
-            <Line type="monotone" dataKey="tyRun" stroke="hsl(var(--primary))" strokeWidth={2} dot={false} connectNulls={false} isAnimationActive={false} />
+            <Line type="monotone" dataKey="tyRun" stroke="#059669" strokeWidth={2.25} dot={false} connectNulls={false} isAnimationActive={false} />
           </LineChart>
         </ResponsiveContainer>
       </div>

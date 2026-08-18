@@ -24,7 +24,7 @@ import { cn } from '@/lib/cn';
 // which renders a day earlier west of UTC). See Dashboard.localDate.
 const localDate = (s) => new Date(String(s).slice(0, 10) + 'T00:00:00');
 
-export default function DashboardDaily({ store, selectedBldg }) {
+export default function DashboardDaily({ store, selectedBldg, cumulative }) {
   const storeLabel = store === 'ARDEN' ? 'Arden (S1)' : 'Waynesville (S2)';
   const spdStore = `LEFT(CAST(sd.SalesNo AS VARCHAR(20)), 1) = '${selectedBldg}'`;
 
@@ -308,19 +308,24 @@ export default function DashboardDaily({ store, selectedBldg }) {
     <>
       {/* ═══════════════ YESTERDAY headline ═══════════════ */}
       <HeroBanner icon={Calendar} decorIcon={Calendar} accent="emerald">
-        <div className="text-[11px] font-bold uppercase tracking-widest text-emerald-700 dark:text-emerald-300">
-          {storeLabel}{weekdayLong ? ` · ${weekdayLong}` : ''} · {dateShort}
-        </div>
-        <div className="mt-1 flex items-baseline gap-3 flex-wrap">
-          <span
-            title={fmtCurrency(revenue, true)}
-            className="text-5xl font-extrabold tabular-nums tracking-tight bg-gradient-to-br from-emerald-600 to-teal-500 bg-clip-text text-transparent"
-          >
-            {fmtCurrency(revenue)}
-          </span>
-          <span className="text-sm font-medium text-muted-fg">
-            {noSalesYet ? 'no sales on file for the latest day' : `${fmtNumber(orders)} order${orders === 1 ? '' : 's'} · ${fmtNumber(units)} item${units === 1 ? '' : 's'} sold`}
-          </span>
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <div className="text-[11px] font-bold uppercase tracking-widest text-emerald-700 dark:text-emerald-300">
+              {storeLabel}{weekdayLong ? ` · ${weekdayLong}` : ''} · {dateShort}
+            </div>
+            <div className="mt-1 flex items-baseline gap-3 flex-wrap">
+              <span
+                title={fmtCurrency(revenue, true)}
+                className="text-5xl font-extrabold tabular-nums tracking-tight bg-gradient-to-br from-emerald-600 to-teal-500 bg-clip-text text-transparent"
+              >
+                {fmtCurrency(revenue)}
+              </span>
+              <span className="text-sm font-medium text-muted-fg">
+                {noSalesYet ? 'no sales on file for the latest day' : `${fmtNumber(orders)} order${orders === 1 ? '' : 's'} · ${fmtNumber(units)} item${units === 1 ? '' : 's'} sold`}
+              </span>
+            </div>
+          </div>
+          {cumulative}
         </div>
       </HeroBanner>
 
