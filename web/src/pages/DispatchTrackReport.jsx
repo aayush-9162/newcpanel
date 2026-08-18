@@ -204,7 +204,7 @@ export default function DispatchTrackReport() {
             {/* KPI stats */}
             <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
               <HeroStat label="Completion Rate" value={pctStr(completionPct)} icon={CheckCircle2} accent="emerald" loading={loading}
-                subtitle={`${fmtNumber(completed)} of ${fmtNumber(deliveries)} delivered`} />
+                subtitle={`${fmtNumber(completed)} completed · ${fmtNumber(failed)} failed stops`} />
               <HeroStat label="Failed Deliveries" value={fmtNumber(failed)} icon={XCircle} accent={failed > 0 ? 'rose' : 'emerald'} loading={loading}
                 subtitle={failurePct != null ? `${pctStr(failurePct)} failure rate` : null} urgent={failed > 0} />
               <HeroStat label="Avg Delivery Time" value={avgTime == null ? '—' : `${Math.round(avgTime)}m`} icon={Clock} accent="violet" loading={loading}
