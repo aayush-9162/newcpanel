@@ -19,6 +19,7 @@ import { fmtCurrency, fmtNumber, fmtPercent, fmtCompact, fmtCompactCurrency, tri
 import {
   ResponsiveContainer, LineChart, Line, BarChart, Bar, XAxis, YAxis,
   CartesianGrid, Tooltip as RTooltip, Legend, PieChart, Pie, Cell,
+  AreaChart, Area,
 } from 'recharts';
 import {
   Target, TrendingUp, TrendingDown, Calendar, DollarSign, Activity, Trophy,
@@ -1685,25 +1686,32 @@ function MiniCumulative({ data, monthName, total, className }) {
 
   if (!data.length) return null;
   return (
-    <div className={cn('flex items-center gap-3 rounded-xl border border-emerald-500/30 bg-card/70 px-3 py-2 shadow-sm backdrop-blur-sm', className)}>
+    <div className={cn('flex items-center gap-4 rounded-2xl border border-emerald-500/30 bg-card/70 px-4 py-3 shadow-sm backdrop-blur-sm', className)}>
       <div className="leading-tight">
-        <div className="text-[9px] font-bold uppercase tracking-wider text-muted-fg whitespace-nowrap">Cumulative · {monthName.slice(0, 3)}</div>
-        <div className="flex items-baseline gap-1.5">
-          <span className="text-base font-extrabold tabular-nums leading-none text-emerald-700 dark:text-emerald-300">{fmtCompactCurrency(total)}</span>
+        <div className="text-[10px] font-bold uppercase tracking-wider text-muted-fg whitespace-nowrap">Cumulative · {monthName.slice(0, 3)}</div>
+        <div className="mt-0.5 flex items-baseline gap-1.5">
+          <span className="text-2xl font-extrabold tabular-nums leading-none text-emerald-700 dark:text-emerald-300">{fmtCompactCurrency(total)}</span>
           {deltaPct != null && (
-            <span className={cn('text-[10px] font-bold tabular-nums', up ? 'text-emerald-600 dark:text-emerald-300' : 'text-rose-500 dark:text-rose-300')}>
+            <span className={cn('text-xs font-bold tabular-nums', up ? 'text-emerald-600 dark:text-emerald-300' : 'text-rose-500 dark:text-rose-300')}>
               {up ? '▲' : '▼'}{Math.abs(deltaPct).toFixed(0)}%
             </span>
           )}
         </div>
-        <div className="text-[9px] text-muted-fg">vs last year</div>
+        <div className="mt-0.5 text-[10px] text-muted-fg">vs last year</div>
       </div>
-      <div className="h-11 w-32">
+      <div className="h-[72px] w-52">
         <ResponsiveContainer width="100%" height="100%">
-          <LineChart data={chart} margin={{ top: 4, right: 2, bottom: 0, left: 2 }}>
-            <Line type="monotone" dataKey="lyRun" stroke="hsl(var(--muted-fg))" strokeOpacity={0.45} strokeWidth={1.5} dot={false} isAnimationActive={false} />
-            <Line type="monotone" dataKey="tyRun" stroke="#059669" strokeWidth={2.25} dot={false} connectNulls={false} isAnimationActive={false} />
-          </LineChart>
+          <AreaChart data={chart} margin={{ top: 6, right: 6, bottom: 2, left: 6 }}>
+            <defs>
+              <linearGradient id="cumTy" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="#10b981" stopOpacity={0.4} />
+                <stop offset="100%" stopColor="#10b981" stopOpacity={0} />
+              </linearGradient>
+            </defs>
+            <Line type="monotone" dataKey="lyRun" stroke="hsl(var(--muted-fg))" strokeOpacity={0.55} strokeDasharray="3 3" strokeWidth={1.5} dot={false} isAnimationActive={false} />
+            <Area type="monotone" dataKey="tyRun" stroke="#059669" strokeWidth={2.5} fill="url(#cumTy)" dot={false} connectNulls={false} isAnimationActive={false}
+              activeDot={{ r: 3.5, fill: '#059669', strokeWidth: 0 }} />
+          </AreaChart>
         </ResponsiveContainer>
       </div>
     </div>
