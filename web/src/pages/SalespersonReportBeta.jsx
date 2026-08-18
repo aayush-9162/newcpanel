@@ -751,23 +751,40 @@ function FloorConversion({ store, fromDate, toDate, label }) {
   const capQ  = useAnalyticsQuery('sb/customer-capture', { store: sbStore, from: fromDate, to: toDate }, { retry: 0, enabled: ready, staleTime: 5 * 60 * 1000 });
   const execQ = useAnalyticsQuery('sb/executive',        { store: sbStore, from: fromDate, to: toDate }, { retry: 0, enabled: ready, staleTime: 5 * 60 * 1000 });
 
+  // Tickets + per-seller sales$ come from /sales bySeller.
+  const salesQ = useAnalyticsQuery('sales', { store: sbStore, from: fromDate, to: toDate }, { retry: 0, enabled: ready, staleTime: 5 * 60 * 1000 });
+
+  // Merge per salesperson (by name): UPS from customer-capture; tickets + sales$
+  // from /sales bySeller. Closing = tickets / ups (matches the UPS board exactly);
+  // Burning = 100 - Closing.
+  const normName = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
   const rows = useMemo(() => {
-    const raw = capQ.data?.rows ?? [];
-    return raw.map((r) => ({
-      name: r.name || '—',
-      store: r.storeName || '',
-      unresolved: !!r.unresolved,
-      ups: numF(r.upsTaken),
-      engaged: numF(r.engaged),
-      captured: numF(r.acquisitions),
-      capture: numF(r.captureRatio),
-    })).sort((a, b) => (b.ups ?? 0) - (a.ups ?? 0));
-  }, [capQ.data]);
+    const byName = new Map();
+    for (const r of (capQ.data?.rows ?? [])) {
+      byName.set(normName(r.name), {
+        name: r.name || '—', store: r.storeName || '', unresolved: !!r.unresolved,
+        ups: numF(r.upsTaken), engaged: numF(r.engaged), captured: numF(r.acquisitions), capture: numF(r.captureRatio),
+        tickets: null, sales: null,
+      });
+    }
+    for (const s of (salesQ.data?.bySeller ?? [])) {
+      const key = normName(s.sellerName ?? s.name);
+      const tickets = numF(s.count ?? s.tickets);
+      const sales = numF(s.revenue ?? s.sales ?? s.totalRevenue);
+      const ex = byName.get(key);
+      if (ex) { ex.tickets = tickets; ex.sales = sales; }
+      else byName.set(key, { name: s.sellerName || s.name || '—', store: '', unresolved: false, ups: null, engaged: null, captured: null, capture: null, tickets, sales });
+    }
+    return [...byName.values()].map((r) => {
+      const closing = (r.ups && r.ups > 0) ? ((r.tickets || 0) / r.ups) * 100 : (r.tickets ? 100 : null);
+      return { ...r, closing, burning: closing == null ? null : Math.max(0, 100 - closing) };
+    }).sort((a, b) => (b.sales ?? 0) - (a.sales ?? 0) || (b.ups ?? 0) - (a.ups ?? 0));
+  }, [capQ.data, salesQ.data]);
 
   const cur = execQ.data?.current || {};
   const dlt = execQ.data?.delta || {};
-  const loading = capQ.isLoading || execQ.isLoading;
-  const error   = capQ.error || execQ.error;
+  const loading = capQ.isLoading || execQ.isLoading || salesQ.isLoading;
+  const error   = capQ.error || execQ.error || salesQ.error;
   const totUps  = rows.reduce((s, r) => s + (r.ups || 0), 0);
   const pct = (v) => (v == null ? '—' : `${Number(v).toFixed(1)}%`);
 
@@ -816,7 +833,7 @@ function FloorConversion({ store, fromDate, toDate, label }) {
               </div>
             )}
 
-            {/* Per-salesperson floor activity */}
+            {/* Per-salesperson board — UPS / Tickets / Closing / Burning / Sales */}
             {rows.length > 0 && (
               <div className="overflow-x-auto border-t border-border">
                 <table className="w-full text-sm">
@@ -825,9 +842,10 @@ function FloorConversion({ store, fromDate, toDate, label }) {
                       <th className="px-3 py-2.5 text-left w-9">#</th>
                       <th className="px-3 py-2.5 text-left">Employee</th>
                       <th className="px-3 py-2.5 text-right">UPS</th>
-                      <th className="px-3 py-2.5 text-right">Engaged</th>
-                      <th className="px-3 py-2.5 text-right">Captured</th>
-                      <th className="px-3 py-2.5 text-right">Capture %</th>
+                      <th className="px-3 py-2.5 text-right">Tickets</th>
+                      <th className="px-3 py-2.5 text-right">Closing</th>
+                      <th className="px-3 py-2.5 text-right">Burning</th>
+                      <th className="px-3 py-2.5 text-right">Sales</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -836,12 +854,18 @@ function FloorConversion({ store, fromDate, toDate, label }) {
                         <td className="px-3 py-2.5 tabular-nums text-muted-fg">{i + 1}</td>
                         <td className="px-3 py-2.5 font-semibold">
                           {r.name}
-                          {r.unresolved && <span className="ml-1.5 text-[10px] font-normal text-amber-600 dark:text-amber-300">unresolved</span>}
+                          {(r.ups === 0 || r.ups == null) && (r.sales > 0)
+                            ? <span className="ml-2 rounded bg-rose-100 px-1.5 py-0.5 text-[9px] font-bold uppercase text-rose-600 dark:bg-rose-900/40 dark:text-rose-300">Absent</span>
+                            : r.unresolved ? <span className="ml-1.5 text-[10px] font-normal text-amber-600 dark:text-amber-300">unresolved</span> : null}
                         </td>
-                        <td className="px-3 py-2.5 text-right tabular-nums font-medium">{r.ups == null ? '—' : fmtNumber(r.ups)}</td>
-                        <td className="px-3 py-2.5 text-right tabular-nums text-muted-fg">{r.engaged == null ? '—' : fmtNumber(r.engaged)}</td>
-                        <td className="px-3 py-2.5 text-right tabular-nums text-muted-fg">{r.captured == null ? '—' : fmtNumber(r.captured)}</td>
-                        <td className="px-3 py-2.5 text-right tabular-nums font-semibold">{pct(r.capture)}</td>
+                        <td className="px-3 py-2.5 text-right tabular-nums text-muted-fg">{r.ups == null ? '—' : fmtNumber(r.ups)}</td>
+                        <td className="px-3 py-2.5 text-right tabular-nums font-medium">{r.tickets == null ? '—' : fmtNumber(r.tickets)}</td>
+                        <td className={cn('px-3 py-2.5 text-right tabular-nums font-semibold',
+                          r.closing == null ? 'text-muted-fg' : r.closing >= 50 ? 'text-emerald-600 dark:text-emerald-300' : 'text-rose-500 dark:text-rose-300')}>
+                          {pct(r.closing)}
+                        </td>
+                        <td className="px-3 py-2.5 text-right tabular-nums text-muted-fg">{pct(r.burning)}</td>
+                        <td className="px-3 py-2.5 text-right tabular-nums font-bold">{r.sales == null ? '—' : fmtCurrency(r.sales)}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -849,7 +873,7 @@ function FloorConversion({ store, fromDate, toDate, label }) {
               </div>
             )}
             <div className="px-4 py-2 text-[10px] text-muted-fg">
-              Conversion, Tickets &amp; Revenue above are store-wide (this source doesn't break tickets/closing out per salesperson).
+              UPS from the floor log · Tickets &amp; Sales from written sales · Closing = Tickets ÷ UPS. (Sales is split-credit; BB / pre-tax not exposed here.)
             </div>
           </>
         )}
