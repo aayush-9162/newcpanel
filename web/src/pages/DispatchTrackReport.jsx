@@ -6,18 +6,18 @@
 // defensively (pick over likely keys) and the raw responses are logged once for
 // confirmation. Store here is a LABEL (Arden / Waynesville), not S1/S2.
 
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Topbar } from '@/components/Topbar';
 import { Card, CardContent } from '@/components/ui/Card';
 import { HeroStat, HeroBanner } from '@/components/HeroStat';
 import { useAnalyticsQuery } from '@/lib/api';
-import { fmtCurrency, fmtNumber, fmtCompactCurrency } from '@/lib/format';
+import { fmtNumber } from '@/lib/format';
 import {
   ResponsiveContainer, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip as RTooltip,
 } from 'recharts';
 import {
-  Truck, CheckCircle2, XCircle, Clock, Users, DollarSign, AlertTriangle,
-  MapPin, Gauge, Wallet,
+  Truck, CheckCircle2, XCircle, Clock, Users, AlertTriangle,
+  MapPin, Gauge, Package,
 } from 'lucide-react';
 import { cn } from '@/lib/cn';
 
@@ -78,29 +78,27 @@ export default function DispatchTrackReport() {
   const summaryQ = useAnalyticsQuery('delivery/summary', params, opts);
   const driversQ = useAnalyticsQuery('delivery/driver-performance', params, opts);
   const storeQ   = useAnalyticsQuery('delivery/store', params, opts);
-  const costQ    = useAnalyticsQuery('delivery/cost', params, opts);
   const excQ     = useAnalyticsQuery('delivery/exceptions', { ...params, limit: 25 }, opts);
-
-  // TEMP: log shapes once to confirm field names.
-  useEffect(() => {
-    const L = (t, d) => { if (d) try { console.log('%c[Delivery] ' + t, 'color:#0ea5e9;font-weight:bold', d); } catch { /* ignore */ } };
-    L('summary', summaryQ.data); L('driver-performance', driversQ.data);
-    L('store', storeQ.data); L('cost', costQ.data); L('exceptions', excQ.data);
-  }, [summaryQ.data, driversQ.data, storeQ.data, costQ.data, excQ.data]);
 
   // ── KPIs from summary ──
   const s = summaryQ.data || {};
   const kpis = s.kpis || s.summary || {};
-  const totalStops    = num(pick(kpis, ['totalStops', 'stops', 'total_stops'])) ?? 0;
-  const completed     = num(pick(kpis, ['completed', 'deliveriesCompleted', 'completedDeliveries'])) ?? 0;
-  const failed        = num(pick(kpis, ['failed', 'failedDeliveries'])) ?? 0;
-  const deliveries    = num(pick(kpis, ['totalDeliveries', 'deliveries'])) ?? (completed + failed);
+  const totalStops    = num(pick(kpis, ['totalStops', 'stops'])) ?? 0;
+  const completed     = num(pick(kpis, ['completedDeliveries', 'completed'])) ?? 0;
+  const failed        = num(pick(kpis, ['failedDeliveries', 'failed'])) ?? 0;
+  const orders        = num(pick(kpis, ['totalOrders', 'orders'])) ?? (completed + failed);
+  const exchanges     = num(pick(kpis, ['exchangeDeliveries', 'exchanges'])) ?? 0;
   const completionPct = num(pick(kpis, ['completionPct', 'completionRate', 'completion']));
   const failurePct    = num(pick(kpis, ['failurePct', 'failureRate', 'failure']));
   const avgTime       = num(pick(kpis, ['avgDeliveryTimeMin', 'avgDeliveryTime', 'averageDeliveryTime', 'avgTime']));
-  const amountDue     = num(pick(kpis, ['amountDue', 'totalAmountDue']));
   const driverCount   = num(pick(s, ['driverCount', 'drivers'])) ?? (driversQ.data?.drivers?.length ?? null);
   const avgStops      = num(pick(s, ['avgStopsPerDriver']));
+  const serviceKinds  = (s.byServiceKind || []).map((k) => ({
+    key: String(pick(k, ['key']) || '—'),
+    orders: num(pick(k, ['totalOrders'])) ?? 0,
+    completed: num(pick(k, ['completedDeliveries', 'completed'])) ?? 0,
+    failed: num(pick(k, ['failedDeliveries', 'failed'])) ?? 0,
+  }));
 
   // ── Trend series ──
   const trend = useMemo(() => {
@@ -138,14 +136,6 @@ export default function DispatchTrackReport() {
       completionPct: num(pick(r, ['completionPct', 'completionRate'])),
     }));
   }, [storeQ.data]);
-
-  // ── Cost totals ──
-  const cost = costQ.data?.totals || {};
-  const amtDue      = num(pick(cost, ['amountDue']));
-  const delCharges  = num(pick(cost, ['deliveryCharges']));
-  const codAmount   = num(pick(cost, ['codAmount']));
-  const collected   = num(pick(cost, ['paymentCollected', 'collected']));
-  const avgCostStop = num(pick(cost, ['avgCostPerStop']));
 
   // ── Exceptions ──
   const exceptions = excQ.data?.rows ?? [];
@@ -187,9 +177,9 @@ export default function DispatchTrackReport() {
               </div>
               <div className="mt-1 flex items-baseline gap-2.5 flex-wrap">
                 <span className="text-4xl font-extrabold tabular-nums tracking-tight text-blue-700 dark:text-blue-200">
-                  {loading ? '…' : fmtNumber(deliveries)}
+                  {loading ? '…' : fmtNumber(orders)}
                 </span>
-                <span className="text-sm font-medium text-muted-fg">deliveries · {pctStr(completionPct)} completed</span>
+                <span className="text-sm font-medium text-muted-fg">orders · {pctStr(completionPct)} completed</span>
               </div>
               <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
                 <Chip label="Total Stops" value={fmtNumber(totalStops)} />
@@ -208,10 +198,9 @@ export default function DispatchTrackReport() {
               <HeroStat label="Failed Deliveries" value={fmtNumber(failed)} icon={XCircle} accent={failed > 0 ? 'rose' : 'emerald'} loading={loading}
                 subtitle={failurePct != null ? `${pctStr(failurePct)} failure rate` : null} urgent={failed > 0} />
               <HeroStat label="Avg Delivery Time" value={avgTime == null ? '—' : `${Math.round(avgTime)}m`} icon={Clock} accent="violet" loading={loading}
-                subtitle={avgStops != null ? `${avgStops.toFixed(1)} stops / driver` : null} />
-              <HeroStat label="Amount Due" value={amountDue == null ? '—' : fmtCompactCurrency(amountDue)}
-                fullValue={amountDue == null ? null : fmtCurrency(amountDue)} icon={DollarSign} accent="amber" loading={loading}
-                subtitle={collected != null ? `${fmtCompactCurrency(collected)} collected` : null} />
+                subtitle={driverCount != null ? `${fmtNumber(driverCount)} driver${driverCount === 1 ? '' : 's'}` : null} />
+              <HeroStat label="Total Orders" value={fmtNumber(orders)} icon={Package} accent="primary" loading={loading}
+                subtitle={`${fmtNumber(exchanges)} exchanges · ${fmtNumber(totalStops)} stops`} />
             </div>
 
             {/* Trend */}
@@ -282,29 +271,28 @@ export default function DispatchTrackReport() {
               </CardContent>
             </Card>
 
-            {/* Store comparison + Cost */}
+            {/* Service type + Route breakdown */}
             <div className="grid gap-5 lg:grid-cols-2">
               <Card>
                 <CardContent className="p-0">
-                  <SectionHead icon={MapPin} title="Store Comparison" />
-                  {stores.length === 0 ? <Empty /> : (
+                  <SectionHead icon={Package} title="By Service Type" />
+                  {serviceKinds.length === 0 ? <Empty /> : (
                     <div className="divide-y divide-border">
-                      {stores.map((r, i) => (
-                        <div key={r.store + i} className="flex items-center gap-3 px-4 py-3">
-                          <div className="grid h-9 w-9 place-items-center rounded-lg bg-primary/10 text-primary text-xs font-bold">
-                            {r.store.slice(0, 2).toUpperCase()}
+                      {serviceKinds.map((k, i) => {
+                        const pctDone = k.orders ? (k.completed / k.orders) * 100 : null;
+                        return (
+                          <div key={k.key + i} className="flex items-center gap-3 px-4 py-3">
+                            <div className="grid h-9 w-9 place-items-center rounded-lg bg-primary/10 text-primary">
+                              <Package size={16} />
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <div className="text-sm font-semibold capitalize">{k.key}</div>
+                              <div className="text-[11px] text-muted-fg">{fmtNumber(k.orders)} orders · {fmtNumber(k.completed)} completed{k.failed ? ` · ${fmtNumber(k.failed)} failed` : ''}</div>
+                            </div>
+                            <div className="text-right text-sm font-bold tabular-nums text-emerald-600 dark:text-emerald-300">{pctStr(pctDone)}</div>
                           </div>
-                          <div className="min-w-0 flex-1">
-                            <div className="text-sm font-semibold">{r.store}</div>
-                            <div className="text-[11px] text-muted-fg">{fmtNumber(r.deliveries ?? 0)} deliveries · {fmtNumber(r.stops ?? 0)} stops</div>
-                          </div>
-                          <div className={cn('text-right text-sm font-bold tabular-nums',
-                            (r.completionPct ?? 0) >= 90 ? 'text-emerald-600 dark:text-emerald-300' : 'text-amber-600 dark:text-amber-300')}>
-                            {pctStr(r.completionPct)}
-                            <div className="text-[10px] font-normal text-rose-500">{fmtNumber(r.failed ?? 0)} failed</div>
-                          </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
                 </CardContent>
@@ -312,14 +300,27 @@ export default function DispatchTrackReport() {
 
               <Card>
                 <CardContent className="p-0">
-                  <SectionHead icon={Wallet} title="Cost & Collections" />
-                  <div className="grid grid-cols-2 gap-3 p-4">
-                    <MiniStat label="Amount Due" value={amtDue == null ? '—' : fmtCurrency(amtDue)} />
-                    <MiniStat label="Collected" value={collected == null ? '—' : fmtCurrency(collected)} tone="emerald" />
-                    <MiniStat label="Delivery Charges" value={delCharges == null ? '—' : fmtCurrency(delCharges)} />
-                    <MiniStat label="COD" value={codAmount == null ? '—' : fmtCurrency(codAmount)} />
-                    <MiniStat label="Avg Cost / Stop" value={avgCostStop == null ? '—' : fmtCurrency(avgCostStop)} />
-                  </div>
+                  <SectionHead icon={MapPin} title="By Route / Unit" />
+                  {stores.length === 0 ? <Empty /> : (
+                    <div className="divide-y divide-border">
+                      {stores.map((r, i) => (
+                        <div key={r.store + i} className="flex items-center gap-3 px-4 py-3">
+                          <div className="grid h-9 w-9 place-items-center rounded-lg bg-primary/10 text-primary text-xs font-bold uppercase">
+                            {r.store.slice(0, 2)}
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <div className="text-sm font-semibold uppercase">{r.store}</div>
+                            <div className="text-[11px] text-muted-fg">{fmtNumber(r.deliveries ?? 0)} deliveries · {fmtNumber(r.stops ?? 0)} stops</div>
+                          </div>
+                          <div className={cn('text-right text-sm font-bold tabular-nums',
+                            (r.completionPct ?? 0) >= 90 ? 'text-emerald-600 dark:text-emerald-300' : 'text-amber-600 dark:text-amber-300')}>
+                            {pctStr(r.completionPct)}
+                            {(r.failed ?? 0) > 0 && <div className="text-[10px] font-normal text-rose-500">{fmtNumber(r.failed)} failed</div>}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             </div>
@@ -375,14 +376,6 @@ function Chip({ label, value, tone }) {
       tone === 'rose' ? 'border-rose-500/30 bg-rose-500/5' : 'border-blue-500/20 bg-white/50 dark:bg-white/5')}>
       <div className="text-[9px] font-bold uppercase tracking-wider text-muted-fg">{label}</div>
       <div className={cn('mt-0.5 truncate text-sm font-extrabold tabular-nums', tone === 'rose' ? 'text-rose-600 dark:text-rose-300' : 'text-blue-900 dark:text-blue-100')}>{value}</div>
-    </div>
-  );
-}
-function MiniStat({ label, value, tone }) {
-  return (
-    <div className="rounded-lg border border-border bg-card px-3 py-2">
-      <div className="text-[10px] font-bold uppercase tracking-wider text-muted-fg">{label}</div>
-      <div className={cn('mt-0.5 text-base font-extrabold tabular-nums', tone === 'emerald' ? 'text-emerald-600 dark:text-emerald-300' : 'text-fg')}>{value}</div>
     </div>
   );
 }
