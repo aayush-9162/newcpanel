@@ -751,40 +751,46 @@ function FloorConversion({ store, fromDate, toDate, label }) {
   const capQ  = useAnalyticsQuery('sb/customer-capture', { store: sbStore, from: fromDate, to: toDate }, { retry: 0, enabled: ready, staleTime: 5 * 60 * 1000 });
   const execQ = useAnalyticsQuery('sb/executive',        { store: sbStore, from: fromDate, to: toDate }, { retry: 0, enabled: ready, staleTime: 5 * 60 * 1000 });
 
-  // Tickets + per-seller sales$ come from /sales bySeller.
-  const salesQ = useAnalyticsQuery('sales', { store: sbStore, from: fromDate, to: toDate }, { retry: 0, enabled: ready, staleTime: 5 * 60 * 1000 });
+  // Tickets (primary-attributed, like the UPS board) come from sb/care-plan,
+  // keyed by userId; per-seller sales$ (split-credit, matching the board's Sales
+  // column) come from /sales bySeller, matched by name.
+  const careQ  = useAnalyticsQuery('sb/care-plan', { store: sbStore, from: fromDate, to: toDate }, { retry: 0, enabled: ready, staleTime: 5 * 60 * 1000 });
+  const salesQ = useAnalyticsQuery('sales',        { store: sbStore, from: fromDate, to: toDate }, { retry: 0, enabled: ready, staleTime: 5 * 60 * 1000 });
 
-  // Merge per salesperson (by name): UPS from customer-capture; tickets + sales$
-  // from /sales bySeller. Closing = tickets / ups (matches the UPS board exactly);
-  // Burning = 100 - Closing.
   const normName = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
   const rows = useMemo(() => {
-    const byName = new Map();
+    const byId = new Map();
+    // UPS from customer-capture (per userId)
     for (const r of (capQ.data?.rows ?? [])) {
-      byName.set(normName(r.name), {
-        name: r.name || '—', store: r.storeName || '', unresolved: !!r.unresolved,
-        ups: numF(r.upsTaken), engaged: numF(r.engaged), captured: numF(r.acquisitions), capture: numF(r.captureRatio),
-        tickets: null, sales: null,
+      byId.set(r.userId, {
+        userId: r.userId, name: r.name || '—', store: r.storeName || '', unresolved: !!r.unresolved,
+        ups: numF(r.upsTaken), tickets: null, sales: null,
       });
     }
-    for (const s of (salesQ.data?.bySeller ?? [])) {
-      const key = normName(s.sellerName ?? s.name);
-      const tickets = numF(s.count ?? s.tickets);
-      const sales = numF(s.revenue ?? s.sales ?? s.totalRevenue);
-      const ex = byName.get(key);
-      if (ex) { ex.tickets = tickets; ex.sales = sales; }
-      else byName.set(key, { name: s.sellerName || s.name || '—', store: '', unresolved: false, ups: null, engaged: null, captured: null, capture: null, tickets, sales });
+    // Tickets from care-plan (primary attribution, per userId)
+    for (const c of (careQ.data?.rows ?? [])) {
+      const ex = byId.get(c.userId);
+      const tickets = numF(c.tickets);
+      if (ex) ex.tickets = tickets;
+      else byId.set(c.userId, { userId: c.userId, name: c.name || '—', store: c.storeName || '', unresolved: !!c.unresolved, ups: null, tickets, sales: null });
     }
-    return [...byName.values()].map((r) => {
-      const closing = (r.ups && r.ups > 0) ? ((r.tickets || 0) / r.ups) * 100 : (r.tickets ? 100 : null);
+    // Sales$ from /sales bySeller (split-credit), matched by name
+    const salesByName = new Map();
+    for (const s of (salesQ.data?.bySeller ?? [])) salesByName.set(normName(s.sellerName ?? s.name), numF(s.revenue ?? s.sales ?? s.totalRevenue));
+    for (const r of byId.values()) {
+      const sv = salesByName.get(normName(r.name));
+      if (sv != null) r.sales = sv;
+    }
+    return [...byId.values()].map((r) => {
+      const closing = (r.ups && r.ups > 0) ? ((r.tickets || 0) / r.ups) * 100 : null;
       return { ...r, closing, burning: closing == null ? null : Math.max(0, 100 - closing) };
     }).sort((a, b) => (b.sales ?? 0) - (a.sales ?? 0) || (b.ups ?? 0) - (a.ups ?? 0));
-  }, [capQ.data, salesQ.data]);
+  }, [capQ.data, careQ.data, salesQ.data]);
 
   const cur = execQ.data?.current || {};
   const dlt = execQ.data?.delta || {};
-  const loading = capQ.isLoading || execQ.isLoading || salesQ.isLoading;
-  const error   = capQ.error || execQ.error || salesQ.error;
+  const loading = capQ.isLoading || execQ.isLoading || careQ.isLoading || salesQ.isLoading;
+  const error   = capQ.error || execQ.error || careQ.error || salesQ.error;
   const totUps  = rows.reduce((s, r) => s + (r.ups || 0), 0);
   const pct = (v) => (v == null ? '—' : `${Number(v).toFixed(1)}%`);
 
