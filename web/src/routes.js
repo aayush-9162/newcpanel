@@ -58,6 +58,7 @@ export const routes = [
   { path: '/dmgsummary',         label: 'Damage Report',           icon: PackageX,      group: 'Reports', built: true, home: true, roles: MGR },
   { path: '/leads',              label: 'Prospective Buyer',       icon: Users,         group: 'Reports', built: true, roles: MGR },
   { path: '/pickup/new',         label: 'Delivery & Pickup',       icon: Truck,         group: 'Reports', built: true, roles: MGR },
+  { path: '/dispatchtrack',      label: 'DispatchTrack Report',    icon: Truck,         group: 'Reports', built: true, home: true, roles: MGR },
   { path: '/hot-button-issues',  label: 'Hot Button Issues',       icon: AlertTriangle, group: 'Reports', built: true, roles: MGR },
 
   // Owner-only reports — admin sees them, manager / viewer / salesperson do not

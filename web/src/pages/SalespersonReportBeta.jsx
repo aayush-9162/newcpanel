@@ -752,7 +752,7 @@ function FloorHero({ store, fromDate, toDate, year, label, weekday, periodLabel 
   return (
     <HeroBanner icon={Trophy} decorIcon={Trophy} accent="emerald">
       <div className="text-[11px] font-bold uppercase tracking-widest text-emerald-700 dark:text-emerald-300">
-        {storeLabel} · {weekday ? `${weekday}, ` : ''}{label} · {periodLabel} · UPS system (live)
+        {storeLabel} · {weekday ? `${weekday}, ` : ''}{label} · {periodLabel}
       </div>
       <div className="mt-1 flex items-baseline gap-2.5 flex-wrap">
         <span className="text-4xl font-extrabold tabular-nums tracking-tight text-emerald-700 dark:text-emerald-200">
@@ -785,7 +785,7 @@ function FloorConversion({ store, fromDate, toDate, year, label }) {
           <TrendingUp size={16} className="text-sky-500" />
           <span className="text-sm font-semibold">Salesperson Performance</span>
           <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-amber-700 dark:bg-amber-900/40 dark:text-amber-200">Beta</span>
-          <span className="text-[11px] text-muted-fg">· {label} · {storeLabel} · UPS system (live)</span>
+          <span className="text-[11px] text-muted-fg">· {label} · {storeLabel}</span>
           {rows.length > 0 && <span className="ml-auto text-[11px] text-muted-fg">{fmtNumber(totUps)} ups on the floor</span>}
         </div>
         {loading ? (
@@ -839,9 +839,6 @@ function FloorConversion({ store, fromDate, toDate, year, label }) {
                 </table>
               </div>
             )}
-            <div className="px-4 py-2 text-[10px] text-muted-fg">
-              UPS from the floor log · Tickets &amp; Sales from written sales · Closing = Tickets ÷ UPS. (Sales is split-credit; BB / pre-tax not exposed here.)
-            </div>
           </>
         )}
       </CardContent>
