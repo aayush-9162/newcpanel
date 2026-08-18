@@ -10,7 +10,7 @@
 // sale + month-to-date) + SalesItemDetail (items); codes → names + monthly
 // targets via MySQL employees (rv_code, name, default_target).
 
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Topbar } from '@/components/Topbar';
 import { Card, CardContent } from '@/components/ui/Card';
 import { HeroBanner } from '@/components/HeroStat';
@@ -498,6 +498,8 @@ export default function SalespersonReportBeta() {
         {period === 'monthly' ? (
           <MonthlyView
             store={store} monthName={monthName} yearNum={yearNum} storeLabel={storeLabel}
+            fromDate={anchor ? `${anchor.getFullYear()}-${String(anchor.getMonth() + 1).padStart(2, '0')}-01` : ''}
+            toDate={dayStr}
             loading={monthLoading} rows={monthRows} team={teamMonth} top={monthTop}
             standouts={monthStandouts} daysElapsed={daysElapsed} monthTotalDays={monthTotalDays}
             daysRemaining={daysRemaining} onRowClick={openSpMonth}
@@ -558,8 +560,8 @@ export default function SalespersonReportBeta() {
                   </CardContent>
                 </Card>
 
-                {/* Floor & Conversion (from the UPS system) */}
-                <FloorConversion store={store} range="yesterday" rangeLabel="Yesterday" />
+                {/* Floor & Conversion (live from the new UPS system) */}
+                <FloorConversion store={store} fromDate={dayStr} toDate={dayStr} label={dateShort} />
               </>
             )}
           </>
@@ -730,85 +732,56 @@ function Leaderboard({ rows, teamRev, onRowClick }) {
   );
 }
 
-// ═══════════════ Floor & Conversion (BETA) — from the UPS system ═══════════════
-// Salesperson closing-ratio scoreboard from the CFC Analytics API
-// (legacy-ups/conversion/salesperson) via our server-side proxy. Each row:
-//   { Store, salesperson_id, name, ups, sales (= closed tickets), closing_ratio (0–1) }
+// ═══════════════ Floor & Conversion (BETA) — live from the new UPS system ═══════
+// Per-salesperson floor activity from sb/customer-capture:
+//   { userId, name, storeName, acquisitions, engaged, upsTaken, captureRatio }
+// plus store-level KPIs (tickets, conversion, avg ticket, revenue) with
+// prior-period deltas from sb/executive. Both need user id 58 (admin/manager).
 const numF = (v) => {
   if (v == null) return null;
   if (typeof v === 'number') return Number.isFinite(v) ? v : null;
   const n = parseFloat(String(v).replace(/[^0-9.\-]/g, ''));
   return Number.isFinite(n) ? n : null;
 };
-// "JoeC" → "Joe C"; all-caps codes like "JEFFR" are left as-is.
-const prettyName = (n) => String(n || '—').replace(/([a-z])([A-Z])/g, '$1 $2');
-function extractFloorRows(payload) {
-  const data = payload?.data ?? payload;
-  if (Array.isArray(data)) return data;
-  if (data && typeof data === 'object') {
-    if (Array.isArray(data.all) && data.all.length) return data.all;
-    const closers = [...(data.topClosers || []), ...(data.lowClosers || [])];
-    if (closers.length) return closers;
-  }
-  return [];
-}
-function normalizeFloorRows(payload) {
-  const raw = extractFloorRows(payload);
-  if (!raw.length) return [];
-  return raw.map((r) => {
-    const cr = r.closing_ratio != null ? Number(r.closing_ratio) : null;
-    const closing = cr == null || !Number.isFinite(cr) ? null : (cr <= 1 ? cr * 100 : cr);
-    return {
-      name: prettyName(r.name),
-      store: r.Store ?? r.store ?? '',
-      ups: numF(r.ups),
-      tickets: numF(r.sales),        // the API's `sales` field = number of closed tickets
-      closing,
-      burning: closing == null ? null : Math.max(0, 100 - closing),
-    };
-  }).sort((a, b) => (b.tickets ?? 0) - (a.tickets ?? 0) || (b.ups ?? 0) - (a.ups ?? 0));
-}
 
-function FloorConversion({ store, range, rangeLabel }) {
+function FloorConversion({ store, fromDate, toDate, label }) {
   const storeLabel = store === 'ARDEN' ? 'Arden' : 'Waynesville';
-  const primary = useAnalyticsQuery('legacy-ups/conversion/salesperson',
-    { store: storeLabel, range, top: 200, min_ups: 0 }, { retry: 0, staleTime: 5 * 60 * 1000 });
-  const primaryRows = useMemo(() => normalizeFloorRows(primary.data), [primary.data]);
-
-  // The legacy UPS feed has no recent-day data (it ended at the cutover to the
-  // new system), so if the selected window is empty fall back to this-year.
-  const emptyPrimary = !primary.isLoading && !primary.error && primaryRows.length === 0;
-  const fallback = useAnalyticsQuery('legacy-ups/conversion/salesperson',
-    { store: storeLabel, range: 'this-year', top: 200, min_ups: 0 },
-    { retry: 0, enabled: emptyPrimary, staleTime: 5 * 60 * 1000 });
-  const fallbackRows = useMemo(() => normalizeFloorRows(fallback.data), [fallback.data]);
-
-  // TEMP DISCOVERY — probe the NEW-system SB endpoints (needs user id 58) to
-  // reveal their response shapes for the current month. Remove once mapped.
   const sbStore = store === 'ARDEN' ? 'S1' : 'S2';
-  const today = new Date();
-  const iso = (d) => d.toISOString().slice(0, 10);
-  const mFrom = iso(new Date(today.getFullYear(), today.getMonth(), 1));
-  const mTo = iso(today);
-  const sbCap  = useAnalyticsQuery('sb/customer-capture', { store: sbStore, from: mFrom, to: mTo }, { retry: 0 });
-  const sbExec = useAnalyticsQuery('sb/executive',        { store: sbStore, from: mFrom, to: mTo }, { retry: 0 });
-  useEffect(() => {
-    if (sbCap.data)  { console.log('%c[SB] customer-capture ' + sbStore, 'color:#16a34a;font-weight:bold'); try { console.log(JSON.stringify(sbCap.data, null, 2)); } catch {} }
-    if (sbCap.error) console.log('[SB] customer-capture error:', sbCap.error);
-    if (sbExec.data) { console.log('%c[SB] executive ' + sbStore, 'color:#16a34a;font-weight:bold'); try { console.log(JSON.stringify(sbExec.data, null, 2)); } catch {} }
-    if (sbExec.error) console.log('[SB] executive error:', sbExec.error);
-  }, [sbCap.data, sbCap.error, sbExec.data, sbExec.error, sbStore]);
+  const ready = !!fromDate && !!toDate;
+  const capQ  = useAnalyticsQuery('sb/customer-capture', { store: sbStore, from: fromDate, to: toDate }, { retry: 0, enabled: ready, staleTime: 5 * 60 * 1000 });
+  const execQ = useAnalyticsQuery('sb/executive',        { store: sbStore, from: fromDate, to: toDate }, { retry: 0, enabled: ready, staleTime: 5 * 60 * 1000 });
 
-  const usedFallback = emptyPrimary && fallbackRows.length > 0;
-  const rows    = primaryRows.length ? primaryRows : fallbackRows;
-  const loading = primary.isLoading || (emptyPrimary && fallback.isLoading);
-  const error   = primary.error || (emptyPrimary ? fallback.error : null);
+  const rows = useMemo(() => {
+    const raw = capQ.data?.rows ?? [];
+    return raw.map((r) => ({
+      name: r.name || '—',
+      store: r.storeName || '',
+      unresolved: !!r.unresolved,
+      ups: numF(r.upsTaken),
+      engaged: numF(r.engaged),
+      captured: numF(r.acquisitions),
+      capture: numF(r.captureRatio),
+    })).sort((a, b) => (b.ups ?? 0) - (a.ups ?? 0));
+  }, [capQ.data]);
 
-  const closed = rows.filter((r) => r.closing != null);
-  const avgClosing = closed.length ? closed.reduce((s, r) => s + r.closing, 0) / closed.length : 0;
-  const totUps = rows.reduce((s, r) => s + (r.ups || 0), 0);
-  const totTix = rows.reduce((s, r) => s + (r.tickets || 0), 0);
+  const cur = execQ.data?.current || {};
+  const dlt = execQ.data?.delta || {};
+  const loading = capQ.isLoading || execQ.isLoading;
+  const error   = capQ.error || execQ.error;
+  const totUps  = rows.reduce((s, r) => s + (r.ups || 0), 0);
   const pct = (v) => (v == null ? '—' : `${Number(v).toFixed(1)}%`);
+
+  const Delta = ({ v, unit }) => {
+    if (v == null) return null;
+    const up = v >= 0;
+    return <span className={cn('ml-1 text-[10px] font-semibold', up ? 'text-emerald-600 dark:text-emerald-300' : 'text-rose-500 dark:text-rose-300')}>{up ? '▲' : '▼'}{Math.abs(v).toFixed(1)}{unit}</span>;
+  };
+  const Kpi = ({ label: l, value, delta, unit }) => (
+    <div className="rounded-lg border border-border bg-card px-3 py-2">
+      <div className="text-[9px] font-bold uppercase tracking-wider text-muted-fg">{l}</div>
+      <div className="mt-0.5 text-lg font-extrabold tabular-nums leading-tight">{value}{delta != null && <Delta v={delta} unit={unit} />}</div>
+    </div>
+  );
 
   return (
     <Card>
@@ -817,18 +790,9 @@ function FloorConversion({ store, range, rangeLabel }) {
           <TrendingUp size={16} className="text-sky-500" />
           <span className="text-sm font-semibold">Floor &amp; Conversion</span>
           <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-amber-700 dark:bg-amber-900/40 dark:text-amber-200">Beta</span>
-          <span className="text-[11px] text-muted-fg">· {usedFallback ? 'This Year' : rangeLabel} · {storeLabel} · UPS system</span>
-          {rows.length > 0 && (
-            <span className="ml-auto text-[11px] text-muted-fg">
-              {fmtNumber(totUps)} ups · {fmtNumber(totTix)} closes · {pct(avgClosing)} avg closing
-            </span>
-          )}
+          <span className="text-[11px] text-muted-fg">· {label} · {storeLabel} · UPS system (live)</span>
+          {rows.length > 0 && <span className="ml-auto text-[11px] text-muted-fg">{fmtNumber(totUps)} ups on the floor</span>}
         </div>
-        {usedFallback && (
-          <div className="border-b border-border bg-amber-500/5 px-4 py-1.5 text-[11px] text-amber-700 dark:text-amber-300">
-            No UPS data for {rangeLabel} (the legacy feed ends at the new-system cutover) — showing this year to date.
-          </div>
-        )}
         {loading ? (
           <div className="grid place-items-center py-12 text-sm text-muted-fg">
             <div className="flex flex-col items-center gap-3"><div className="h-7 w-7 animate-spin rounded-full border-2 border-primary border-t-transparent" />Loading floor data…</div>
@@ -837,41 +801,57 @@ function FloorConversion({ store, range, rangeLabel }) {
           <div className="m-4 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-xs text-amber-700 dark:text-amber-300">
             Couldn't reach the UPS system: {error.message}
           </div>
-        ) : rows.length === 0 ? (
-          <div className="grid place-items-center py-12 text-sm text-muted-fg">No floor data available.</div>
+        ) : rows.length === 0 && !execQ.data ? (
+          <div className="grid place-items-center py-12 text-sm text-muted-fg">No floor data for {label}.</div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-muted/40 text-[10px] uppercase tracking-wider text-muted-fg">
-                <tr className="border-b border-border">
-                  <th className="px-3 py-2.5 text-left w-9">#</th>
-                  <th className="px-3 py-2.5 text-left">Employee</th>
-                  <th className="px-3 py-2.5 text-right">UPS</th>
-                  <th className="px-3 py-2.5 text-right">Tickets</th>
-                  <th className="px-3 py-2.5 text-right">Closing</th>
-                  <th className="px-3 py-2.5 text-right">Burning</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((r, i) => (
-                  <tr key={r.name + i} className="border-b border-border last:border-0 hover:bg-muted/30">
-                    <td className="px-3 py-2.5 tabular-nums text-muted-fg">{i + 1}</td>
-                    <td className="px-3 py-2.5 font-semibold">
-                      {r.name}
-                      {r.store && <span className="ml-1.5 text-[10px] font-normal text-muted-fg">{r.store}</span>}
-                    </td>
-                    <td className="px-3 py-2.5 text-right tabular-nums text-muted-fg">{r.ups == null ? '—' : fmtNumber(r.ups)}</td>
-                    <td className="px-3 py-2.5 text-right tabular-nums font-medium">{r.tickets == null ? '—' : fmtNumber(r.tickets)}</td>
-                    <td className={cn('px-3 py-2.5 text-right tabular-nums font-semibold',
-                      r.closing == null ? 'text-muted-fg' : r.closing >= avgClosing ? 'text-emerald-600 dark:text-emerald-300' : 'text-rose-500 dark:text-rose-300')}>
-                      {pct(r.closing)}
-                    </td>
-                    <td className="px-3 py-2.5 text-right tabular-nums text-muted-fg">{pct(r.burning)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <>
+            {/* Store-level KPIs (with prior-period trend) */}
+            {execQ.data && (
+              <div className="grid grid-cols-2 gap-2 p-3 sm:grid-cols-3 lg:grid-cols-5">
+                <Kpi l="Tickets"     value={fmtNumber(cur.totalTickets ?? 0)} delta={dlt.totalTickets} unit="%" />
+                <Kpi l="Conversion"  value={pct(cur.conversionRate)}          delta={dlt.conversionRate} unit="pp" />
+                <Kpi l="Avg Ticket"  value={cur.avgTicket == null ? '—' : fmtCurrency(cur.avgTicket)} delta={dlt.avgTicket} unit="%" />
+                <Kpi l="Revenue"     value={fmtCompactCurrency(cur.totalRevenue ?? 0)} delta={dlt.totalRevenue} unit="%" />
+                <Kpi l="UPS (floor)" value={fmtNumber(totUps)} />
+              </div>
+            )}
+
+            {/* Per-salesperson floor activity */}
+            {rows.length > 0 && (
+              <div className="overflow-x-auto border-t border-border">
+                <table className="w-full text-sm">
+                  <thead className="bg-muted/40 text-[10px] uppercase tracking-wider text-muted-fg">
+                    <tr className="border-b border-border">
+                      <th className="px-3 py-2.5 text-left w-9">#</th>
+                      <th className="px-3 py-2.5 text-left">Employee</th>
+                      <th className="px-3 py-2.5 text-right">UPS</th>
+                      <th className="px-3 py-2.5 text-right">Engaged</th>
+                      <th className="px-3 py-2.5 text-right">Captured</th>
+                      <th className="px-3 py-2.5 text-right">Capture %</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map((r, i) => (
+                      <tr key={r.name + i} className="border-b border-border last:border-0 hover:bg-muted/30">
+                        <td className="px-3 py-2.5 tabular-nums text-muted-fg">{i + 1}</td>
+                        <td className="px-3 py-2.5 font-semibold">
+                          {r.name}
+                          {r.unresolved && <span className="ml-1.5 text-[10px] font-normal text-amber-600 dark:text-amber-300">unresolved</span>}
+                        </td>
+                        <td className="px-3 py-2.5 text-right tabular-nums font-medium">{r.ups == null ? '—' : fmtNumber(r.ups)}</td>
+                        <td className="px-3 py-2.5 text-right tabular-nums text-muted-fg">{r.engaged == null ? '—' : fmtNumber(r.engaged)}</td>
+                        <td className="px-3 py-2.5 text-right tabular-nums text-muted-fg">{r.captured == null ? '—' : fmtNumber(r.captured)}</td>
+                        <td className="px-3 py-2.5 text-right tabular-nums font-semibold">{pct(r.capture)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            <div className="px-4 py-2 text-[10px] text-muted-fg">
+              Conversion, Tickets &amp; Revenue above are store-wide (this source doesn't break tickets/closing out per salesperson).
+            </div>
+          </>
         )}
       </CardContent>
     </Card>
@@ -879,7 +859,7 @@ function FloorConversion({ store, range, rangeLabel }) {
 }
 
 // ═══════════════ Monthly view (month-to-date) ═══════════════
-function MonthlyView({ store, monthName, yearNum, storeLabel, loading, rows, team, top, standouts, daysElapsed, monthTotalDays, daysRemaining, onRowClick }) {
+function MonthlyView({ store, monthName, yearNum, storeLabel, fromDate, toDate, loading, rows, team, top, standouts, daysElapsed, monthTotalDays, daysRemaining, onRowClick }) {
   return (
     <>
       {/* Month hero — team month-to-date summary + trend */}
@@ -943,8 +923,8 @@ function MonthlyView({ store, monthName, yearNum, storeLabel, loading, rows, tea
             </CardContent>
           </Card>
 
-          {/* Floor & Conversion (from the UPS system) */}
-          <FloorConversion store={store} range="this-month" rangeLabel={`${monthName} ${yearNum}`} />
+          {/* Floor & Conversion (live from the new UPS system) */}
+          <FloorConversion store={store} fromDate={fromDate} toDate={toDate} label={`${monthName} ${yearNum}`} />
         </>
       )}
     </>
