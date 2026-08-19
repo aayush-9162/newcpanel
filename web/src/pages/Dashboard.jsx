@@ -849,6 +849,14 @@ export default function Dashboard() {
           />
         </div>
 
+        {/* ─── Latest-day snapshot — the same KPI tiles as the Daily view ─── */}
+        <SectionHeading
+          icon={Calendar}
+          title="Latest Day Snapshot"
+          hint="Most recent business day on file"
+        />
+        <DashboardDaily store={store} selectedBldg={selectedBldg} kpiOnly />
+
         {/* ─── Area Wise Sales (selected month, top 5) ─── */}
         <SectionHeading
           icon={MapPin}
