@@ -85,42 +85,28 @@ export default function DashboardDaily({ store, selectedBldg, cumulative }) {
   const newC      = Number(cust.newCustomers) || 0;
   const returning = Math.max(0, customers - newC);
 
-  // ── Gross margin — anchored on SalesGrossMarginDetail's OWN most-recent day
-  //    for this store. Cost/margin posts on its own ETL cadence and can lag the
-  //    sales feed, so anchoring here (not on the SaleWRT day) guarantees the tile
-  //    always shows a real, fully-costed number. SalesNo's leading digit is the
-  //    building code. GM% = (SaleAmt − TotalCost) / SaleAmt; 55% is the target.
-  const gmSql = `
-    WITH g AS (
-      SELECT MAX(d) AS d FROM (
-        SELECT CAST(SaleDate AS DATE) AS d
-        FROM SalesGrossMarginDetail
-        WHERE LEFT(CAST(SalesNo AS VARCHAR(20)), 1) = '${selectedBldg}' AND SaleDate < CAST(GETDATE() AS DATE)
-        GROUP BY CAST(SaleDate AS DATE)
-        HAVING SUM(ISNULL(SaleAmt, 0)) > 0
-      ) t
-    )
-    SELECT
-      (SELECT CONVERT(char(10), d, 23) FROM g) AS day,
-      ISNULL(SUM(D.SaleAmt), 0)                AS saleSum,
-      ISNULL(SUM(D.TotalCost), 0)              AS costSum,
-      COUNT(*)                                 AS records
-    FROM SalesGrossMarginDetail D CROSS JOIN g
-    WHERE D.SaleDate >= g.d AND D.SaleDate < DATEADD(DAY, 1, g.d)
-      AND LEFT(CAST(D.SalesNo AS VARCHAR(20)), 1) = '${selectedBldg}'
-  `;
-  const gmQ = useSqlQuery(gmSql, []);
-  const gmRow    = gmQ.data?.rows?.[0] ?? {};
-  const gmSale   = Number(gmRow.saleSum) || 0;
-  const gmCost   = Number(gmRow.costSum) || 0;
-  const gmProfit = gmSale - gmCost;
-  const gmPct    = gmSale ? (gmProfit / gmSale) * 100 : null;
-  const gmDayStr = gmRow.day || null;
-  const gmDateShort = gmDayStr
-    ? `${localDate(gmDayStr).getDate()} ${localDate(gmDayStr).toLocaleDateString('en-US', { month: 'short' })}`
-    : dateShort;
-  const gmDayLabel = gmDayStr ? localDate(gmDayStr).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) : '';
-  const gmHealthy = gmPct != null && gmPct >= 55;
+  // ── Gross margin for the SAME day as the rest of the daily view (dayStr, the
+  //    latest SaleWRT day). The gross-margin feed (SalesGrossMarginDetail) posts
+  //    COST for the day promptly but its SaleAmt column lags a day, so we can't
+  //    read revenue from there. Instead we pair the day's written-sales revenue
+  //    from SaleWRT (the same number the hero shows) with the day's TotalCost
+  //    from the margin feed: GM% = (revenue − cost) / revenue. 55% is the target.
+  const gmCostSql = dayStr ? `
+    SELECT ISNULL(SUM(TotalCost), 0) AS costSum, COUNT(*) AS records
+    FROM SalesGrossMarginDetail
+    WHERE SaleDate >= '${dayStr}' AND SaleDate < DATEADD(DAY, 1, '${dayStr}')
+      AND LEFT(CAST(SalesNo AS VARCHAR(20)), 1) = '${selectedBldg}'
+  ` : 'SELECT 0 AS costSum, 0 AS records';
+  const gmQ = useSqlQuery(gmCostSql, [], { enabled: !!dayStr });
+  const gmCost    = Number(gmQ.data?.rows?.[0]?.costSum) || 0;
+  const gmRecords = Number(gmQ.data?.rows?.[0]?.records) || 0;
+  const gmSale    = revenue; // SaleWRT written sales for the day — matches the hero
+  const gmProfit  = gmSale - gmCost;
+  // Only a real % once we have both the day's revenue and its cost rows.
+  const gmPct     = (gmSale > 0 && gmRecords > 0) ? (gmProfit / gmSale) * 100 : null;
+  const gmDateShort = dateShort;
+  const gmDayLabel  = dayLabel;
+  const gmHealthy   = gmPct != null && gmPct >= 55;
 
   // Top salespeople for the day — orders (sales count) + total revenue, from
   // SalespersonDaily, anchored on the SaleWRT day (kicks off once it's known).
@@ -496,56 +482,41 @@ export default function DashboardDaily({ store, selectedBldg, cumulative }) {
           value={gmPct != null ? `${gmPct.toFixed(1)}%` : '—'}
           caption={gmPct != null
             ? `${fmtCompactCurrency(gmProfit)} profit · ${gmHealthy ? 'on target' : 'below 55%'}`
-            : 'no margin data'}
+            : 'cost not posted yet'}
           icon={Percent}
           accent={gmPct == null ? 'emerald' : gmHealthy ? 'emerald' : 'amber'}
-          loading={gmQ.isLoading}
-          onClick={gmDayStr ? openDetail({
+          loading={gmQ.isLoading || kpiQ.isLoading}
+          onClick={(gmPct != null && dayStr) ? openDetail({
             title: `Gross Margin · ${gmDateShort} · ${storeLabel}`,
             icon: Percent,
             accent: gmHealthy ? 'emerald' : 'amber',
-            headline: gmPct != null ? `${gmPct.toFixed(1)}%` : '—',
-            subtitle: `${fmtCurrency(gmProfit)} profit on ${fmtCurrency(gmSale)} sales · ${gmDayLabel || 'latest margin day'}`,
+            headline: `${gmPct.toFixed(1)}%`,
+            subtitle: `${fmtCurrency(gmProfit)} profit · ${fmtCurrency(gmSale)} written sales − ${fmtCurrency(gmCost)} cost · ${gmDayLabel}`,
             detailsDb: 'sql',
+            // Revenue for the day comes from SaleWRT (the hero figure); this feed
+            // only reliably has the day's COST, so the drilldown breaks the cost
+            // down per order. Sale$ isn't attributable per-order here yet.
             detailsSql: `
-              WITH g AS (
-                SELECT MAX(d) AS d FROM (
-                  SELECT CAST(SaleDate AS DATE) AS d
-                  FROM SalesGrossMarginDetail
-                  WHERE LEFT(CAST(SalesNo AS VARCHAR(20)), 1) = '${selectedBldg}' AND SaleDate < CAST(GETDATE() AS DATE)
-                  GROUP BY CAST(SaleDate AS DATE)
-                  HAVING SUM(ISNULL(SaleAmt, 0)) > 0
-                ) t
-              )
               SELECT TOP 500
-                     CAST(D.SalesNo AS VARCHAR(20)) AS SalesNo,
-                     D.CustomerName,
-                     D.SalesPerson,
-                     ISNULL(D.SaleAmt, 0)                                   AS SaleAmt,
-                     ISNULL(D.TotalCost, 0)                                 AS TotalCost,
-                     (ISNULL(D.SaleAmt, 0) - ISNULL(D.TotalCost, 0))        AS Profit,
-                     CASE WHEN ISNULL(D.SaleAmt, 0) > 0
-                          THEN (ISNULL(D.SaleAmt, 0) - ISNULL(D.TotalCost, 0)) / D.SaleAmt * 100
-                          ELSE NULL END                                     AS GmPct
-              FROM SalesGrossMarginDetail D CROSS JOIN g
-              WHERE D.SaleDate >= g.d AND D.SaleDate < DATEADD(DAY, 1, g.d)
-                AND LEFT(CAST(D.SalesNo AS VARCHAR(20)), 1) = '${selectedBldg}'
-              ORDER BY D.SaleAmt DESC
+                     CAST(SalesNo AS VARCHAR(20))         AS SalesNo,
+                     MAX(CustomerName)                    AS CustomerName,
+                     MAX(SalesPerson)                     AS SalesPerson,
+                     COUNT(*)                             AS lines,
+                     SUM(ISNULL(TotalCost, 0))            AS cost
+              FROM SalesGrossMarginDetail
+              WHERE SaleDate >= '${dayStr}' AND SaleDate < DATEADD(DAY, 1, '${dayStr}')
+                AND LEFT(CAST(SalesNo AS VARCHAR(20)), 1) = '${selectedBldg}'
+              GROUP BY CAST(SalesNo AS VARCHAR(20))
+              ORDER BY SUM(ISNULL(TotalCost, 0)) DESC
             `,
             detailsColumns: [
               { key: 'SalesNo',      label: 'Sale #' },
               { key: 'CustomerName', label: 'Customer', render: (r) => r.CustomerName || '—' },
               { key: 'SalesPerson',  label: 'Salesperson', render: (r) => <span className="text-muted-fg">{r.SalesPerson || '—'}</span> },
-              { key: 'SaleAmt',      label: 'Sale', align: 'right', render: (r) => fmtCurrency(Number(r.SaleAmt) || 0) },
-              { key: 'TotalCost',    label: 'Cost', align: 'right', render: (r) => <span className="text-muted-fg">{fmtCurrency(Number(r.TotalCost) || 0)}</span> },
-              { key: 'Profit',       label: 'Profit', align: 'right', render: (r) => <span className="font-semibold">{fmtCurrency(Number(r.Profit) || 0)}</span> },
-              { key: 'GmPct',        label: 'GM %', align: 'right', render: (r) => {
-                const p = r.GmPct == null ? null : Number(r.GmPct);
-                if (p == null) return <span className="text-muted-fg">—</span>;
-                return <span className={cn('font-semibold', p >= 55 ? 'text-emerald-600 dark:text-emerald-300' : 'text-amber-600 dark:text-amber-300')}>{p.toFixed(1)}%</span>;
-              }},
+              { key: 'lines',        label: 'Items', align: 'right', render: (r) => fmtNumber(Number(r.lines) || 0) },
+              { key: 'cost',         label: 'Cost', align: 'right', render: (r) => <span className="font-semibold">{fmtCurrency(Number(r.cost) || 0)}</span> },
             ],
-            detailsEmpty: 'No margin rows for this day',
+            detailsEmpty: 'No cost rows for this day',
           }) : undefined}
         />
       </div>
