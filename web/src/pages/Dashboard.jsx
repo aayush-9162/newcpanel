@@ -767,20 +767,32 @@ export default function Dashboard() {
           <HeroBanner
             icon={Calendar}
             decorIcon={Calendar}
-            accent={yestRev >= (lastYearMonthTotal / days) ? 'emerald' : 'amber'}
+            accent={thisYearMonthTotal >= lastYearMonthTotal ? 'emerald' : 'amber'}
           >
             <div>
               <div className="text-[11px] font-bold uppercase tracking-widest text-emerald-700 dark:text-emerald-300">
-                {store === 'ARDEN' ? 'Arden (S1)' : 'Waynesville (S2)'} · {category} · Most recent day on file
+                {store === 'ARDEN' ? 'Arden (S1)' : 'Waynesville (S2)'} · {category} · {monthName} {today.getFullYear()}
               </div>
               <div className="mt-1 flex items-baseline gap-3 flex-wrap">
                 <span
-                  title={fmtCurrency(yestRev, true)}
+                  title={fmtCurrency(thisYearMonthTotal, true)}
                   className="text-5xl font-extrabold tabular-nums tracking-tight bg-gradient-to-br from-emerald-600 to-teal-500 bg-clip-text text-transparent"
                 >
-                  {fmtCurrency(yestRev)}
+                  {fmtCurrency(thisYearMonthTotal)}
                 </span>
-                <span className="text-sm font-medium text-muted-fg">{yestDayLabel ? `on ${yestDayLabel}` : 'no data yet'}</span>
+                <span className="text-sm font-medium text-muted-fg">
+                  {(() => {
+                    const parts = [];
+                    if (lastYearMonthTotal > 0) {
+                      const diff = thisYearMonthTotal - lastYearMonthTotal;
+                      const pct  = (diff / lastYearMonthTotal) * 100;
+                      const up   = diff >= 0;
+                      parts.push(`${up ? '▲' : '▼'} ${up ? '+' : '−'}${fmtCompactCurrency(Math.abs(diff))} (${up ? '+' : ''}${pct.toFixed(1)}%) vs LY`);
+                    }
+                    if (yestDayLabel) parts.push(`latest ${fmtCurrency(yestRev)} on ${yestDayLabel}`);
+                    return parts.length ? parts.join(' · ') : 'month to date';
+                  })()}
+                </span>
               </div>
             </div>
           </HeroBanner>
