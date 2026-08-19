@@ -25,7 +25,7 @@ import {
   Target, TrendingUp, TrendingDown, Calendar, DollarSign, Activity, Trophy,
   Building2, Receipt, Wrench, Flame, Users, PackageX, Truck,
   ArrowUpRight, ArrowDownRight, AlertTriangle, ShoppingCart, User, Tag, Heart,
-  Sparkles, ChevronRight, Sofa, BedDouble, Utensils, Lamp, Package, MapPin, Boxes, Award,
+  Sparkles, ChevronRight, Sofa, BedDouble, Utensils, Lamp, Package, MapPin, Boxes, Award, Percent,
 } from 'lucide-react';
 import { cn } from '@/lib/cn';
 import { MetricDrilldown } from '@/components/MetricDrilldown';
@@ -469,6 +469,27 @@ export default function Dashboard() {
   const orderCountQ = useSqlQuery(orderCountSql, [], monthlyOn);
   const orderCount = orderCountQ.data?.rows?.[0] ?? {};
 
+  // ── Gross margin for the whole month (selected store). Uses the gross-margin
+  //    feed's own SaleAmt + TotalCost (same basis as the Gross Margin report) so
+  //    the % agrees with that report. Anchored on the month of that feed's most
+  //    recent day; SalesNo's leading digit is the building code.
+  const monthGmSql = `
+    WITH m AS (SELECT MAX(SaleDate) AS d FROM SalesGrossMarginDetail
+               WHERE LEFT(CAST(SalesNo AS VARCHAR(20)), 1) = '${selectedBldg}'),
+         mb AS (SELECT DATEFROMPARTS(YEAR(d), MONTH(d), 1) AS mStart,
+                       DATEADD(MONTH, 1, DATEFROMPARTS(YEAR(d), MONTH(d), 1)) AS mEnd FROM m)
+    SELECT ISNULL(SUM(D.SaleAmt), 0)   AS saleSum,
+           ISNULL(SUM(D.TotalCost), 0) AS costSum
+    FROM SalesGrossMarginDetail D CROSS JOIN mb
+    WHERE LEFT(CAST(D.SalesNo AS VARCHAR(20)), 1) = '${selectedBldg}'
+      AND D.SaleDate >= mb.mStart AND D.SaleDate < mb.mEnd
+  `;
+  const monthGmQ    = useSqlQuery(monthGmSql, [], monthlyOn);
+  const monthGmSale = Number(monthGmQ.data?.rows?.[0]?.saleSum) || 0;
+  const monthGmCost = Number(monthGmQ.data?.rows?.[0]?.costSum) || 0;
+  const monthGmProfit = monthGmSale - monthGmCost;
+  const monthGmPct    = monthGmSale > 0 ? (monthGmProfit / monthGmSale) * 100 : null;
+
   // ── Item Sold Analysis — categorize items sold THIS MONTH (selected store)
   //    into showroom categories by matching furniture-type keywords in the
   //    item's Description2 text. Rules are checked in priority order (first
@@ -719,6 +740,9 @@ export default function Dashboard() {
   // both from the same query, so they can't disagree.
   const spdMonthRev      = Number(orderCount.thisMonthRev)     || 0;
   const avgOrder         = thisMonthOrders > 0 ? spdMonthRev / thisMonthOrders : null;
+  // Total items sold this month = sum across all showroom categories.
+  const monthUnits       = Object.values(itemCatByRoom).reduce((a, b) => a + (Number(b) || 0), 0);
+  const monthGmHealthy   = monthGmPct != null && monthGmPct >= 55;
   const latestDateLabel = recency?.latestDate
     ? localDate(recency.latestDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
     : 'Yesterday';
@@ -849,13 +873,43 @@ export default function Dashboard() {
           />
         </div>
 
-        {/* ─── Latest-day snapshot — the same KPI tiles as the Daily view ─── */}
-        <SectionHeading
-          icon={Calendar}
-          title="Latest Day Snapshot"
-          hint="Most recent business day on file"
-        />
-        <DashboardDaily store={store} selectedBldg={selectedBldg} kpiOnly />
+        {/* ─── Month-to-date KPI snapshot — Sales · Items Sold · Customers · Gross Margin ─── */}
+        <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+          <HeroStat
+            label={`Sales · ${monthName}`}
+            value={fmtNumber(thisMonthOrders)}
+            icon={ShoppingCart}
+            accent="sky"
+            subtitle={`${fmtCompactCurrency(thisYearMonthTotal)} written · ${fmtNumber(last7Orders)} in last 7d`}
+            loading={orderCountQ.isLoading}
+          />
+          <HeroStat
+            label={`Items Sold · ${monthName}`}
+            value={fmtNumber(monthUnits)}
+            icon={Boxes}
+            accent="primary"
+            subtitle={thisMonthOrders > 0 ? `${(monthUnits / thisMonthOrders).toFixed(1)} per sale` : 'Units sold this month'}
+            loading={itemCatQ.isLoading}
+          />
+          <HeroStat
+            label={`Customers · ${monthName}`}
+            value={fmtNumber(totalCustomers)}
+            icon={Users}
+            accent="violet"
+            subtitle={totalCustomers ? `${fmtNumber(newCustomers)} new · ${fmtNumber(returningCustomers)} returning` : 'Buyers this month'}
+            loading={orderCountQ.isLoading}
+          />
+          <HeroStat
+            label={`Gross Margin · ${monthName}`}
+            value={monthGmPct != null ? `${monthGmPct.toFixed(1)}%` : '—'}
+            icon={Percent}
+            accent={monthGmPct == null ? 'emerald' : monthGmHealthy ? 'emerald' : 'amber'}
+            subtitle={monthGmPct != null
+              ? `${fmtCompactCurrency(monthGmProfit)} profit · ${monthGmHealthy ? 'on target' : 'below 55%'}`
+              : 'no margin data'}
+            loading={monthGmQ.isLoading}
+          />
+        </div>
 
         {/* ─── Area Wise Sales (selected month, top 5) ─── */}
         <SectionHeading

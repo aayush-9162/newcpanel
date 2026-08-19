@@ -24,12 +24,7 @@ import { cn } from '@/lib/cn';
 // which renders a day earlier west of UTC). See Dashboard.localDate.
 const localDate = (s) => new Date(String(s).slice(0, 10) + 'T00:00:00');
 
-// `kpiOnly` renders JUST the 4 KPI tiles (Sales / Items Sold / Customers /
-// Gross Margin) + their drilldown modal — used to embed the latest-day snapshot
-// as a row inside the Monthly dashboard. In that mode the heavy non-KPI queries
-// (area, vendors, item analysis, salespeople) are disabled so nothing wasteful
-// fetches.
-export default function DashboardDaily({ store, selectedBldg, cumulative, kpiOnly = false }) {
+export default function DashboardDaily({ store, selectedBldg, cumulative }) {
   const storeLabel = store === 'ARDEN' ? 'Arden (S1)' : 'Waynesville (S2)';
   const spdStore = `LEFT(CAST(sd.SalesNo AS VARCHAR(20)), 1) = '${selectedBldg}'`;
 
@@ -125,12 +120,12 @@ export default function DashboardDaily({ store, selectedBldg, cumulative, kpiOnl
     GROUP BY LTRIM(RTRIM(sd.SalesPerson))
     ORDER BY revenue DESC
   ` : 'SELECT 1';
-  const spQ = useSqlQuery(spSql, [], { enabled: !kpiOnly && !!dayStr });
+  const spQ = useSqlQuery(spSql, [], { enabled: !!dayStr });
   const topSalespeople = dayStr ? (spQ.data?.rows ?? []) : [];
 
   // Salesperson codes → full names (MySQL employees.rv_code → name). A code like
   // "BJT / CAT / JEC" is a split sale — resolve each part and rejoin.
-  const empQ = useMysqlQuery('SELECT rv_code, name FROM employees', [], { enabled: !kpiOnly });
+  const empQ = useMysqlQuery('SELECT rv_code, name FROM employees', []);
   const empMap = useMemo(() => {
     const m = {};
     for (const r of (empQ.data?.rows ?? [])) {
@@ -200,7 +195,7 @@ export default function DashboardDaily({ store, selectedBldg, cumulative, kpiOnl
     HAVING SUM(S.wrt_sls) <> 0
     ORDER BY Revenue DESC
   `;
-  const areaQ = useSqlQuery(areaSql, [], { enabled: !kpiOnly });
+  const areaQ = useSqlQuery(areaSql, []);
   const yAreas = useMemo(() => {
     const rows = areaQ.data?.rows ?? [];
     const map = new Map();
@@ -254,7 +249,7 @@ export default function DashboardDaily({ store, selectedBldg, cumulative, kpiOnl
     FROM vagg LEFT JOIN vrev ON vrev.vendor = vagg.vendor
     ORDER BY revenue DESC
   `;
-  const vendorQ = useSqlQuery(vendorSql, [], { enabled: !kpiOnly });
+  const vendorQ = useSqlQuery(vendorSql, []);
   const topVendors = vendorQ.data?.rows ?? [];
   const topVendorsRevTotal = topVendors.reduce((s, v) => s + (Number(v.revenue) || 0), 0);
   // Same query without the TOP 5 cap — powers the "See all vendors" popup.
@@ -286,7 +281,7 @@ export default function DashboardDaily({ store, selectedBldg, cumulative, kpiOnl
          cat AS (SELECT ${roomCase} AS room FROM base)
     SELECT room, COUNT(*) AS units FROM cat GROUP BY room
   `;
-  const itemCatQ = useSqlQuery(itemCatSql, [], { enabled: !kpiOnly });
+  const itemCatQ = useSqlQuery(itemCatSql, []);
   const itemCatByRoom = useMemo(() => {
     const map = {};
     for (const r of (itemCatQ.data?.rows ?? [])) map[r.room] = Number(r.units) || 0;
@@ -333,7 +328,6 @@ export default function DashboardDaily({ store, selectedBldg, cumulative, kpiOnl
   return (
     <>
       {/* ═══════════════ YESTERDAY headline ═══════════════ */}
-      {!kpiOnly && (
       <div className="relative">
         <HeroBanner icon={Calendar} decorIcon={Calendar} accent="emerald">
           <div>
@@ -357,7 +351,6 @@ export default function DashboardDaily({ store, selectedBldg, cumulative, kpiOnl
           <div className="absolute inset-y-3 right-3 hidden w-[340px] lg:block">{cumulative}</div>
         )}
       </div>
-      )}
 
       {/* ═══════════════ KPI tiles (compact) ═══════════════ */}
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
@@ -528,7 +521,6 @@ export default function DashboardDaily({ store, selectedBldg, cumulative, kpiOnl
         />
       </div>
 
-      {!kpiOnly && (<>
       {/* ═══════════════ Area-wise sales (top 5 + see all) ═══════════════ */}
       <SectionHeading
         icon={MapPin}
@@ -822,7 +814,6 @@ export default function DashboardDaily({ store, selectedBldg, cumulative, kpiOnl
             );
           })}
       </div>
-      </>)}
 
       <MetricDrilldown drilldown={drilldown} onClose={() => setDrilldown(null)} />
     </>
