@@ -826,22 +826,8 @@ export default function Dashboard() {
         </div>
 
         {/* ═══════════════ CURRENT-MONTH headline tiles (per selected filters) ═══════════════ */}
-        <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-          <HeroStat
-            label={`Sales · ${monthName} ${today.getFullYear()}`}
-            value={fmtCompactCurrency(thisYearMonthTotal)}
-            fullValue={fmtCurrency(thisYearMonthTotal)}
-            icon={DollarSign}
-            accent="primary"
-            subtitle={(() => {
-              if (lastYearMonthTotal <= 0) return 'Selected store';
-              const diff = thisYearMonthTotal - lastYearMonthTotal;
-              const pct  = (diff / lastYearMonthTotal) * 100;
-              const up   = diff >= 0;
-              return `${up ? '▲' : '▼'} ${up ? '+' : '−'}${fmtCompactCurrency(Math.abs(diff))} (${up ? '+' : ''}${pct.toFixed(1)}%) vs LY ${fmtCompactCurrency(lastYearMonthTotal)}`;
-            })()}
-            loading={monthTotQ.isLoading}
-          />
+        {/* Sales · Month total is shown in the hero above, so it's not repeated here. */}
+        <div className="grid grid-cols-2 gap-4 lg:grid-cols-3">
           <HeroStat
             label="Target"
             value={fmtCompactCurrency(target)}
@@ -882,6 +868,34 @@ export default function Dashboard() {
             accent="sky"
             subtitle={`${fmtCompactCurrency(thisYearMonthTotal)} written · ${fmtNumber(last7Orders)} in last 7d`}
             loading={orderCountQ.isLoading}
+            onClick={openDetail({
+              title: `Sales · ${monthName} · ${store === 'ARDEN' ? 'Arden (S1)' : 'Waynesville (S2)'}`,
+              icon: ShoppingCart,
+              accent: 'sky',
+              headline: fmtNumber(thisMonthOrders),
+              subtitle: 'Every distinct sale ticket rung up this month',
+              detailsDb: 'sql',
+              detailsSql: `
+                WITH m AS (SELECT MAX(SaleDate) AS d FROM SalespersonDaily)
+                SELECT sd.SalesNo,
+                       MIN(sd.SaleDate) AS SaleDate,
+                       MAX(sd.CustomerName) AS CustomerName,
+                       MAX(sd.SalesPerson) AS SalesPerson,
+                       SUM(ISNULL(sd.SaleSplitAmt, 0)) AS amount
+                FROM SalespersonDaily sd CROSS JOIN m
+                WHERE YEAR(sd.SaleDate) = YEAR(m.d) AND MONTH(sd.SaleDate) = MONTH(m.d) AND ${spdStore}
+                GROUP BY sd.SalesNo
+                ORDER BY MIN(sd.SaleDate) DESC
+              `,
+              detailsColumns: [
+                { key: 'SaleDate',     label: 'Date', render: (r) => r.SaleDate ? new Date(r.SaleDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' }) : '—' },
+                { key: 'SalesNo',      label: 'Sale #' },
+                { key: 'CustomerName', label: 'Customer' },
+                { key: 'SalesPerson',  label: 'Salesperson' },
+                { key: 'amount',       label: 'Amount', align: 'right', render: (r) => <span className="font-semibold">{fmtCurrency(Number(r.amount) || 0)}</span> },
+              ],
+              detailsEmpty: 'No sales this month yet',
+            })}
           />
           <HeroStat
             label={`Items Sold · ${monthName}`}
@@ -890,6 +904,37 @@ export default function Dashboard() {
             accent="primary"
             subtitle={thisMonthOrders > 0 ? `${(monthUnits / thisMonthOrders).toFixed(1)} per sale` : 'Units sold this month'}
             loading={itemCatQ.isLoading}
+            onClick={openDetail({
+              title: `Items Sold · ${monthName} · ${store === 'ARDEN' ? 'Arden (S1)' : 'Waynesville (S2)'}`,
+              icon: Boxes,
+              accent: 'primary',
+              headline: fmtNumber(monthUnits),
+              subtitle: 'Every item line sold this month',
+              detailsDb: 'sql',
+              detailsSql: `
+                WITH m AS (SELECT MAX(SaleDate) AS d FROM SalesItemDetail),
+                     mb AS (SELECT DATEFROMPARTS(YEAR(d), MONTH(d), 1) AS mStart,
+                                   DATEADD(MONTH, 1, DATEFROMPARTS(YEAR(d), MONTH(d), 1)) AS mEnd FROM m)
+                SELECT TOP 1000
+                       s.SaleDate,
+                       CAST(s.SaleNo AS VARCHAR(20))            AS SaleNo,
+                       LTRIM(RTRIM(s.ItemID))                   AS ItemID,
+                       LTRIM(RTRIM(s.VendorID))                 AS VendorID,
+                       LTRIM(RTRIM(ISNULL(s.Description2, ''))) AS Description
+                FROM SalesItemDetail s CROSS JOIN mb
+                WHERE s.SaleDate >= mb.mStart AND s.SaleDate < mb.mEnd
+                  AND LEFT(CAST(s.SaleNo AS VARCHAR(20)), 1) = '${selectedBldg}'
+                ORDER BY s.SaleDate DESC, SaleNo
+              `,
+              detailsColumns: [
+                { key: 'SaleDate',    label: 'Date', render: (r) => r.SaleDate ? new Date(r.SaleDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' }) : '—' },
+                { key: 'SaleNo',      label: 'Sale #' },
+                { key: 'ItemID',      label: 'Item ID' },
+                { key: 'VendorID',    label: 'Vendor' },
+                { key: 'Description', label: 'Description', render: (r) => r.Description || '—' },
+              ],
+              detailsEmpty: 'No items sold this month yet',
+            })}
           />
           <HeroStat
             label={`Customers · ${monthName}`}
@@ -898,6 +943,54 @@ export default function Dashboard() {
             accent="violet"
             subtitle={totalCustomers ? `${fmtNumber(newCustomers)} new · ${fmtNumber(returningCustomers)} returning` : 'Buyers this month'}
             loading={orderCountQ.isLoading}
+            onClick={openDetail({
+              title: `Customers · ${monthName} · ${store === 'ARDEN' ? 'Arden (S1)' : 'Waynesville (S2)'}`,
+              icon: Users,
+              accent: 'violet',
+              headline: fmtNumber(totalCustomers),
+              subtitle: totalCustomers
+                ? `${fmtNumber(newCustomers)} new · ${fmtNumber(returningCustomers)} returning this month`
+                : 'No customers this month yet',
+              detailsDb: 'sql',
+              detailsSql: `
+                WITH m AS (SELECT MAX(SaleDate) AS d FROM SalespersonDaily),
+                     fc AS (
+                       SELECT sd.CustomerId, MIN(sd.SaleDate) AS firstSale
+                       FROM SalespersonDaily sd
+                       WHERE sd.CustomerId IS NOT NULL AND LTRIM(RTRIM(sd.CustomerId)) <> ''
+                       GROUP BY sd.CustomerId
+                     )
+                SELECT sd.CustomerId,
+                       MAX(sd.CustomerName)      AS CustomerName,
+                       MIN(fc.firstSale)         AS firstSale,
+                       CASE WHEN YEAR(MIN(fc.firstSale)) = YEAR(MAX(m.d))
+                                 AND MONTH(MIN(fc.firstSale)) = MONTH(MAX(m.d))
+                            THEN 'New' ELSE 'Returning' END AS custType,
+                       SUM(sd.SaleSplitAmt)      AS spent,
+                       COUNT(DISTINCT sd.SalesNo) AS orders
+                FROM SalespersonDaily sd
+                INNER JOIN fc ON fc.CustomerId = sd.CustomerId
+                CROSS JOIN m
+                WHERE YEAR(sd.SaleDate) = YEAR(m.d) AND MONTH(sd.SaleDate) = MONTH(m.d) AND ${spdStore}
+                GROUP BY sd.CustomerId
+                ORDER BY SUM(sd.SaleSplitAmt) DESC
+              `,
+              detailsColumns: [
+                { key: 'custType', label: 'Type', render: (r) => (
+                  <span className={cn('inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold',
+                    r.custType === 'New'
+                      ? 'bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-200'
+                      : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-200')}>
+                    {r.custType}
+                  </span>
+                )},
+                { key: 'CustomerName', label: 'Customer' },
+                { key: 'firstSale',    label: 'First Sale', render: (r) => r.firstSale ? new Date(r.firstSale).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' }) : '—' },
+                { key: 'orders',       label: 'Sales', align: 'right', render: (r) => fmtNumber(Number(r.orders) || 0) },
+                { key: 'spent',        label: 'Spent', align: 'right', render: (r) => <span className="font-semibold">{fmtCurrency(Number(r.spent) || 0)}</span> },
+              ],
+              detailsEmpty: 'No customers this month yet',
+            })}
           />
           <HeroStat
             label={`Gross Margin · ${monthName}`}
@@ -908,6 +1001,49 @@ export default function Dashboard() {
               ? `${fmtCompactCurrency(monthGmProfit)} profit · ${monthGmHealthy ? 'on target' : 'below 55%'}`
               : 'no margin data'}
             loading={monthGmQ.isLoading}
+            onClick={monthGmPct != null ? openDetail({
+              title: `Gross Margin · ${monthName} · ${store === 'ARDEN' ? 'Arden (S1)' : 'Waynesville (S2)'}`,
+              icon: Percent,
+              accent: monthGmHealthy ? 'emerald' : 'amber',
+              headline: `${monthGmPct.toFixed(1)}%`,
+              subtitle: `${fmtCurrency(monthGmProfit)} profit · ${fmtCurrency(monthGmSale)} sales − ${fmtCurrency(monthGmCost)} cost`,
+              detailsDb: 'sql',
+              detailsSql: `
+                WITH m AS (SELECT MAX(SaleDate) AS d FROM SalesGrossMarginDetail
+                           WHERE LEFT(CAST(SalesNo AS VARCHAR(20)), 1) = '${selectedBldg}'),
+                     mb AS (SELECT DATEFROMPARTS(YEAR(d), MONTH(d), 1) AS mStart,
+                                   DATEADD(MONTH, 1, DATEFROMPARTS(YEAR(d), MONTH(d), 1)) AS mEnd FROM m)
+                SELECT TOP 1000
+                       CAST(D.SalesNo AS VARCHAR(20))                  AS SalesNo,
+                       MAX(D.CustomerName)                             AS CustomerName,
+                       MAX(D.SalesPerson)                              AS SalesPerson,
+                       SUM(ISNULL(D.SaleAmt, 0))                       AS SaleAmt,
+                       SUM(ISNULL(D.TotalCost, 0))                     AS TotalCost,
+                       (SUM(ISNULL(D.SaleAmt, 0)) - SUM(ISNULL(D.TotalCost, 0))) AS Profit,
+                       CASE WHEN SUM(ISNULL(D.SaleAmt, 0)) > 0
+                            THEN (SUM(ISNULL(D.SaleAmt, 0)) - SUM(ISNULL(D.TotalCost, 0))) / SUM(D.SaleAmt) * 100
+                            ELSE NULL END                              AS GmPct
+                FROM SalesGrossMarginDetail D CROSS JOIN mb
+                WHERE LEFT(CAST(D.SalesNo AS VARCHAR(20)), 1) = '${selectedBldg}'
+                  AND D.SaleDate >= mb.mStart AND D.SaleDate < mb.mEnd
+                GROUP BY CAST(D.SalesNo AS VARCHAR(20))
+                ORDER BY SUM(D.SaleAmt) DESC
+              `,
+              detailsColumns: [
+                { key: 'SalesNo',      label: 'Sale #' },
+                { key: 'CustomerName', label: 'Customer', render: (r) => r.CustomerName || '—' },
+                { key: 'SalesPerson',  label: 'Salesperson', render: (r) => <span className="text-muted-fg">{r.SalesPerson || '—'}</span> },
+                { key: 'SaleAmt',      label: 'Sale', align: 'right', render: (r) => fmtCurrency(Number(r.SaleAmt) || 0) },
+                { key: 'TotalCost',    label: 'Cost', align: 'right', render: (r) => <span className="text-muted-fg">{fmtCurrency(Number(r.TotalCost) || 0)}</span> },
+                { key: 'Profit',       label: 'Profit', align: 'right', render: (r) => <span className="font-semibold">{fmtCurrency(Number(r.Profit) || 0)}</span> },
+                { key: 'GmPct',        label: 'GM %', align: 'right', render: (r) => {
+                  const p = r.GmPct == null ? null : Number(r.GmPct);
+                  if (p == null) return <span className="text-muted-fg">—</span>;
+                  return <span className={cn('font-semibold', p >= 55 ? 'text-emerald-600 dark:text-emerald-300' : 'text-amber-600 dark:text-amber-300')}>{p.toFixed(1)}%</span>;
+                }},
+              ],
+              detailsEmpty: 'No margin rows this month',
+            }) : undefined}
           />
         </div>
 
