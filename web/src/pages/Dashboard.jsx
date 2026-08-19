@@ -1686,27 +1686,25 @@ function MiniCumulative({ data, monthName, total, className }) {
 
   if (!data.length) return null;
   return (
-    <div className={cn('flex flex-col justify-center rounded-2xl border border-emerald-500/30 bg-card/70 px-4 py-3 shadow-sm backdrop-blur-sm', className)}>
-      <div className="flex items-center justify-between gap-4">
-        <div className="leading-tight">
-          <div className="text-[10px] font-bold uppercase tracking-wider text-muted-fg whitespace-nowrap">Cumulative · {monthName.slice(0, 3)}</div>
-          <div className="mt-0.5 flex items-baseline gap-1.5">
-            <span className="text-2xl font-extrabold tabular-nums leading-none text-emerald-700 dark:text-emerald-300">{fmtCompactCurrency(total)}</span>
-            {deltaPct != null && (
-              <span className={cn('text-xs font-bold tabular-nums', up ? 'text-emerald-600 dark:text-emerald-300' : 'text-rose-500 dark:text-rose-300')}>
-                {up ? '▲' : '▼'}{Math.abs(deltaPct).toFixed(0)}%
-              </span>
-            )}
-          </div>
+    <div className={cn('flex items-center gap-3 rounded-2xl border border-emerald-500/30 bg-card/70 px-3 py-1 shadow-sm backdrop-blur-sm', className)}>
+      <div className="leading-tight">
+        <div className="text-[10px] font-bold uppercase tracking-wider text-muted-fg whitespace-nowrap">Cumulative · {monthName.slice(0, 3)}</div>
+        <div className="mt-0.5 flex items-baseline gap-1.5">
+          <span className="text-xl font-extrabold tabular-nums leading-none text-emerald-700 dark:text-emerald-300">{fmtCompactCurrency(total)}</span>
+          {deltaPct != null && (
+            <span className={cn('text-[11px] font-bold tabular-nums', up ? 'text-emerald-600 dark:text-emerald-300' : 'text-rose-500 dark:text-rose-300')}>
+              {up ? '▲' : '▼'}{Math.abs(deltaPct).toFixed(0)}%
+            </span>
+          )}
         </div>
-        <div className="flex flex-col gap-1 text-[9px] font-semibold">
-          <span className="flex items-center gap-1"><span className="inline-block h-1.5 w-3 rounded-full bg-emerald-600" />This year</span>
-          <span className="flex items-center gap-1 text-muted-fg"><span className="inline-block h-1.5 w-3 rounded-full bg-slate-400" />Last year</span>
+        <div className="mt-1 flex gap-2 text-[8px] font-semibold">
+          <span className="flex items-center gap-1"><span className="inline-block h-1 w-2.5 rounded-full bg-emerald-600" />TY</span>
+          <span className="flex items-center gap-1 text-muted-fg"><span className="inline-block h-1 w-2.5 rounded-full bg-slate-400" />LY</span>
         </div>
       </div>
-      <div className="mt-1.5 h-28 w-60">
+      <div className="h-14 w-52">
         <ResponsiveContainer width="100%" height="100%">
-          <AreaChart data={chart} margin={{ top: 6, right: 6, bottom: 2, left: 6 }}>
+          <AreaChart data={chart} margin={{ top: 4, right: 4, bottom: 0, left: 4 }}>
             <defs>
               <linearGradient id="cumTy" x1="0" y1="0" x2="0" y2="1">
                 <stop offset="0%" stopColor="#10b981" stopOpacity={0.4} />
@@ -1718,8 +1716,8 @@ function MiniCumulative({ data, monthName, total, className }) {
               </linearGradient>
             </defs>
             <Area type="monotone" dataKey="lyRun" name="Last Year" stroke="#94a3b8" strokeWidth={2} fill="url(#cumLy)" dot={false} isAnimationActive={false} />
-            <Area type="monotone" dataKey="tyRun" name="This Year" stroke="#059669" strokeWidth={2.75} fill="url(#cumTy)" dot={false} connectNulls={false} isAnimationActive={false}
-              activeDot={{ r: 4, fill: '#059669', strokeWidth: 0 }} />
+            <Area type="monotone" dataKey="tyRun" name="This Year" stroke="#059669" strokeWidth={2.5} fill="url(#cumTy)" dot={false} connectNulls={false} isAnimationActive={false}
+              activeDot={{ r: 3.5, fill: '#059669', strokeWidth: 0 }} />
             <RTooltip contentStyle={{ background: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: 10, fontSize: 11 }}
               formatter={(v) => (v == null ? '—' : fmtCompactCurrency(v))} labelFormatter={(l) => `Day ${l}`} />
           </AreaChart>
