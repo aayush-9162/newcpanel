@@ -92,9 +92,13 @@ export default function DashboardDaily({ store, selectedBldg, cumulative }) {
   //    building code. GM% = (SaleAmt − TotalCost) / SaleAmt; 55% is the target.
   const gmSql = `
     WITH g AS (
-      SELECT CAST(MAX(SaleDate) AS DATE) AS d
-      FROM SalesGrossMarginDetail
-      WHERE LEFT(CAST(SalesNo AS VARCHAR(20)), 1) = '${selectedBldg}' AND SaleDate < CAST(GETDATE() AS DATE)
+      SELECT MAX(d) AS d FROM (
+        SELECT CAST(SaleDate AS DATE) AS d
+        FROM SalesGrossMarginDetail
+        WHERE LEFT(CAST(SalesNo AS VARCHAR(20)), 1) = '${selectedBldg}' AND SaleDate < CAST(GETDATE() AS DATE)
+        GROUP BY CAST(SaleDate AS DATE)
+        HAVING SUM(ISNULL(SaleAmt, 0)) > 0
+      ) t
     )
     SELECT
       (SELECT CONVERT(char(10), d, 23) FROM g) AS day,
@@ -117,26 +121,6 @@ export default function DashboardDaily({ store, selectedBldg, cumulative }) {
     : dateShort;
   const gmDayLabel = gmDayStr ? localDate(gmDayStr).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) : '';
   const gmHealthy = gmPct != null && gmPct >= 55;
-
-  // TEMP DIAGNOSTIC — figure out how SalesGrossMarginDetail encodes store & how
-  // fresh the data is. Remove once the store filter is confirmed.
-  const gmDiag = useSqlQuery(`
-    SELECT TOP 8 CAST(SalesNo AS VARCHAR(30)) AS SalesNo, CONVERT(char(10), SaleDate, 23) AS SaleDate,
-                 SaleAmt, TotalCost, SalesPerson, PrimarySalesPerson
-    FROM SalesGrossMarginDetail
-    ORDER BY SaleDate DESC
-  `, []);
-  const gmDiag2 = useSqlQuery(`
-    SELECT
-      (SELECT COUNT(*) FROM SalesGrossMarginDetail) AS totalRows,
-      (SELECT CONVERT(char(10), CAST(MAX(SaleDate) AS DATE), 23) FROM SalesGrossMarginDetail) AS maxDate,
-      (SELECT COUNT(*) FROM SalesGrossMarginDetail WHERE LEFT(CAST(SalesNo AS VARCHAR(30)),1)='1') AS startsWith1,
-      (SELECT COUNT(*) FROM SalesGrossMarginDetail WHERE LEFT(CAST(SalesNo AS VARCHAR(30)),1)='2') AS startsWith2
-  `, []);
-  if (typeof window !== 'undefined') {
-    if (gmDiag.data) console.log('GM DIAG · recent rows:', gmDiag.data.rows);
-    if (gmDiag2.data) console.log('GM DIAG · summary:', gmDiag2.data.rows?.[0]);
-  }
 
   // Top salespeople for the day — orders (sales count) + total revenue, from
   // SalespersonDaily, anchored on the SaleWRT day (kicks off once it's known).
@@ -525,9 +509,13 @@ export default function DashboardDaily({ store, selectedBldg, cumulative }) {
             detailsDb: 'sql',
             detailsSql: `
               WITH g AS (
-                SELECT CAST(MAX(SaleDate) AS DATE) AS d
-                FROM SalesGrossMarginDetail
-                WHERE LEFT(CAST(SalesNo AS VARCHAR(20)), 1) = '${selectedBldg}' AND SaleDate < CAST(GETDATE() AS DATE)
+                SELECT MAX(d) AS d FROM (
+                  SELECT CAST(SaleDate AS DATE) AS d
+                  FROM SalesGrossMarginDetail
+                  WHERE LEFT(CAST(SalesNo AS VARCHAR(20)), 1) = '${selectedBldg}' AND SaleDate < CAST(GETDATE() AS DATE)
+                  GROUP BY CAST(SaleDate AS DATE)
+                  HAVING SUM(ISNULL(SaleAmt, 0)) > 0
+                ) t
               )
               SELECT TOP 500
                      CAST(D.SalesNo AS VARCHAR(20)) AS SalesNo,
