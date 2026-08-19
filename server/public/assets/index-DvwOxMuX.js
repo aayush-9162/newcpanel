@@ -891,13 +891,13 @@ In order to be iterable, non-array objects must have a [Symbol.iterator]() metho
     WHERE ProfitCenter = '${e}' AND DayMonth LIKE '%${h}'
     ORDER BY TRY_CONVERT(DATE,
       LEFT(DayMonth, 2) + ' ' + LEFT(SUBSTRING(DayMonth, 4, 99), 3) + ' ' + CAST(YEAR(GETDATE()) AS VARCHAR), 106)
-  `,w=((Tw=Oe(v,[],o).data)==null?void 0:Tw.rows)??[],S=`
+  `,w=((Tw=Oe(v,[],{enabled:!0}).data)==null?void 0:Tw.rows)??[],S=`
     SELECT
       SUM(ISNULL(${p}, 0)) AS thisYearTotal,
       SUM(ISNULL(${m}, 0)) AS lastYearTotal
     FROM SalesAggrDayWiseReport
     WHERE ProfitCenter = '${e}' AND DayMonth LIKE '%${h}'
-  `,y=Oe(S,[],o),N=((Ow=y.data)==null?void 0:Ow.rows[0])??{thisYearTotal:0,lastYearTotal:0},j=`
+  `,y=Oe(S,[],{enabled:!0}),N=((Ow=y.data)==null?void 0:Ow.rows[0])??{thisYearTotal:0,lastYearTotal:0},j=`
     SELECT MonthName,
            SUM(ISNULL(${p}, 0)) AS thisYear,
            SUM(ISNULL(${m}, 0)) AS lastYear

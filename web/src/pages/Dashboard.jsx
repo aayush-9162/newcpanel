@@ -99,7 +99,9 @@ export default function Dashboard() {
     ORDER BY TRY_CONVERT(DATE,
       LEFT(DayMonth, 2) + ' ' + LEFT(SUBSTRING(DayMonth, 4, 99), 3) + ' ' + CAST(YEAR(GETDATE()) AS VARCHAR), 106)
   `;
-  const dailyQ = useSqlQuery(dailySql, [], monthlyOn);
+  // Always enabled (not just monthly): the cumulative hero widget on the Daily
+  // view needs this running-total data too.
+  const dailyQ = useSqlQuery(dailySql, [], { enabled: true });
   const daily = dailyQ.data?.rows ?? [];
 
   // ── 2) Month totals (LY / TY) — drives the target donut
@@ -110,7 +112,7 @@ export default function Dashboard() {
     FROM SalesAggrDayWiseReport
     WHERE ProfitCenter = '${store}' AND DayMonth LIKE '%${monthName}'
   `;
-  const monthTotQ = useSqlQuery(monthTotSql, [], monthlyOn);
+  const monthTotQ = useSqlQuery(monthTotSql, [], { enabled: true });
   const totals = monthTotQ.data?.rows[0] ?? { thisYearTotal: 0, lastYearTotal: 0 };
 
   // ── 3) Year-wise monthly summary (for the bottom chart)
