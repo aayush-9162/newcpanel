@@ -761,12 +761,12 @@ export default function Dashboard() {
         ) : (
         <>
         {/* ═══════════════ YESTERDAY (headline) ═══════════════ */}
-        <HeroBanner
-          icon={Calendar}
-          decorIcon={Calendar}
-          accent={yestRev >= (lastYearMonthTotal / days) ? 'emerald' : 'amber'}
-        >
-          <div className="flex flex-wrap items-center justify-between gap-4">
+        <div className="relative">
+          <HeroBanner
+            icon={Calendar}
+            decorIcon={Calendar}
+            accent={yestRev >= (lastYearMonthTotal / days) ? 'emerald' : 'amber'}
+          >
             <div>
               <div className="text-[11px] font-bold uppercase tracking-widest text-emerald-700 dark:text-emerald-300">
                 {store === 'ARDEN' ? 'Arden (S1)' : 'Waynesville (S2)'} · {category} · Most recent day on file
@@ -781,9 +781,11 @@ export default function Dashboard() {
                 <span className="text-sm font-medium text-muted-fg">{yestDayLabel ? `on ${yestDayLabel}` : 'no data yet'}</span>
               </div>
             </div>
+          </HeroBanner>
+          <div className="absolute inset-y-3 right-3 hidden w-[340px] lg:block">
             <MiniCumulative data={dailyChart} monthName={monthName} total={thisYearMonthTotal} />
           </div>
-        </HeroBanner>
+        </div>
 
         {/* ═══════════════ CURRENT-MONTH headline tiles (per selected filters) ═══════════════ */}
         <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
@@ -1686,8 +1688,8 @@ function MiniCumulative({ data, monthName, total, className }) {
 
   if (!data.length) return null;
   return (
-    <div className={cn('flex items-center gap-3 rounded-2xl border border-emerald-500/30 bg-card/70 px-3 py-1 shadow-sm backdrop-blur-sm', className)}>
-      <div className="leading-tight">
+    <div className={cn('flex h-full items-stretch gap-3 rounded-2xl border border-emerald-500/30 bg-card/70 pl-3 shadow-sm backdrop-blur-sm', className)}>
+      <div className="flex shrink-0 flex-col justify-center leading-tight">
         <div className="text-[10px] font-bold uppercase tracking-wider text-muted-fg whitespace-nowrap">Cumulative · {monthName.slice(0, 3)}</div>
         <div className="mt-0.5 flex items-baseline gap-1.5">
           <span className="text-xl font-extrabold tabular-nums leading-none text-emerald-700 dark:text-emerald-300">{fmtCompactCurrency(total)}</span>
@@ -1702,9 +1704,9 @@ function MiniCumulative({ data, monthName, total, className }) {
           <span className="flex items-center gap-1 text-muted-fg"><span className="inline-block h-1 w-2.5 rounded-full bg-slate-400" />LY</span>
         </div>
       </div>
-      <div className="h-14 w-52">
+      <div className="h-full flex-1">
         <ResponsiveContainer width="100%" height="100%">
-          <AreaChart data={chart} margin={{ top: 4, right: 4, bottom: 0, left: 4 }}>
+          <AreaChart data={chart} margin={{ top: 8, right: 8, bottom: 6, left: 4 }}>
             <defs>
               <linearGradient id="cumTy" x1="0" y1="0" x2="0" y2="1">
                 <stop offset="0%" stopColor="#10b981" stopOpacity={0.4} />

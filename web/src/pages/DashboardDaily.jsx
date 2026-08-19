@@ -307,8 +307,8 @@ export default function DashboardDaily({ store, selectedBldg, cumulative }) {
   return (
     <>
       {/* ═══════════════ YESTERDAY headline ═══════════════ */}
-      <HeroBanner icon={Calendar} decorIcon={Calendar} accent="emerald">
-        <div className="flex flex-wrap items-center justify-between gap-4">
+      <div className="relative">
+        <HeroBanner icon={Calendar} decorIcon={Calendar} accent="emerald">
           <div>
             <div className="text-[11px] font-bold uppercase tracking-widest text-emerald-700 dark:text-emerald-300">
               {storeLabel}{weekdayLong ? ` · ${weekdayLong}` : ''} · {dateShort}
@@ -325,9 +325,11 @@ export default function DashboardDaily({ store, selectedBldg, cumulative }) {
               </span>
             </div>
           </div>
-          {cumulative}
-        </div>
-      </HeroBanner>
+        </HeroBanner>
+        {cumulative && (
+          <div className="absolute inset-y-3 right-3 hidden w-[340px] lg:block">{cumulative}</div>
+        )}
+      </div>
 
       {/* ═══════════════ KPI tiles (compact) ═══════════════ */}
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
