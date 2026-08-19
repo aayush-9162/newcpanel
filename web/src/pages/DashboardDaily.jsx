@@ -16,7 +16,7 @@ import { fmtCurrency, fmtNumber, fmtCompactCurrency } from '@/lib/format';
 import { ROOM_RULES, roomCase, itemTypeCase } from '@/lib/salesRules';
 import { vendorDomain } from '@/data/vendorLogos';
 import {
-  Calendar, ShoppingCart, Users, Truck, Package, MapPin, Boxes, Activity, ChevronRight, Award,
+  Calendar, ShoppingCart, Users, Truck, Package, MapPin, Boxes, Activity, ChevronRight, Award, Percent,
 } from 'lucide-react';
 import { cn } from '@/lib/cn';
 
@@ -84,6 +84,39 @@ export default function DashboardDaily({ store, selectedBldg, cumulative }) {
   const customers = Number(cust.customers) || 0;
   const newC      = Number(cust.newCustomers) || 0;
   const returning = Math.max(0, customers - newC);
+
+  // ── Gross margin — anchored on SalesGrossMarginDetail's OWN most-recent day
+  //    for this store. Cost/margin posts on its own ETL cadence and can lag the
+  //    sales feed, so anchoring here (not on the SaleWRT day) guarantees the tile
+  //    always shows a real, fully-costed number. SalesNo's leading digit is the
+  //    building code. GM% = (SaleAmt − TotalCost) / SaleAmt; 55% is the target.
+  const gmSql = `
+    WITH g AS (
+      SELECT CAST(MAX(SaleDate) AS DATE) AS d
+      FROM SalesGrossMarginDetail
+      WHERE LEFT(CAST(SalesNo AS VARCHAR(20)), 1) = '${selectedBldg}' AND SaleDate < CAST(GETDATE() AS DATE)
+    )
+    SELECT
+      (SELECT CONVERT(char(10), d, 23) FROM g) AS day,
+      ISNULL(SUM(D.SaleAmt), 0)                AS saleSum,
+      ISNULL(SUM(D.TotalCost), 0)              AS costSum,
+      COUNT(*)                                 AS records
+    FROM SalesGrossMarginDetail D CROSS JOIN g
+    WHERE D.SaleDate >= g.d AND D.SaleDate < DATEADD(DAY, 1, g.d)
+      AND LEFT(CAST(D.SalesNo AS VARCHAR(20)), 1) = '${selectedBldg}'
+  `;
+  const gmQ = useSqlQuery(gmSql, []);
+  const gmRow    = gmQ.data?.rows?.[0] ?? {};
+  const gmSale   = Number(gmRow.saleSum) || 0;
+  const gmCost   = Number(gmRow.costSum) || 0;
+  const gmProfit = gmSale - gmCost;
+  const gmPct    = gmSale ? (gmProfit / gmSale) * 100 : null;
+  const gmDayStr = gmRow.day || null;
+  const gmDateShort = gmDayStr
+    ? `${localDate(gmDayStr).getDate()} ${localDate(gmDayStr).toLocaleDateString('en-US', { month: 'short' })}`
+    : dateShort;
+  const gmDayLabel = gmDayStr ? localDate(gmDayStr).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) : '';
+  const gmHealthy = gmPct != null && gmPct >= 55;
 
   // Top salespeople for the day — orders (sales count) + total revenue, from
   // SalespersonDaily, anchored on the SaleWRT day (kicks off once it's known).
@@ -300,8 +333,6 @@ export default function DashboardDaily({ store, selectedBldg, cumulative }) {
   };
 
   const top5Areas = yAreas.areas.slice(0, 5);
-  const topArea = yAreas.areas[0] || null;
-  const topAreaShare = topArea && yAreas.total ? ((topArea.revenue / yAreas.total) * 100).toFixed(1) : '0';
   const noSalesYet = !kpiQ.isLoading && orders === 0 && revenue === 0;
 
   return (
@@ -457,13 +488,57 @@ export default function DashboardDaily({ store, selectedBldg, cumulative }) {
           })}
         />
         <StatCard
-          label={`Prime Market · ${dateShort}`}
-          value={topArea ? fmtCompactCurrency(topArea.revenue) : '—'}
-          caption={topArea ? `${topArea.name} · ${topAreaShare}% of day` : 'no sales'}
-          icon={MapPin}
-          accent="emerald"
-          loading={areaQ.isLoading}
-          onClick={topArea ? openDetail(areaZipConfig(topArea)) : undefined}
+          label={`Gross Margin · ${gmDateShort}`}
+          value={gmPct != null ? `${gmPct.toFixed(1)}%` : '—'}
+          caption={gmPct != null
+            ? `${fmtCompactCurrency(gmProfit)} profit · ${gmHealthy ? 'on target' : 'below 55%'}`
+            : 'no margin data'}
+          icon={Percent}
+          accent={gmPct == null ? 'emerald' : gmHealthy ? 'emerald' : 'amber'}
+          loading={gmQ.isLoading}
+          onClick={gmDayStr ? openDetail({
+            title: `Gross Margin · ${gmDateShort} · ${storeLabel}`,
+            icon: Percent,
+            accent: gmHealthy ? 'emerald' : 'amber',
+            headline: gmPct != null ? `${gmPct.toFixed(1)}%` : '—',
+            subtitle: `${fmtCurrency(gmProfit)} profit on ${fmtCurrency(gmSale)} sales · ${gmDayLabel || 'latest margin day'}`,
+            detailsDb: 'sql',
+            detailsSql: `
+              WITH g AS (
+                SELECT CAST(MAX(SaleDate) AS DATE) AS d
+                FROM SalesGrossMarginDetail
+                WHERE LEFT(CAST(SalesNo AS VARCHAR(20)), 1) = '${selectedBldg}' AND SaleDate < CAST(GETDATE() AS DATE)
+              )
+              SELECT TOP 500
+                     CAST(D.SalesNo AS VARCHAR(20)) AS SalesNo,
+                     D.CustomerName,
+                     D.SalesPerson,
+                     ISNULL(D.SaleAmt, 0)                                   AS SaleAmt,
+                     ISNULL(D.TotalCost, 0)                                 AS TotalCost,
+                     (ISNULL(D.SaleAmt, 0) - ISNULL(D.TotalCost, 0))        AS Profit,
+                     CASE WHEN ISNULL(D.SaleAmt, 0) > 0
+                          THEN (ISNULL(D.SaleAmt, 0) - ISNULL(D.TotalCost, 0)) / D.SaleAmt * 100
+                          ELSE NULL END                                     AS GmPct
+              FROM SalesGrossMarginDetail D CROSS JOIN g
+              WHERE D.SaleDate >= g.d AND D.SaleDate < DATEADD(DAY, 1, g.d)
+                AND LEFT(CAST(D.SalesNo AS VARCHAR(20)), 1) = '${selectedBldg}'
+              ORDER BY D.SaleAmt DESC
+            `,
+            detailsColumns: [
+              { key: 'SalesNo',      label: 'Sale #' },
+              { key: 'CustomerName', label: 'Customer', render: (r) => r.CustomerName || '—' },
+              { key: 'SalesPerson',  label: 'Salesperson', render: (r) => <span className="text-muted-fg">{r.SalesPerson || '—'}</span> },
+              { key: 'SaleAmt',      label: 'Sale', align: 'right', render: (r) => fmtCurrency(Number(r.SaleAmt) || 0) },
+              { key: 'TotalCost',    label: 'Cost', align: 'right', render: (r) => <span className="text-muted-fg">{fmtCurrency(Number(r.TotalCost) || 0)}</span> },
+              { key: 'Profit',       label: 'Profit', align: 'right', render: (r) => <span className="font-semibold">{fmtCurrency(Number(r.Profit) || 0)}</span> },
+              { key: 'GmPct',        label: 'GM %', align: 'right', render: (r) => {
+                const p = r.GmPct == null ? null : Number(r.GmPct);
+                if (p == null) return <span className="text-muted-fg">—</span>;
+                return <span className={cn('font-semibold', p >= 55 ? 'text-emerald-600 dark:text-emerald-300' : 'text-amber-600 dark:text-amber-300')}>{p.toFixed(1)}%</span>;
+              }},
+            ],
+            detailsEmpty: 'No margin rows for this day',
+          }) : undefined}
         />
       </div>
 
@@ -791,6 +866,7 @@ const STAT_ACCENTS = {
   primary: { border: 'border-blue-500/40',   grad: 'from-blue-500 to-indigo-500',   ring: 'ring-blue-500/30',   text: 'text-blue-600 dark:text-blue-300',     wash: 'from-blue-500/15 dark:from-blue-500/20' },
   violet:  { border: 'border-violet-500/40', grad: 'from-violet-500 to-purple-500', ring: 'ring-violet-500/30', text: 'text-violet-600 dark:text-violet-300', wash: 'from-violet-500/15 dark:from-violet-500/20' },
   emerald: { border: 'border-emerald-500/40',grad: 'from-emerald-500 to-teal-500',  ring: 'ring-emerald-500/30',text: 'text-emerald-600 dark:text-emerald-300',wash: 'from-emerald-500/15 dark:from-emerald-500/20' },
+  amber:   { border: 'border-amber-500/40',  grad: 'from-amber-500 to-orange-500',  ring: 'ring-amber-500/30',  text: 'text-amber-600 dark:text-amber-300',   wash: 'from-amber-500/15 dark:from-amber-500/20' },
 };
 function StatCard({ label, value, caption, icon: Icon, accent = 'sky', loading, onClick }) {
   const a = STAT_ACCENTS[accent] || STAT_ACCENTS.sky;
