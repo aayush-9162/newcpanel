@@ -6,7 +6,7 @@ import { Topbar } from '@/components/Topbar';
 import { Card, CardContent } from '@/components/ui/Card';
 import { usePoScrubQuery, poScrubGet } from '@/lib/api';
 import { cn } from '@/lib/cn';
-import { FileSpreadsheet, Search, RefreshCw, ExternalLink, AlertTriangle } from 'lucide-react';
+import { FileSpreadsheet, Search, RefreshCw, AlertTriangle, X } from 'lucide-react';
 
 const cell = (c) => String(c ?? '').trim();
 const nonEmpty = (row) => row.filter((c) => cell(c) !== '').length;
@@ -46,6 +46,7 @@ export default function POScrubReport() {
   });
   const [active, setActive] = useState(0);
   const [q, setQ] = useState('');
+  const [colFilters, setColFilters] = useState({}); // { [colIndex]: filterText }
   const [refreshing, setRefreshing] = useState(false);
 
   const sheets = data?.sheets ?? [];
@@ -55,12 +56,22 @@ export default function POScrubReport() {
   const sheet = sheets[active];
   const shaped = useMemo(() => (sheet ? shapeSheet(sheet.values) : null), [sheet]);
 
+  const activeColFilters = useMemo(
+    () => Object.entries(colFilters).filter(([, v]) => String(v).trim() !== '').map(([c, v]) => [Number(c), String(v).toLowerCase()]),
+    [colFilters],
+  );
   const bodyRows = useMemo(() => {
     if (!shaped) return [];
     const needle = q.trim().toLowerCase();
-    if (!needle) return shaped.body;
-    return shaped.body.filter((r) => r.some((c) => String(c ?? '').toLowerCase().includes(needle)));
-  }, [shaped, q]);
+    if (!needle && activeColFilters.length === 0) return shaped.body;
+    return shaped.body.filter((r) => {
+      if (needle && !r.some((c) => String(c ?? '').toLowerCase().includes(needle))) return false;
+      for (const [c, v] of activeColFilters) {
+        if (!String(r[c] ?? '').toLowerCase().includes(v)) return false;
+      }
+      return true;
+    });
+  }, [shaped, q, activeColFilters]);
 
   // A column is "numeric" (right-aligned) when most of its filled cells parse as numbers.
   const colNumeric = useMemo(() => {
@@ -85,9 +96,9 @@ export default function POScrubReport() {
     <>
       <Topbar title="PO Scrub Report" subtitle={data?.title || 'Purchase-order scrub tracker'} />
 
-      <div className="space-y-4">
+      <div className="flex flex-1 flex-col gap-4 p-4 min-h-0">
         {/* Toolbar: tab bar + search + refresh */}
-        <Card>
+        <Card className="shrink-0">
           <CardContent className="p-0">
             <div className="flex flex-wrap items-center gap-2 border-b border-border bg-gradient-to-r from-emerald-500/10 via-transparent to-transparent px-4 py-3">
               <FileSpreadsheet size={16} className="text-emerald-600 dark:text-emerald-400" />
@@ -117,7 +128,7 @@ export default function POScrubReport() {
                   <button
                     key={s.name + i}
                     type="button"
-                    onClick={() => { setActive(i); setQ(''); }}
+                    onClick={() => { setActive(i); setQ(''); setColFilters({}); }}
                     className={cn(
                       'shrink-0 whitespace-nowrap rounded-lg px-3 py-1.5 text-xs font-semibold transition',
                       i === active ? 'bg-primary text-primary-fg shadow-sm' : 'text-muted-fg hover:bg-muted',
@@ -141,8 +152,17 @@ export default function POScrubReport() {
                     className="w-full rounded-lg border border-border bg-card py-1.5 pl-8 pr-3 text-sm outline-none focus:border-primary/50"
                   />
                 </div>
+                {(q || activeColFilters.length > 0) && (
+                  <button
+                    type="button"
+                    onClick={() => { setQ(''); setColFilters({}); }}
+                    className="inline-flex items-center gap-1 rounded-lg border border-border px-2 py-1 text-[11px] font-semibold text-muted-fg transition hover:bg-muted"
+                  >
+                    <X size={12} /> Clear filters
+                  </button>
+                )}
                 <span className="text-[11px] text-muted-fg">
-                  {bodyRows.length} row{bodyRows.length === 1 ? '' : 's'}{q && shaped ? ` of ${shaped.body.length}` : ''}
+                  {bodyRows.length} row{bodyRows.length === 1 ? '' : 's'}{(q || activeColFilters.length) && shaped ? ` of ${shaped.body.length}` : ''}
                 </span>
               </div>
             )}
@@ -172,33 +192,44 @@ export default function POScrubReport() {
         ) : !sheet ? (
           <Card><CardContent className="py-16 text-center text-sm text-muted-fg">No sheets found.</CardContent></Card>
         ) : (
-          <Card>
-            <CardContent className="p-0">
+          <Card className="flex flex-1 flex-col min-h-0">
+            <CardContent className="flex flex-1 flex-col min-h-0 p-0">
               {shaped.titles.length > 0 && (
-                <div className="flex flex-wrap items-center gap-2 border-b border-border bg-gradient-to-r from-emerald-500/20 via-emerald-500/5 to-transparent px-4 py-2.5">
+                <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border bg-gradient-to-r from-emerald-500/20 via-emerald-500/5 to-transparent px-4 py-2.5">
                   <span className="h-2 w-2 shrink-0 rounded-full bg-emerald-500 shadow-[0_0_8px] shadow-emerald-500/50" />
                   {shaped.titles.map((t, i) => (
                     <span key={i} className="text-sm font-extrabold tracking-tight text-emerald-800 dark:text-emerald-200">{t}</span>
                   ))}
                 </div>
               )}
-              {/* Fixed-height scroll box → the horizontal scrollbar stays visible
-                  even at the top; header + first two columns (#, PO) freeze. */}
-              <div className="po-scroll max-h-[68vh] overflow-auto rounded-b-xl">
+              {/* The scroll box now FILLS the card, which fills the viewport — so the
+                  page itself never scrolls and the horizontal bar is always on screen.
+                  Header + first two columns (#, PO) freeze. */}
+              <div className="po-scroll min-h-0 flex-1 overflow-auto rounded-b-xl">
                 <table className="min-w-full border-separate border-spacing-0 text-sm">
                   <thead>
                     <tr>
-                      <th className="sticky left-0 top-0 z-30 w-11 min-w-[2.75rem] border-b border-r border-border bg-muted px-2 py-2.5 text-right text-[10px] font-bold text-muted-fg">#</th>
+                      <th className="sticky left-0 top-0 z-30 w-11 min-w-[2.75rem] border-b border-r border-border bg-muted px-2 py-2 text-right align-bottom text-[10px] font-bold text-muted-fg">#</th>
                       {Array.from({ length: shaped.cols }).map((_, c) => (
                         <th
                           key={c}
                           className={cn(
-                            'sticky top-0 z-20 whitespace-nowrap border-b border-border bg-muted px-3 py-2.5 text-[11px] font-bold uppercase tracking-wider text-muted-fg',
-                            colNumeric[c] ? 'text-right' : 'text-left',
+                            'sticky top-0 z-20 border-b border-border bg-muted px-2 py-1.5 align-top',
                             c === 0 && 'left-[2.75rem] z-30 border-r',
                           )}
                         >
-                          {String(shaped.header[c] ?? '').trim()}
+                          <div className={cn('whitespace-nowrap px-1 pb-1 text-[11px] font-bold uppercase tracking-wider text-muted-fg', colNumeric[c] ? 'text-right' : 'text-left')}>
+                            {String(shaped.header[c] ?? '').trim() || ' '}
+                          </div>
+                          <input
+                            value={colFilters[c] ?? ''}
+                            onChange={(e) => setColFilters((f) => ({ ...f, [c]: e.target.value }))}
+                            placeholder="filter…"
+                            className={cn(
+                              'w-full min-w-[80px] rounded border border-border bg-card px-1.5 py-0.5 text-[11px] font-normal normal-case tracking-normal text-fg outline-none focus:border-primary/60',
+                              colFilters[c] && 'border-primary/60 bg-primary/5',
+                            )}
+                          />
                         </th>
                       ))}
                     </tr>
