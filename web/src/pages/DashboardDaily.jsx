@@ -12,12 +12,12 @@ import { useMemo, useState } from 'react';
 import { HeroStat, HeroBanner } from '@/components/HeroStat';
 import { MetricDrilldown } from '@/components/MetricDrilldown';
 import { useSqlQuery } from '@/lib/api';
-import { TopSalespersons } from '@/components/TopSalespersons';
+import { TopSalespersons, useTopSellers } from '@/components/TopSalespersons';
 import { fmtCurrency, fmtNumber, fmtCompactCurrency } from '@/lib/format';
 import { ROOM_RULES, roomCase, itemTypeCase } from '@/lib/salesRules';
 import { vendorDomain } from '@/data/vendorLogos';
 import {
-  Calendar, ShoppingCart, Users, Truck, Package, MapPin, Boxes, Activity, ChevronRight, Award, Percent,
+  Calendar, ShoppingCart, Users, Truck, Package, MapPin, Boxes, Activity, ChevronRight, Award, Percent, Receipt, Target,
 } from 'lucide-react';
 import { cn } from '@/lib/cn';
 
@@ -109,6 +109,12 @@ export default function DashboardDaily({ store, selectedBldg, cumulative }) {
   const gmDayLabel  = dayLabel;
   const gmHealthy   = gmPct != null && gmPct >= 55;
 
+  // ── Floor totals for the day — from the live UPS system (same source as the
+  //    Top Salespersons board below; React Query dedupes the identical request).
+  const floor = useTopSellers(store, dayStr, dayStr);
+  const floorUps     = floor.rows.reduce((s, r) => s + (r.ups || 0), 0);
+  const floorTickets = floor.rows.reduce((s, r) => s + (r.tickets || 0), 0);
+  const floorClosing = floorUps > 0 ? (floorTickets / floorUps) * 100 : null;
 
   // ── Units sold (SalesItemDetail latest day).
   const unitsSql = `
@@ -297,13 +303,8 @@ export default function DashboardDaily({ store, selectedBldg, cumulative }) {
 
       {/* ═══════════════ KPI tiles (compact) ═══════════════ */}
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <StatCard
-          label={`Sales · ${dateShort}`}
-          value={fmtNumber(orders)}
-          caption={weekdayLong || 'Latest day'}
-          icon={ShoppingCart}
-          accent="sky"
-          loading={kpiQ.isLoading}
+        <button
+          type="button"
           onClick={openDetail({
             title: `Sales · ${dateShort} · ${storeLabel}`,
             icon: ShoppingCart,
@@ -325,7 +326,35 @@ export default function DashboardDaily({ store, selectedBldg, cumulative }) {
             ],
             detailsEmpty: 'No sales yesterday',
           })}
-        />
+          className="group relative col-span-2 flex flex-col overflow-hidden rounded-xl border border-sky-500/40 bg-card p-4 text-left transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md lg:row-span-2"
+        >
+          <div className="absolute inset-0 bg-gradient-to-br from-sky-500/15 via-transparent to-transparent opacity-80 dark:from-sky-500/20" />
+          <div className="relative flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <div className="text-[10px] font-bold uppercase tracking-wider text-muted-fg">Sales · {dateShort}</div>
+              {kpiQ.isLoading
+                ? <div className="mt-2 h-9 w-16 animate-pulse rounded bg-muted/50" />
+                : <div className="mt-1 text-4xl font-extrabold leading-none tabular-nums text-sky-600 dark:text-sky-300">{fmtNumber(orders)}</div>}
+              <div className="mt-1.5 text-[11px] font-medium text-muted-fg">{weekdayLong ? `${weekdayLong} · sale tickets` : 'sale tickets'}</div>
+            </div>
+            <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-gradient-to-br from-sky-500 to-cyan-500 text-white shadow ring-2 ring-sky-500/30">
+              <ShoppingCart size={16} strokeWidth={2.25} />
+            </div>
+          </div>
+
+          {/* Floor totals from the UPS system */}
+          <div className="relative mt-4 border-t border-border/70 pt-3">
+            <div className="mb-2 flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-wider text-muted-fg">
+              <Activity size={11} className="text-sky-500" /> Floor · UPS system
+              {floor.error && <span className="text-amber-600 dark:text-amber-300">· unavailable</span>}
+            </div>
+            <div className="grid grid-cols-3 gap-2">
+              <FloorStat icon={Users}   label="UPS"     value={floor.loading ? '…' : floor.error ? '—' : fmtNumber(floorUps)} tint="text-sky-500" />
+              <FloorStat icon={Receipt} label="Tickets" value={floor.loading ? '…' : floor.error ? '—' : fmtNumber(floorTickets)} tint="text-violet-500" />
+              <FloorStat icon={Target}  label="Closing" value={floor.loading ? '…' : (floorClosing == null ? '—' : `${floorClosing.toFixed(0)}%`)} tint="text-emerald-500" valueClass={closingTone(floorClosing)} />
+            </div>
+          </div>
+        </button>
         <StatCard
           label={`Items Sold · ${dateShort}`}
           value={fmtNumber(units)}
@@ -420,6 +449,7 @@ export default function DashboardDaily({ store, selectedBldg, cumulative }) {
             detailsEmpty: 'No customers yesterday',
           })}
         />
+        <div className="col-span-2 lg:col-span-2">
         <StatCard
           label={`Gross Margin · ${gmDateShort}`}
           value={gmPct != null ? `${gmPct.toFixed(1)}%` : '—'}
@@ -462,6 +492,7 @@ export default function DashboardDaily({ store, selectedBldg, cumulative }) {
             detailsEmpty: 'No cost rows for this day',
           }) : undefined}
         />
+        </div>
       </div>
 
       {/* ═══════════════ Area-wise sales (top 5 + see all) ═══════════════ */}
@@ -723,6 +754,24 @@ const STAT_ACCENTS = {
   emerald: { border: 'border-emerald-500/40',grad: 'from-emerald-500 to-teal-500',  ring: 'ring-emerald-500/30',text: 'text-emerald-600 dark:text-emerald-300',wash: 'from-emerald-500/15 dark:from-emerald-500/20' },
   amber:   { border: 'border-amber-500/40',  grad: 'from-amber-500 to-orange-500',  ring: 'ring-amber-500/30',  text: 'text-amber-600 dark:text-amber-300',   wash: 'from-amber-500/15 dark:from-amber-500/20' },
 };
+// Colour a closing-rate value: green when strong, amber mid, red weak.
+const closingTone = (c) => c == null ? 'text-fg'
+  : c >= 50 ? 'text-emerald-600 dark:text-emerald-300'
+  : c >= 30 ? 'text-amber-600 dark:text-amber-300'
+  : 'text-rose-500 dark:text-rose-300';
+
+// Small floor metric cell (UPS / Tickets / Closing) inside the Sales bento card.
+function FloorStat({ icon: Icon, label, value, tint, valueClass }) {
+  return (
+    <div className="flex flex-col items-center gap-0.5 rounded-lg border border-border bg-muted/30 px-1.5 py-2">
+      <span className="flex items-center gap-1 text-[9px] font-bold uppercase tracking-wider text-muted-fg">
+        {Icon && <Icon size={11} className={tint} />}{label}
+      </span>
+      <span className={cn('text-base font-extrabold tabular-nums leading-none', valueClass || 'text-fg')}>{value}</span>
+    </div>
+  );
+}
+
 function StatCard({ label, value, caption, icon: Icon, accent = 'sky', loading, onClick }) {
   const a = STAT_ACCENTS[accent] || STAT_ACCENTS.sky;
   const Comp = onClick ? 'button' : 'div';
