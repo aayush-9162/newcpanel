@@ -239,7 +239,9 @@ let _saToken = { value: null, exp: 0 };
 async function getSheetsToken() {
   if (_saToken.value && Date.now() < _saToken.exp - 60_000) return _saToken.value;
   const refresh = loadPoScrubRefreshToken();
-  if (!refresh || !GOOGLE_CLIENT_ID_ENV || !GOOGLE_CLIENT_SECRET) throw new Error('PO scrub OAuth not configured (run scripts/po-scrub-auth.mjs)');
+  if (!GOOGLE_CLIENT_ID_ENV)  throw new Error('missing GOOGLE_CLIENT_ID in server .env');
+  if (!GOOGLE_CLIENT_SECRET)  throw new Error('missing GOOGLE_CLIENT_SECRET in server .env');
+  if (!refresh)               throw new Error('missing/unreadable po-scrub-oauth.json (run scripts/po-scrub-auth.mjs and place the file in server/)');
   const r = await fetch('https://oauth2.googleapis.com/token', {
     method: 'POST',
     headers: { 'content-type': 'application/x-www-form-urlencoded' },

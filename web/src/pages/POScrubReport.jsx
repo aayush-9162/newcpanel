@@ -8,19 +8,34 @@ import { usePoScrubQuery, poScrubGet } from '@/lib/api';
 import { cn } from '@/lib/cn';
 import { FileSpreadsheet, Search, RefreshCw, ExternalLink, AlertTriangle } from 'lucide-react';
 
-const nonEmpty = (row) => row.filter((c) => String(c ?? '').trim() !== '').length;
+const cell = (c) => String(c ?? '').trim();
+const nonEmpty = (row) => row.filter((c) => cell(c) !== '').length;
+const isEmptyRow = (row) => nonEmpty(row) === 0;
+// Cells that read as a number / currency / percent → right-aligned, monospaced.
+const isNumeric = (s) => { const t = cell(s); return t !== '' && /^[-+]?\$?\s?[\d,]+(\.\d+)?\s?%?$/.test(t); };
 
 // Split a sheet's 2D values into: leading title rows (single-cell banners), the
-// header row (first row with ≥2 filled cells), and the body rows below it.
+// header row (first row with ≥2 filled cells), and the body rows below it
+// (fully-empty rows dropped so the table reads cleanly).
 function shapeSheet(values) {
   const rows = values ?? [];
   let headerIdx = rows.findIndex((r) => nonEmpty(r) >= 2);
   if (headerIdx < 0) headerIdx = rows.length ? 0 : -1;
-  const titles = rows.slice(0, Math.max(0, headerIdx)).map((r) => r.find((c) => String(c ?? '').trim() !== '') || '').filter(Boolean);
+  const titles = rows.slice(0, Math.max(0, headerIdx)).map((r) => r.find((c) => cell(c) !== '') || '').filter(Boolean);
   const header = headerIdx >= 0 ? rows[headerIdx] : [];
-  const body   = headerIdx >= 0 ? rows.slice(headerIdx + 1) : [];
+  const body   = (headerIdx >= 0 ? rows.slice(headerIdx + 1) : []).filter((r) => !isEmptyRow(r));
   const cols   = Math.max(header.length, ...body.map((r) => r.length), 0);
   return { titles, header, body, cols };
+}
+
+// Colored pill for a Status-like column.
+function StatusBadge({ value }) {
+  const v = value.toLowerCase();
+  const tone = v.includes('open') ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-200'
+    : (v.includes('close') || v.includes('complete') || v.includes('done') || v.includes('received')) ? 'bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-200'
+    : (v.includes('hold') || v.includes('pending') || v.includes('back')) ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-200'
+    : 'bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-200';
+  return <span className={cn('inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold', tone)}>{value}</span>;
 }
 
 export default function POScrubReport() {
@@ -46,6 +61,16 @@ export default function POScrubReport() {
     if (!needle) return shaped.body;
     return shaped.body.filter((r) => r.some((c) => String(c ?? '').toLowerCase().includes(needle)));
   }, [shaped, q]);
+
+  // A column is "numeric" (right-aligned) when most of its filled cells parse as numbers.
+  const colNumeric = useMemo(() => {
+    if (!shaped) return [];
+    return Array.from({ length: shaped.cols }).map((_, c) => {
+      let num = 0, tot = 0;
+      for (const r of shaped.body) { const v = cell(r[c]); if (v) { tot++; if (isNumeric(v)) num++; } }
+      return tot > 0 && num / tot >= 0.6;
+    });
+  }, [shaped]);
 
   // Hard refresh — bypass the server cache, then refetch the query.
   const hardRefresh = async () => {
@@ -162,7 +187,7 @@ export default function POScrubReport() {
                     <tr className="border-b border-border">
                       <th className="px-2 py-2 text-right text-[10px] font-semibold text-muted-fg">#</th>
                       {Array.from({ length: shaped.cols }).map((_, c) => (
-                        <th key={c} className="whitespace-nowrap px-3 py-2 text-left text-[11px] font-bold uppercase tracking-wider text-muted-fg">
+                        <th key={c} className={cn('whitespace-nowrap px-3 py-2 text-[11px] font-bold uppercase tracking-wider text-muted-fg', colNumeric[c] ? 'text-right' : 'text-left')}>
                           {String(shaped.header[c] ?? '').trim()}
                         </th>
                       ))}
@@ -171,27 +196,26 @@ export default function POScrubReport() {
                   <tbody>
                     {bodyRows.length === 0 ? (
                       <tr><td colSpan={shaped.cols + 1} className="px-4 py-10 text-center text-sm text-muted-fg">No matching rows.</td></tr>
-                    ) : bodyRows.map((row, ri) => {
-                      // A row with a single filled cell reads as a section band.
-                      const filled = nonEmpty(row);
-                      if (filled === 1) {
-                        const text = row.find((c) => String(c ?? '').trim() !== '') || '';
-                        return (
-                          <tr key={ri} className="bg-emerald-500/5">
-                            <td className="px-2 py-2 text-right text-[10px] text-muted-fg">{ri + 1}</td>
-                            <td colSpan={shaped.cols} className="px-3 py-2 text-sm font-semibold text-emerald-800 dark:text-emerald-200">{text}</td>
-                          </tr>
-                        );
-                      }
-                      return (
-                        <tr key={ri} className="border-b border-border/60 last:border-0 odd:bg-muted/20 hover:bg-muted/40">
-                          <td className="px-2 py-1.5 text-right text-[10px] tabular-nums text-muted-fg">{ri + 1}</td>
-                          {Array.from({ length: shaped.cols }).map((_, c) => (
-                            <td key={c} className="whitespace-nowrap px-3 py-1.5 align-top">{String(row[c] ?? '').trim()}</td>
-                          ))}
-                        </tr>
-                      );
-                    })}
+                    ) : bodyRows.map((row, ri) => (
+                      <tr key={ri} className="border-b border-border/50 last:border-0 odd:bg-muted/15 hover:bg-primary/5">
+                        <td className="px-2 py-2 text-right text-[10px] tabular-nums text-muted-fg/70">{ri + 1}</td>
+                        {Array.from({ length: shaped.cols }).map((_, c) => {
+                          const raw = cell(row[c]);
+                          const isStatus = String(shaped.header[c] ?? '').toLowerCase().includes('status') && raw;
+                          return (
+                            <td
+                              key={c}
+                              className={cn(
+                                'px-3 py-2 align-top text-[13px]',
+                                colNumeric[c] ? 'whitespace-nowrap text-right tabular-nums font-medium' : 'max-w-[300px] whitespace-normal break-words',
+                              )}
+                            >
+                              {isStatus ? <StatusBadge value={raw} /> : raw}
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    ))}
                   </tbody>
                 </table>
               </div>
