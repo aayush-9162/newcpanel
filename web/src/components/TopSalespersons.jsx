@@ -33,29 +33,29 @@ export function useTopSellers(store, fromDate, toDate) {
   const sbStore    = store === 'ARDEN' ? 'S1' : 'S2';
   const stale      = 5 * 60 * 1000;
 
-  // Single-day: authoritative board data.
+  const storeName = store === 'ARDEN' ? 'arden' : 'waynesville';
+
+  // Single-day: the daily board (/reports/today/combined).
   const dayQ = useUpsReportQuery('today/combined', { store: storeLabel, date: fromDate },
     { retry: 0, enabled: singleDay, staleTime: stale });
-
-  // Care-plan (both modes: gives carePlansSold per seller).
-  const sbParams = { store: sbStore, from: fromDate, to: toDate };
-  const rangeReady = !!fromDate && !!toDate;
-  const careQ  = useAnalyticsQuery('sb/care-plan',        sbParams, { retry: 0, enabled: rangeReady, staleTime: stale });
-  // Range-only feeds.
-  const capQ   = useAnalyticsQuery('sb/customer-capture', sbParams, { retry: 0, enabled: rangeReady && !singleDay, staleTime: stale });
-  const salesQ = useAnalyticsQuery('sales',               sbParams, { retry: 0, enabled: rangeReady && !singleDay, staleTime: stale });
+  // Date range (month): the Salesperson Summary report (/reports/admin/daily-summary)
+  // — accepts from/to and returns the SAME canonical fields per employee.
+  const rangeReady = !!fromDate && !!toDate && !singleDay;
+  const sumQ = useUpsReportQuery('admin/daily-summary', { from: fromDate, to: toDate },
+    { retry: 0, enabled: rangeReady, staleTime: stale });
+  // Care-plan (both modes) — the only source of carePlansSold per seller.
+  const careQ = useAnalyticsQuery('sb/care-plan', { store: sbStore, from: fromDate, to: toDate },
+    { retry: 0, enabled: !!fromDate && !!toDate, staleTime: stale });
 
   const rows = useMemo(() => {
+    const careByName = new Map((careQ.data?.rows ?? []).map((c) => [normName(c.name), numF(c.carePlansSold)]));
     if (singleDay) {
-      const careByName = new Map((careQ.data?.rows ?? []).map((c) => [normName(c.name), numF(c.carePlansSold)]));
       return (dayQ.data?.byEmployee ?? []).map((e) => {
         const name = `${e.first_name ?? ''} ${e.last_name ?? ''}`.trim() || e.username || '—';
         const tickets  = numF(e.tickets);            // REGULAR tickets — matches the board
         const credited = numF(e.credited_tickets);   // RG + PH
         return {
-          name,
-          ups:       numF(e.ups),
-          tickets,
+          name, ups: numF(e.ups), tickets,
           phone:     (credited != null && tickets != null) ? Math.max(0, credited - tickets) : null,
           carePlans: careByName.get(normName(name)) ?? null,
           sales:     numF(e.total_sales),
@@ -64,26 +64,25 @@ export function useTopSellers(store, fromDate, toDate) {
       }).filter((r) => r.name && r.name !== '—')
         .sort((a, b) => (b.sales ?? 0) - (a.sales ?? 0) || (b.ups ?? 0) - (a.ups ?? 0));
     }
-    // Date range → SB per-seller merge.
-    const byName = new Map();
-    const ensure = (nm) => {
-      const k = normName(nm);
-      if (!byName.has(k)) byName.set(k, { name: nm || '—', ups: null, tickets: null, phone: null, sales: null, carePlans: null });
-      return byName.get(k);
-    };
-    for (const r of (capQ.data?.rows ?? []))       { const e = ensure(r.name); e.ups = numF(r.upsTaken); }
-    for (const c of (careQ.data?.rows ?? []))      { const e = ensure(c.name); e.tickets = numF(c.tickets); e.carePlans = numF(c.carePlansSold); }
-    for (const s of (salesQ.data?.bySeller ?? [])) { const e = ensure(s.sellerName ?? s.name); e.sales = numF(s.revenue ?? s.sales ?? s.totalRevenue); }
-    return [...byName.values()]
-      .map((r) => ({ ...r, closing: (r.ups && r.ups > 0) ? ((r.tickets || 0) / r.ups) * 100 : null }))
-      .filter((r) => r.name && r.name !== '—')
+    // Range → daily-summary. Pick our store from stores[] (store filter is ignored).
+    const st = (sumQ.data?.stores ?? []).find((s) => String(s.name).toLowerCase() === storeName);
+    const empRows = st?.sections?.employee?.rows ?? [];
+    return empRows.map((e) => ({
+      name:      e.full_name || `${e.first_name ?? ''} ${e.last_name ?? ''}`.trim() || '—',
+      ups:       numF(e.num_opps),       // UPS (already netted)
+      tickets:   numF(e.num_sales),      // REGULAR (RG) tickets — matches the board
+      phone:     numF(e.phone_orders),   // PH count, shown separately
+      carePlans: careByName.get(normName(e.full_name)) ?? null,
+      sales:     numF(e.total_sales),
+      closing:   numF(e.closing_ratio),
+    })).filter((r) => r.name && r.name !== '—')
       .sort((a, b) => (b.sales ?? 0) - (a.sales ?? 0) || (b.ups ?? 0) - (a.ups ?? 0));
-  }, [singleDay, dayQ.data, capQ.data, careQ.data, salesQ.data]);
+  }, [singleDay, dayQ.data, sumQ.data, careQ.data, storeName]);
 
   return {
     rows,
-    loading: singleDay ? dayQ.isLoading : (capQ.isLoading || careQ.isLoading || salesQ.isLoading),
-    error:   singleDay ? dayQ.error     : (capQ.error || careQ.error || salesQ.error),
+    loading: singleDay ? dayQ.isLoading : sumQ.isLoading,
+    error:   singleDay ? dayQ.error     : sumQ.error,
   };
 }
 

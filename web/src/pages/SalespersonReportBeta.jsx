@@ -699,18 +699,19 @@ function useFloorData(store, fromDate, toDate, year) {
   // RG+PH; the difference is the phone-order count we surface separately.
   const singleDay = !year && !!fromDate && fromDate === toDate;
 
+  const storeName = store === 'ARDEN' ? 'arden' : 'waynesville';
   const params = year ? { store: sbStore, year } : { store: sbStore, from: fromDate, to: toDate };
   const ready = year ? true : (!!fromDate && !!toDate);
   const stale = 5 * 60 * 1000;
-  const dayQ   = useUpsReportQuery('today/combined', { store: storeLabel, date: fromDate }, { retry: 0, enabled: singleDay, staleTime: stale });
+  const dayQ   = useUpsReportQuery('today/combined',      { store: storeLabel, date: fromDate }, { retry: 0, enabled: singleDay, staleTime: stale });
+  // Range (month/year) → the Salesperson Summary report, which accepts from/to.
+  const sumQ   = useUpsReportQuery('admin/daily-summary', { from: fromDate, to: toDate }, { retry: 0, enabled: !!fromDate && !!toDate && !singleDay, staleTime: stale });
   const execQ  = useAnalyticsQuery('sb/executive',        params, { retry: 0, enabled: ready, staleTime: stale });
   const careQ  = useAnalyticsQuery('sb/care-plan',        params, { retry: 0, enabled: ready, staleTime: stale });
-  const capQ   = useAnalyticsQuery('sb/customer-capture', params, { retry: 0, enabled: ready && !singleDay, staleTime: stale });
-  const salesQ = useAnalyticsQuery('sales',               params, { retry: 0, enabled: ready && !singleDay, staleTime: stale });
 
   const rows = useMemo(() => {
+    const care = new Map((careQ.data?.rows ?? []).map((c) => [normNameF(c.name), { carePlans: numF(c.carePlansSold), attach: numF(c.attachRate) }]));
     if (singleDay) {
-      const care = new Map((careQ.data?.rows ?? []).map((c) => [normNameF(c.name), { carePlans: numF(c.carePlansSold), attach: numF(c.attachRate) }]));
       const st = dayQ.data?.store || '';
       return (dayQ.data?.byEmployee ?? []).map((e) => {
         const name = `${e.first_name ?? ''} ${e.last_name ?? ''}`.trim() || e.username || '—';
@@ -728,35 +729,38 @@ function useFloorData(store, fromDate, toDate, year) {
         };
       }).sort((a, b) => (b.sales ?? 0) - (a.sales ?? 0) || (b.ups ?? 0) - (a.ups ?? 0));
     }
-    const byName = new Map();
-    const ensure = (nm) => {
-      const k = normNameF(nm);
-      if (!byName.has(k)) byName.set(k, { name: nm || '—', store: '', unresolved: false, ups: null, tickets: null, phone: null, sales: null, carePlans: null, attach: null });
-      return byName.get(k);
-    };
-    for (const r of (capQ.data?.rows ?? [])) { const e = ensure(r.name); e.ups = numF(r.upsTaken); if (r.storeName) e.store = r.storeName; if (r.unresolved) e.unresolved = true; }
-    for (const c of (careQ.data?.rows ?? [])) { const e = ensure(c.name); e.tickets = numF(c.tickets); e.carePlans = numF(c.carePlansSold); e.attach = numF(c.attachRate); if (!e.store && c.storeName) e.store = c.storeName; }
-    for (const s of (salesQ.data?.bySeller ?? [])) { const e = ensure(s.sellerName ?? s.name); e.sales = numF(s.revenue ?? s.sales ?? s.totalRevenue); }
-    return [...byName.values()].map((r) => {
-      const closing = (r.ups && r.ups > 0) ? ((r.tickets || 0) / r.ups) * 100 : null;
-      return { ...r, closing, burning: closing == null ? null : Math.max(0, 100 - closing) };
+    // Range → daily-summary; pick our store from stores[] (store filter ignored).
+    const stObj = (sumQ.data?.stores ?? []).find((s) => String(s.name).toLowerCase() === storeName);
+    const empRows = stObj?.sections?.employee?.rows ?? [];
+    return empRows.map((e) => {
+      const name = e.full_name || `${e.first_name ?? ''} ${e.last_name ?? ''}`.trim() || '—';
+      const closing = numF(e.closing_ratio);
+      const cp = care.get(normNameF(name)) || {};
+      return {
+        name, store: e.store_name || storeName, unresolved: false,
+        ups: numF(e.num_opps), tickets: numF(e.num_sales), phone: numF(e.phone_orders),
+        sales: numF(e.total_sales),
+        carePlans: cp.carePlans ?? null, attach: cp.attach ?? null,
+        closing, burning: numF(e.burning_ratio) ?? (closing == null ? null : Math.max(0, 100 - closing)),
+      };
     }).sort((a, b) => (b.sales ?? 0) - (a.sales ?? 0) || (b.ups ?? 0) - (a.ups ?? 0));
-  }, [singleDay, dayQ.data, capQ.data, careQ.data, salesQ.data]);
+  }, [singleDay, dayQ.data, sumQ.data, careQ.data, storeName]);
 
   const cur = execQ.data?.current || {};
   const dlt = execQ.data?.delta || {};
   const sm  = dayQ.data?.store_metrics;
-  const sumSales = singleDay ? (numF(sm?.total_sales) ?? rows.reduce((s, r) => s + (r.sales || 0), 0)) : rows.reduce((s, r) => s + (r.sales || 0), 0);
-  const totUps   = singleDay ? (numF(sm?.ups) ?? rows.reduce((s, r) => s + (r.ups || 0), 0)) : rows.reduce((s, r) => s + (r.ups || 0), 0);
-  const tickets  = singleDay ? (numF(sm?.tickets) ?? rows.reduce((s, r) => s + (r.tickets || 0), 0))
-                             : ((numF(cur.totalTickets) ?? rows.reduce((s, r) => s + (r.tickets || 0), 0)) || 0);
+  const stObj = (sumQ.data?.stores ?? []).find((s) => String(s.name).toLowerCase() === storeName);
+  const rangeTot = stObj?.sections?.employee?.totals;
+  const sumSales = singleDay ? (numF(sm?.total_sales) ?? 0) : (numF(rangeTot?.total_sales) ?? rows.reduce((s, r) => s + (r.sales || 0), 0));
+  const totUps   = singleDay ? (numF(sm?.ups)         ?? 0) : (numF(rangeTot?.num_opps)    ?? rows.reduce((s, r) => s + (r.ups || 0), 0));
+  const tickets  = singleDay ? (numF(sm?.tickets)     ?? 0) : (numF(rangeTot?.num_sales)   ?? rows.reduce((s, r) => s + (r.tickets || 0), 0));
   const avgSale  = tickets ? sumSales / tickets : null;
   const leader   = rows[0] || null;                    // rows already sorted by sales desc
   return {
     rows, cur, dlt, sumSales, totUps, tickets, avgSale, leader,
     hasExec: !!execQ.data,
-    loading: singleDay ? dayQ.isLoading : (capQ.isLoading || careQ.isLoading || salesQ.isLoading || execQ.isLoading),
-    error:   singleDay ? dayQ.error : (capQ.error || execQ.error || careQ.error || salesQ.error),
+    loading: singleDay ? dayQ.isLoading : (sumQ.isLoading || execQ.isLoading),
+    error:   singleDay ? dayQ.error : (sumQ.error || execQ.error),
   };
 }
 
