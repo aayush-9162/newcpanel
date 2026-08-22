@@ -15,7 +15,7 @@ import { Topbar } from '@/components/Topbar';
 import { Card, CardContent } from '@/components/ui/Card';
 import { HeroBanner } from '@/components/HeroStat';
 import { MetricDrilldown } from '@/components/MetricDrilldown';
-import { useSqlQuery, useMysqlQuery, useAnalyticsQuery } from '@/lib/api';
+import { useSqlQuery, useMysqlQuery, useAnalyticsQuery, useUpsReportQuery } from '@/lib/api';
 import { fmtCurrency, fmtNumber, fmtCompactCurrency } from '@/lib/format';
 import {
   Trophy, Receipt, Crown, Medal, Award, Calendar, Sparkles,
@@ -691,36 +691,47 @@ const normNameF = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '')
 // /sales bySeller · store KPIs ← sb/executive. React Query dedupes identical
 // requests, so calling this twice triggers one set of fetches.
 function useFloorData(store, fromDate, toDate, year) {
-  const sbStore = store === 'ARDEN' ? 'S1' : 'S2';
-  // Yearly uses the API's `year` filter (calendar-year scoped + indexed);
-  // daily/monthly use an explicit from/to window.
+  const sbStore    = store === 'ARDEN' ? 'S1' : 'S2';
+  const storeLabel = store === 'ARDEN' ? 'Arden' : 'Waynesville';
+  // A SINGLE day uses the UPS "Today's Reports" board — its per-employee
+  // `tickets` is REGULAR tickets (RG, phone excluded) and it carries a ready-made
+  // `closing_ratio`, so it matches the ups-board exactly. `credited_tickets` is
+  // RG+PH; the difference is the phone-order count we surface separately.
+  const singleDay = !year && !!fromDate && fromDate === toDate;
+
   const params = year ? { store: sbStore, year } : { store: sbStore, from: fromDate, to: toDate };
   const ready = year ? true : (!!fromDate && !!toDate);
-  const opts = { retry: 0, enabled: ready, staleTime: 5 * 60 * 1000 };
-  const capQ   = useAnalyticsQuery('sb/customer-capture', params, opts);
-  const execQ  = useAnalyticsQuery('sb/executive',        params, opts);
-  const careQ  = useAnalyticsQuery('sb/care-plan',        params, opts);
-  const salesQ = useAnalyticsQuery('sales',               params, opts);
-
-  // TEMP DIAGNOSTIC — dump the FULL per-seller objects (JSON) so every field is
-  // visible; we need to find which field holds the true sold-ticket count (2 for
-  // Joe), since care-plan `tickets` over-counts (3).
-  useEffect(() => {
-    try {
-      const findJoe = (arr, key) => (arr ?? []).find((x) => String(x?.[key] ?? '').toLowerCase().includes('joe'));
-      console.log('[TICKET DIAG] joeCapture  =', JSON.stringify(findJoe(capQ.data?.rows, 'name')));
-      console.log('[TICKET DIAG] joeCarePlan =', JSON.stringify(findJoe(careQ.data?.rows, 'name')));
-      console.log('[TICKET DIAG] joeSales    =', JSON.stringify((salesQ.data?.bySeller ?? []).find((x) => String(x.sellerName ?? x.name ?? '').toLowerCase().includes('joe'))));
-      console.log('[TICKET DIAG] execCurrent =', JSON.stringify(execQ.data?.current));
-      console.log('[TICKET DIAG] execKeys    =', execQ.data ? Object.keys(execQ.data) : null);
-    } catch { /* ignore */ }
-  }, [capQ.data, careQ.data, salesQ.data, execQ.data]);
+  const stale = 5 * 60 * 1000;
+  const dayQ   = useUpsReportQuery('today/combined', { store: storeLabel, date: fromDate }, { retry: 0, enabled: singleDay, staleTime: stale });
+  const execQ  = useAnalyticsQuery('sb/executive',        params, { retry: 0, enabled: ready, staleTime: stale });
+  const careQ  = useAnalyticsQuery('sb/care-plan',        params, { retry: 0, enabled: ready, staleTime: stale });
+  const capQ   = useAnalyticsQuery('sb/customer-capture', params, { retry: 0, enabled: ready && !singleDay, staleTime: stale });
+  const salesQ = useAnalyticsQuery('sales',               params, { retry: 0, enabled: ready && !singleDay, staleTime: stale });
 
   const rows = useMemo(() => {
+    if (singleDay) {
+      const care = new Map((careQ.data?.rows ?? []).map((c) => [normNameF(c.name), { carePlans: numF(c.carePlansSold), attach: numF(c.attachRate) }]));
+      const st = dayQ.data?.store || '';
+      return (dayQ.data?.byEmployee ?? []).map((e) => {
+        const name = `${e.first_name ?? ''} ${e.last_name ?? ''}`.trim() || e.username || '—';
+        const tickets  = numF(e.tickets);          // REGULAR — matches the board
+        const credited = numF(e.credited_tickets); // RG + PH
+        const closing  = numF(e.closing_ratio);
+        const cp = care.get(normNameF(name)) || {};
+        return {
+          name, store: st, unresolved: false,
+          ups: numF(e.ups), tickets,
+          phone: (credited != null && tickets != null) ? Math.max(0, credited - tickets) : null,
+          sales: numF(e.total_sales),
+          carePlans: cp.carePlans ?? null, attach: cp.attach ?? null,
+          closing, burning: closing == null ? null : Math.max(0, 100 - closing),
+        };
+      }).sort((a, b) => (b.sales ?? 0) - (a.sales ?? 0) || (b.ups ?? 0) - (a.ups ?? 0));
+    }
     const byName = new Map();
     const ensure = (nm) => {
       const k = normNameF(nm);
-      if (!byName.has(k)) byName.set(k, { name: nm || '—', store: '', unresolved: false, ups: null, tickets: null, sales: null, carePlans: null, attach: null });
+      if (!byName.has(k)) byName.set(k, { name: nm || '—', store: '', unresolved: false, ups: null, tickets: null, phone: null, sales: null, carePlans: null, attach: null });
       return byName.get(k);
     };
     for (const r of (capQ.data?.rows ?? [])) { const e = ensure(r.name); e.ups = numF(r.upsTaken); if (r.storeName) e.store = r.storeName; if (r.unresolved) e.unresolved = true; }
@@ -730,20 +741,22 @@ function useFloorData(store, fromDate, toDate, year) {
       const closing = (r.ups && r.ups > 0) ? ((r.tickets || 0) / r.ups) * 100 : null;
       return { ...r, closing, burning: closing == null ? null : Math.max(0, 100 - closing) };
     }).sort((a, b) => (b.sales ?? 0) - (a.sales ?? 0) || (b.ups ?? 0) - (a.ups ?? 0));
-  }, [capQ.data, careQ.data, salesQ.data]);
+  }, [singleDay, dayQ.data, capQ.data, careQ.data, salesQ.data]);
 
   const cur = execQ.data?.current || {};
   const dlt = execQ.data?.delta || {};
-  const sumSales = rows.reduce((s, r) => s + (r.sales || 0), 0);
-  const totUps   = rows.reduce((s, r) => s + (r.ups || 0), 0);
-  const tickets  = (numF(cur.totalTickets) ?? rows.reduce((s, r) => s + (r.tickets || 0), 0)) || 0;
+  const sm  = dayQ.data?.store_metrics;
+  const sumSales = singleDay ? (numF(sm?.total_sales) ?? rows.reduce((s, r) => s + (r.sales || 0), 0)) : rows.reduce((s, r) => s + (r.sales || 0), 0);
+  const totUps   = singleDay ? (numF(sm?.ups) ?? rows.reduce((s, r) => s + (r.ups || 0), 0)) : rows.reduce((s, r) => s + (r.ups || 0), 0);
+  const tickets  = singleDay ? (numF(sm?.tickets) ?? rows.reduce((s, r) => s + (r.tickets || 0), 0))
+                             : ((numF(cur.totalTickets) ?? rows.reduce((s, r) => s + (r.tickets || 0), 0)) || 0);
   const avgSale  = tickets ? sumSales / tickets : null;
   const leader   = rows[0] || null;                    // rows already sorted by sales desc
   return {
     rows, cur, dlt, sumSales, totUps, tickets, avgSale, leader,
     hasExec: !!execQ.data,
-    loading: capQ.isLoading || execQ.isLoading || careQ.isLoading || salesQ.isLoading,
-    error:   capQ.error || execQ.error || careQ.error || salesQ.error,
+    loading: singleDay ? dayQ.isLoading : (capQ.isLoading || careQ.isLoading || salesQ.isLoading || execQ.isLoading),
+    error:   singleDay ? dayQ.error : (capQ.error || execQ.error || careQ.error || salesQ.error),
   };
 }
 
@@ -824,6 +837,7 @@ function FloorConversion({ store, fromDate, toDate, year, label }) {
                       <th className="px-3 py-2.5 text-left">Employee</th>
                       <th className="px-3 py-2.5 text-right">UPS</th>
                       <th className="px-3 py-2.5 text-right">Tickets</th>
+                      <th className="px-3 py-2.5 text-right">Phone</th>
                       <th className="px-3 py-2.5 text-right">Closing</th>
                       <th className="px-3 py-2.5 text-right">Burning</th>
                       <th className="px-3 py-2.5 text-right">Care Plans</th>
@@ -840,6 +854,7 @@ function FloorConversion({ store, fromDate, toDate, year, label }) {
                         </td>
                         <td className="px-3 py-2.5 text-right tabular-nums text-muted-fg">{r.ups == null ? '—' : fmtNumber(r.ups)}</td>
                         <td className="px-3 py-2.5 text-right tabular-nums font-medium">{r.tickets == null ? '—' : fmtNumber(r.tickets)}</td>
+                        <td className="px-3 py-2.5 text-right tabular-nums text-muted-fg">{(r.phone ?? 0) > 0 ? fmtNumber(r.phone) : '—'}</td>
                         <td className={cn('px-3 py-2.5 text-right tabular-nums font-semibold',
                           r.closing == null ? 'text-muted-fg' : r.closing >= 50 ? 'text-emerald-600 dark:text-emerald-300' : 'text-rose-500 dark:text-rose-300')}>
                           {pct(r.closing)}

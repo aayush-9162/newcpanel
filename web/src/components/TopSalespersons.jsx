@@ -7,7 +7,7 @@
 // Used by both the Daily and Monthly dashboards — pass a from/to window.
 import { useMemo } from 'react';
 import { Award, ChevronRight, Users, Receipt, Target } from 'lucide-react';
-import { useAnalyticsQuery } from '@/lib/api';
+import { useAnalyticsQuery, useUpsReportQuery } from '@/lib/api';
 import { fmtCurrency, fmtNumber } from '@/lib/format';
 import { cn } from '@/lib/cn';
 
@@ -20,19 +20,55 @@ const numF = (v) => {
 const normName = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
 
 // Merged, sales-ranked per-salesperson floor rows for a store + date window.
+//
+// For a SINGLE day we use the UPS "Today's Reports" combined board
+// (/api/reports/today/combined) — it returns the canonical figures the ups-board
+// shows: `tickets` = REGULAR tickets (RG, excludes phone), `credited_tickets` =
+// RG+PH, and a ready-made `closing_ratio`. Care-plan counts are merged in from
+// sb/care-plan. For a date RANGE (month) that daily board doesn't apply, so we
+// fall back to the SB per-seller merge (whose `tickets` there is RG+PH).
 export function useTopSellers(store, fromDate, toDate) {
-  const sbStore = store === 'ARDEN' ? 'S1' : 'S2';
-  const params = { store: sbStore, from: fromDate, to: toDate };
-  const opts = { retry: 0, enabled: !!fromDate && !!toDate, staleTime: 5 * 60 * 1000 };
-  const capQ   = useAnalyticsQuery('sb/customer-capture', params, opts);
-  const careQ  = useAnalyticsQuery('sb/care-plan',        params, opts);
-  const salesQ = useAnalyticsQuery('sales',               params, opts);
+  const singleDay  = !!fromDate && fromDate === toDate;
+  const storeLabel = store === 'ARDEN' ? 'Arden' : 'Waynesville';
+  const sbStore    = store === 'ARDEN' ? 'S1' : 'S2';
+  const stale      = 5 * 60 * 1000;
+
+  // Single-day: authoritative board data.
+  const dayQ = useUpsReportQuery('today/combined', { store: storeLabel, date: fromDate },
+    { retry: 0, enabled: singleDay, staleTime: stale });
+
+  // Care-plan (both modes: gives carePlansSold per seller).
+  const sbParams = { store: sbStore, from: fromDate, to: toDate };
+  const rangeReady = !!fromDate && !!toDate;
+  const careQ  = useAnalyticsQuery('sb/care-plan',        sbParams, { retry: 0, enabled: rangeReady, staleTime: stale });
+  // Range-only feeds.
+  const capQ   = useAnalyticsQuery('sb/customer-capture', sbParams, { retry: 0, enabled: rangeReady && !singleDay, staleTime: stale });
+  const salesQ = useAnalyticsQuery('sales',               sbParams, { retry: 0, enabled: rangeReady && !singleDay, staleTime: stale });
 
   const rows = useMemo(() => {
+    if (singleDay) {
+      const careByName = new Map((careQ.data?.rows ?? []).map((c) => [normName(c.name), numF(c.carePlansSold)]));
+      return (dayQ.data?.byEmployee ?? []).map((e) => {
+        const name = `${e.first_name ?? ''} ${e.last_name ?? ''}`.trim() || e.username || '—';
+        const tickets  = numF(e.tickets);            // REGULAR tickets — matches the board
+        const credited = numF(e.credited_tickets);   // RG + PH
+        return {
+          name,
+          ups:       numF(e.ups),
+          tickets,
+          phone:     (credited != null && tickets != null) ? Math.max(0, credited - tickets) : null,
+          carePlans: careByName.get(normName(name)) ?? null,
+          sales:     numF(e.total_sales),
+          closing:   numF(e.closing_ratio),
+        };
+      }).filter((r) => r.name && r.name !== '—')
+        .sort((a, b) => (b.sales ?? 0) - (a.sales ?? 0) || (b.ups ?? 0) - (a.ups ?? 0));
+    }
+    // Date range → SB per-seller merge.
     const byName = new Map();
     const ensure = (nm) => {
       const k = normName(nm);
-      if (!byName.has(k)) byName.set(k, { name: nm || '—', ups: null, tickets: null, sales: null, carePlans: null });
+      if (!byName.has(k)) byName.set(k, { name: nm || '—', ups: null, tickets: null, phone: null, sales: null, carePlans: null });
       return byName.get(k);
     };
     for (const r of (capQ.data?.rows ?? []))       { const e = ensure(r.name); e.ups = numF(r.upsTaken); }
@@ -42,12 +78,12 @@ export function useTopSellers(store, fromDate, toDate) {
       .map((r) => ({ ...r, closing: (r.ups && r.ups > 0) ? ((r.tickets || 0) / r.ups) * 100 : null }))
       .filter((r) => r.name && r.name !== '—')
       .sort((a, b) => (b.sales ?? 0) - (a.sales ?? 0) || (b.ups ?? 0) - (a.ups ?? 0));
-  }, [capQ.data, careQ.data, salesQ.data]);
+  }, [singleDay, dayQ.data, capQ.data, careQ.data, salesQ.data]);
 
   return {
     rows,
-    loading: capQ.isLoading || careQ.isLoading || salesQ.isLoading,
-    error:   capQ.error || careQ.error || salesQ.error,
+    loading: singleDay ? dayQ.isLoading : (capQ.isLoading || careQ.isLoading || salesQ.isLoading),
+    error:   singleDay ? dayQ.error     : (capQ.error || careQ.error || salesQ.error),
   };
 }
 
@@ -88,6 +124,7 @@ export function TopSalespersons({ store, fromDate, toDate, title, hint, storeLab
       { key: 'name',    label: 'Salesperson', render: (r) => <span className="font-semibold">{r.name}</span> },
       { key: 'ups',     label: 'UPS', align: 'right', render: (r) => r.ups == null ? '—' : fmtNumber(r.ups) },
       { key: 'tickets', label: 'Tickets', align: 'right', render: (r) => r.tickets == null ? '—' : fmtNumber(r.tickets) },
+      { key: 'phone',   label: 'Phone', align: 'right', render: (r) => (Number(r.phone) || 0) > 0 ? fmtNumber(r.phone) : '—' },
       { key: 'closing', label: 'Closing', align: 'right', render: (r) => r.closing == null ? '—' : <span className={cn('font-semibold', closingTone(r.closing))}>{r.closing.toFixed(0)}%</span> },
       { key: 'carePlans', label: 'Care Plans', align: 'right', render: (r) => r.carePlans == null ? '—' : fmtNumber(r.carePlans) },
       { key: 'sales',   label: 'Written Sales', align: 'right', render: (r) => <span className="font-semibold">{fmtCurrency(r.sales || 0)}</span> },

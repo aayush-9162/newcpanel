@@ -186,6 +186,35 @@ app.get('/api/analytics/*', async (req, res) => {
   }
 });
 
+// ─── UPS "Today's Reports" proxy (/api/reports/*) ────────────────────────────
+// The floor daily-summary board (regular vs credited tickets, canonical closing
+// ratio) lives under /api/reports on the same UPS backend — a DIFFERENT prefix
+// from /api/admin/analytics. Same identity model, so proxy it the same way.
+// e.g. GET /api/ups-report/today/combined?store=Arden&date=2026-08-21
+app.get('/api/ups-report/*', async (req, res) => {
+  const sub = req.params[0] || '';
+  const qi  = req.originalUrl.indexOf('?');
+  const qs  = qi >= 0 ? req.originalUrl.slice(qi) : '';
+  const url = `${ANALYTICS_URL}/api/reports/${sub}${qs}`;
+
+  const headers = { 'X-CFC-Env': 'LIVE', Accept: 'application/json' };
+  if (ANALYTICS_USER_ID) headers['x-user-id']    = ANALYTICS_USER_ID;
+  if (ANALYTICS_TOKEN)   headers['x-admin-token'] = ANALYTICS_TOKEN;
+
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), 20_000);
+  try {
+    const r = await fetch(url, { headers, signal: ac.signal });
+    const text = await r.text();
+    res.status(r.status).type('application/json').send(text);
+  } catch (err) {
+    const msg = err.name === 'AbortError' ? `ups-report timeout (${ANALYTICS_URL})` : err.message;
+    res.status(502).json({ ok: false, error: 'ups-report unreachable', message: msg });
+  } finally {
+    clearTimeout(timer);
+  }
+});
+
 const cache = new Map();
 const TTL_MS = 5_000;
 

@@ -118,6 +118,26 @@ export function useAnalyticsQuery(path, params = {}, options = {}) {
   });
 }
 
+// UPS "Today's Reports" board (/api/reports/*) — the daily floor summary with
+// regular vs credited tickets and the canonical closing ratio. Proxied server-
+// side under /api/ups-report/*. e.g. path 'today/combined', { store:'Arden', date:'2026-08-21' }.
+export async function upsReportGet(path, params = {}) {
+  const clean = Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''));
+  const qs = new URLSearchParams(clean).toString();
+  const res = await authFetch(`/api/ups-report/${path}${qs ? `?${qs}` : ''}`);
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok || json.ok === false) throw new Error(json.message || json.error || `UPS report failed (${res.status})`);
+  return json;
+}
+
+export function useUpsReportQuery(path, params = {}, options = {}) {
+  return useQuery({
+    queryKey: ['ups-report', path, params],
+    queryFn: () => upsReportGet(path, params),
+    ...options,
+  });
+}
+
 // ─── Admin: manage the email → role access list (admin only) ────────────────
 export async function adminListUsers() {
   const res = await authFetch('/api/admin/users');
