@@ -702,21 +702,19 @@ function useFloorData(store, fromDate, toDate, year) {
   const careQ  = useAnalyticsQuery('sb/care-plan',        params, opts);
   const salesQ = useAnalyticsQuery('sales',               params, opts);
 
-  // TEMP DIAGNOSTIC — dump the raw per-seller shapes so we can see which field
-  // holds the true sold-ticket count (care-plan `tickets` over-counts for some).
+  // TEMP DIAGNOSTIC — dump the FULL per-seller objects (JSON) so every field is
+  // visible; we need to find which field holds the true sold-ticket count (2 for
+  // Joe), since care-plan `tickets` over-counts (3).
   useEffect(() => {
     try {
-      const joe = (arr, key) => (arr ?? []).find((x) => String(x?.[key] ?? x?.name ?? '').toLowerCase().includes('joe'));
-      console.log('%c[TICKET DIAG]', 'color:#e11d48;font-weight:bold', {
-        carePlanRows:  careQ.data?.rows,
-        salesBySeller: salesQ.data?.bySeller,
-        captureRows:   capQ.data?.rows,
-        joeCarePlan:   joe(careQ.data?.rows, 'name'),
-        joeSales:      (salesQ.data?.bySeller ?? []).find((x) => String(x.sellerName ?? x.name ?? '').toLowerCase().includes('joe')),
-        joeCapture:    joe(capQ.data?.rows, 'name'),
-      });
+      const findJoe = (arr, key) => (arr ?? []).find((x) => String(x?.[key] ?? '').toLowerCase().includes('joe'));
+      console.log('[TICKET DIAG] joeCapture  =', JSON.stringify(findJoe(capQ.data?.rows, 'name')));
+      console.log('[TICKET DIAG] joeCarePlan =', JSON.stringify(findJoe(careQ.data?.rows, 'name')));
+      console.log('[TICKET DIAG] joeSales    =', JSON.stringify((salesQ.data?.bySeller ?? []).find((x) => String(x.sellerName ?? x.name ?? '').toLowerCase().includes('joe'))));
+      console.log('[TICKET DIAG] execCurrent =', JSON.stringify(execQ.data?.current));
+      console.log('[TICKET DIAG] execKeys    =', execQ.data ? Object.keys(execQ.data) : null);
     } catch { /* ignore */ }
-  }, [capQ.data, careQ.data, salesQ.data]);
+  }, [capQ.data, careQ.data, salesQ.data, execQ.data]);
 
   const rows = useMemo(() => {
     const byName = new Map();
