@@ -14,7 +14,8 @@ import { useNavigate } from 'react-router-dom';
 import { Topbar } from '@/components/Topbar';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/Card';
 import { HeroStat, HeroBanner } from '@/components/HeroStat';
-import { useSqlQuery, useMysqlQuery, useAnalyticsQuery } from '@/lib/api';
+import { useSqlQuery, useMysqlQuery } from '@/lib/api';
+import { TopSalespersons } from '@/components/TopSalespersons';
 import { fmtCurrency, fmtNumber, fmtPercent, fmtCompact, fmtCompactCurrency, trimStr } from '@/lib/format';
 import {
   ResponsiveContainer, LineChart, Line, BarChart, Bar, XAxis, YAxis,
@@ -559,10 +560,8 @@ export default function Dashboard() {
   const topItemsRevQ = useSqlQuery(topItemsRevSql, [], monthlyOn);
   const topItemsRev = topItemsRevQ.data?.rows ?? [];
 
-  // ── Top salespeople this month — from the live UPS-system analytics API
-  //    (/sales → bySeller), the SAME source the Salesperson Report BETA uses, so
-  //    the figures match that report. Names come back resolved from the API.
-  const sbStore = store === 'ARDEN' ? 'S1' : 'S2';
+  // ── Top salespeople this month — the <TopSalespersons> board fetches the live
+  //    UPS-system floor data itself; here we only compute the month's date window.
   const spMM     = String(month).padStart(2, '0');
   const spYear   = today.getFullYear();
   const spFrom   = `${spYear}-${spMM}-01`;
@@ -570,17 +569,6 @@ export default function Dashboard() {
   const spTo = isCurMonth
     ? `${spYear}-${spMM}-${String(today.getDate()).padStart(2, '0')}`
     : `${spYear}-${spMM}-${String(new Date(spYear, month, 0).getDate()).padStart(2, '0')}`;
-  const apiSalesQ = useAnalyticsQuery('sales', { store: sbStore, from: spFrom, to: spTo }, {
-    retry: 0, enabled: monthlyOn.enabled, staleTime: 5 * 60 * 1000,
-  });
-  const apiSellers = useMemo(() => {
-    const rows = (apiSalesQ.data?.bySeller ?? []).map((s) => ({
-      name:    s.sellerName ?? s.name ?? '—',
-      sales:   Number(s.revenue ?? s.sales ?? s.totalRevenue ?? 0) || 0,
-      tickets: Number(s.tickets ?? s.saleCount ?? s.orders ?? s.count ?? 0) || 0,
-    }));
-    return rows.filter((r) => r.name && r.name !== '—').sort((a, b) => b.sales - a.sales);
-  }, [apiSalesQ.data]);
 
   // ── Vendor Wise Analysis — top 5 vendors by units sold this month (selected
   //    store). Clicking a vendor drills into their item-type breakdown.
@@ -1090,70 +1078,16 @@ export default function Dashboard() {
           })}
         </div>
         {/* ─── Top Salespersons (this month) — live UPS-system API, same as Salesperson Report BETA ─── */}
-        <SectionHeading
-          icon={Award}
+        <TopSalespersons
+          store={store}
+          fromDate={spFrom}
+          toDate={spTo}
           title={`Top Salespersons · ${store === 'ARDEN' ? 'Arden (S1)' : 'Waynesville (S2)'}`}
-          hint={`${monthName} · by written sales`}
-          action={apiSellers.length > 0 ? (
-            <button
-              type="button"
-              onClick={openDetail({
-                title: `All Salespersons · ${monthName} · ${store === 'ARDEN' ? 'Arden (S1)' : 'Waynesville (S2)'}`,
-                icon: Award,
-                accent: 'amber',
-                subtitle: 'Everyone with written sales this month, ranked by written sales',
-                loadRows: async () => apiSellers.map((r, i) => ({ rank: i + 1, ...r })),
-                detailsColumns: [
-                  { key: 'rank',    label: '#', render: (r) => <span className="tabular-nums text-muted-fg">{r.rank}</span> },
-                  { key: 'name',    label: 'Salesperson', render: (r) => <span className="font-semibold">{r.name}</span> },
-                  { key: 'tickets', label: 'Tickets', align: 'right', render: (r) => (Number(r.tickets) || 0) > 0 ? fmtNumber(Number(r.tickets)) : '—' },
-                  { key: 'sales',   label: 'Written Sales', align: 'right', render: (r) => <span className="font-semibold">{fmtCurrency(Number(r.sales) || 0)}</span> },
-                ],
-                detailsEmpty: 'No salesperson sales this month',
-              })}
-              className="inline-flex items-center gap-1 rounded-lg border border-border px-2.5 py-1 text-xs font-semibold text-primary transition hover:bg-muted"
-            >
-              See all salespersons <ChevronRight size={13} />
-            </button>
-          ) : null}
+          hint={`${monthName} · UPS · Tickets · Closing · written sales`}
+          storeLabel={store === 'ARDEN' ? 'Arden (S1)' : 'Waynesville (S2)'}
+          label={monthName}
+          openDetail={openDetail}
         />
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-          {apiSalesQ.isLoading ? (
-            <div className="col-span-1 py-6 text-center text-xs text-muted-fg sm:col-span-3">Loading floor data…</div>
-          ) : apiSalesQ.error ? (
-            <div className="col-span-1 rounded-lg border border-amber-500/30 bg-amber-500/5 py-6 text-center text-xs text-amber-700 dark:text-amber-300 sm:col-span-3">
-              Couldn't reach the UPS system{apiSalesQ.error.message ? `: ${apiSalesQ.error.message}` : ''}.
-            </div>
-          ) : apiSellers.length === 0 ? (
-            <div className="col-span-1 py-6 text-center text-xs text-muted-fg sm:col-span-3">No salesperson sales this month.</div>
-          ) : apiSellers.slice(0, 3).map((s, i) => {
-            const medal = [
-              { grad: 'from-amber-400 to-yellow-500', ring: 'ring-amber-500/30' },
-              { grad: 'from-slate-300 to-slate-400',  ring: 'ring-slate-400/30' },
-              { grad: 'from-orange-400 to-amber-600', ring: 'ring-orange-500/30' },
-            ][i] || { grad: 'from-slate-300 to-slate-400', ring: 'ring-slate-400/30' };
-            return (
-              <div
-                key={s.name + i}
-                className="group relative flex items-center gap-3 overflow-hidden rounded-xl border border-border bg-card p-4 text-left"
-              >
-                <span className={cn('grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-gradient-to-br text-base font-extrabold text-white shadow ring-2', medal.grad, medal.ring)}>
-                  {i + 1}
-                </span>
-                <div className="min-w-0 flex-1">
-                  <div className="truncate text-sm font-bold text-fg" title={s.name}>{s.name}</div>
-                  <div className="truncate text-xs text-muted-fg">
-                    {s.tickets > 0 ? `${fmtNumber(s.tickets)} ticket${s.tickets === 1 ? '' : 's'}` : 'written sales'}
-                  </div>
-                </div>
-                <div className="text-right">
-                  <div className="text-lg font-extrabold tabular-nums text-fg">{fmtCurrency(s.sales)}</div>
-                  <div className="text-[10px] uppercase tracking-wider text-muted-fg">written sales</div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
 
         {/* ─── Company Snapshot ─── */}
         <SectionHeading icon={Sparkles} title="Company Snapshot" hint="Click any tile to see the details" />
