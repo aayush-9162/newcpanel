@@ -18,6 +18,7 @@ import {
   UserCog,
   ShieldAlert,
   Trophy,
+  FileSpreadsheet,
 } from 'lucide-react';
 
 // `home: true` → shown on the cpanel home left panel.
@@ -59,6 +60,7 @@ export const routes = [
   { path: '/leads',              label: 'Prospective Buyer',       icon: Users,         group: 'Reports', built: true, roles: MGR },
   { path: '/pickup/new',         label: 'Delivery & Pickup',       icon: Truck,         group: 'Reports', built: true, roles: MGR },
   { path: '/dispatchtrack',      label: 'DispatchTrack Report BETA', icon: Truck,       group: 'Reports', built: true, home: true, roles: MGR },
+  { path: '/po-scrub',           label: 'PO SCRUB REPORT',         icon: FileSpreadsheet, group: 'Reports', built: true, home: true, roles: MGR },
   { path: '/hot-button-issues',  label: 'Hot Button Issues',       icon: AlertTriangle, group: 'Reports', built: true, roles: MGR },
 
   // Owner-only reports — admin sees them, manager / viewer / salesperson do not

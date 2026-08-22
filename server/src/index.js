@@ -3,7 +3,7 @@ import express from 'express';
 import cors from 'cors';
 import morgan from 'morgan';
 import path from 'node:path';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { queries } from './queries/index.js';
 import { runSql, runMysql, clearSqlCache } from './upstream.js';
@@ -212,6 +212,84 @@ app.get('/api/ups-report/*', async (req, res) => {
     res.status(502).json({ ok: false, error: 'ups-report unreachable', message: msg });
   } finally {
     clearTimeout(timer);
+  }
+});
+
+// ─── PO Scrub Report (Google Sheets API as the sheet owner via OAuth) ────────
+// The Workspace blocks service accounts and public sharing, so the server reads
+// the sheet AS a 123cfc.com owner: a one-time consent (scripts/po-scrub-auth.mjs)
+// stores a refresh token, which the server exchanges for read-only access tokens.
+// Reuses the existing GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET. Configure:
+//   PO_SCRUB_SHEET_ID   = the /d/<ID>/ part of the sheet URL
+//   PO_SCRUB_OAUTH_FILE = path to the JSON holding { refresh_token }
+const PO_SCRUB_SHEET_ID   = process.env.PO_SCRUB_SHEET_ID   || '';
+const PO_SCRUB_OAUTH_FILE = process.env.PO_SCRUB_OAUTH_FILE || './po-scrub-oauth.json';
+const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || '';
+const GOOGLE_CLIENT_ID_ENV = process.env.GOOGLE_CLIENT_ID || '';
+
+function loadPoScrubRefreshToken() {
+  try {
+    const file = path.isAbsolute(PO_SCRUB_OAUTH_FILE) ? PO_SCRUB_OAUTH_FILE : path.join(__dirname, '..', PO_SCRUB_OAUTH_FILE);
+    const raw = JSON.parse(readFileSync(file, 'utf8'));
+    return raw.refresh_token || null;
+  } catch { return null; }
+}
+
+let _saToken = { value: null, exp: 0 };
+async function getSheetsToken() {
+  if (_saToken.value && Date.now() < _saToken.exp - 60_000) return _saToken.value;
+  const refresh = loadPoScrubRefreshToken();
+  if (!refresh || !GOOGLE_CLIENT_ID_ENV || !GOOGLE_CLIENT_SECRET) throw new Error('PO scrub OAuth not configured (run scripts/po-scrub-auth.mjs)');
+  const r = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      client_id: GOOGLE_CLIENT_ID_ENV,
+      client_secret: GOOGLE_CLIENT_SECRET,
+      refresh_token: refresh,
+      grant_type: 'refresh_token',
+    }),
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok || !j.access_token) throw new Error(j.error_description || j.error || 'token refresh failed');
+  _saToken = { value: j.access_token, exp: Date.now() + (j.expires_in || 3600) * 1000 };
+  return _saToken.value;
+}
+
+let poScrubCache = { at: 0, payload: null };
+app.get('/api/po-scrub', async (req, res) => {
+  if (!PO_SCRUB_SHEET_ID) {
+    return res.status(503).json({ ok: false, error: 'PO scrub not configured (PO_SCRUB_SHEET_ID)' });
+  }
+  const force = req.query.refresh === '1';
+  // Shared cache refreshed every 5 hours; the Refresh button (refresh=1) bypasses
+  // it to pull the sheet live on demand.
+  if (!force && poScrubCache.payload && Date.now() - poScrubCache.at < 5 * 60 * 60 * 1000) {
+    return res.json(poScrubCache.payload);
+  }
+  try {
+    const token = await getSheetsToken();
+    const headers = { Authorization: `Bearer ${token}`, Accept: 'application/json' };
+    // 1) Sheet metadata → visible tab titles, in order.
+    const metaR = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${PO_SCRUB_SHEET_ID}?fields=properties.title,sheets.properties(title,hidden,index)`, { headers });
+    const meta = await metaR.json().catch(() => ({}));
+    if (!metaR.ok) throw new Error(meta.error?.message || `metadata ${metaR.status}`);
+    const tabs = (meta.sheets || []).map((s) => s.properties).filter((p) => p && !p.hidden).sort((a, b) => a.index - b.index);
+    // 2) One batchGet for every tab's used range (FORMATTED = as displayed).
+    const qs = tabs.map((t) => `ranges=${encodeURIComponent(`'${String(t.title).replace(/'/g, "''")}'`)}`).join('&');
+    const valsR = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${PO_SCRUB_SHEET_ID}/values:batchGet?${qs}&valueRenderOption=FORMATTED_VALUE&majorDimension=ROWS`, { headers });
+    const vals = await valsR.json().catch(() => ({}));
+    if (!valsR.ok) throw new Error(vals.error?.message || `values ${valsR.status}`);
+    const ranges = vals.valueRanges || [];
+    const sheets = tabs.map((t, i) => {
+      const values = ranges[i]?.values || [];
+      return { name: t.title, rows: values.length, cols: values.reduce((m, r) => Math.max(m, r.length), 0), values };
+    });
+    const payload = { ok: true, title: meta.properties?.title || 'PO Scrub Report', fetchedAt: new Date().toISOString(), sheets };
+    poScrubCache = { at: Date.now(), payload };
+    res.json(payload);
+  } catch (err) {
+    res.status(502).json({ ok: false, error: 'sheet read failed', message: err.message });
   }
 });
 

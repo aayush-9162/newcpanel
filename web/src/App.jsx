@@ -15,6 +15,7 @@ import ManagerPerformance from '@/pages/ManagerPerformance.jsx';
 import SalesPerformance from '@/pages/SalesPerformance.jsx';
 import SalespersonReportBeta from '@/pages/SalespersonReportBeta.jsx';
 import DispatchTrackReport from '@/pages/DispatchTrackReport.jsx';
+import POScrubReport from '@/pages/POScrubReport.jsx';
 import GrossMargin from '@/pages/GrossMargin.jsx';
 import FloorSales from '@/pages/FloorSales.jsx';
 import DmgSummary from '@/pages/DmgSummary.jsx';
@@ -47,6 +48,7 @@ const built = {
   '/sales/performance': <SalesPerformance />,
   '/sales/report-beta': <SalespersonReportBeta />,
   '/dispatchtrack': <DispatchTrackReport />,
+  '/po-scrub': <POScrubReport />,
   '/gmr': <GrossMargin />,
   '/fms': <FloorSales />,
   '/dmgsummary': <DmgSummary />,

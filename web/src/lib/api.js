@@ -138,6 +138,18 @@ export function useUpsReportQuery(path, params = {}, options = {}) {
   });
 }
 
+// PO Scrub Report — every tab of the Google sheet, via the Apps Script proxy.
+export async function poScrubGet(refresh = false) {
+  const res = await authFetch(`/api/po-scrub${refresh ? '?refresh=1' : ''}`);
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok || json.ok === false) throw new Error(json.message || json.error || `PO scrub failed (${res.status})`);
+  return json;
+}
+
+export function usePoScrubQuery(options = {}) {
+  return useQuery({ queryKey: ['po-scrub'], queryFn: () => poScrubGet(false), ...options });
+}
+
 // ─── Admin: manage the email → role access list (admin only) ────────────────
 export async function adminListUsers() {
   const res = await authFetch('/api/admin/users');
