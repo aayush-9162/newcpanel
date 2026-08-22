@@ -1,12 +1,12 @@
 // PO Scrub Report — mirrors the "PO SCRUB REPORT" Google spreadsheet inside CFC
 // Hub. Every tab is fetched (as display values) from the sheet via the server
 // proxy, and rendered here as a searchable, sortable table with a tab bar.
-import { useMemo, useState, useEffect } from 'react';
+import { useMemo, useState, useEffect, useRef } from 'react';
 import { Topbar } from '@/components/Topbar';
 import { Card, CardContent } from '@/components/ui/Card';
 import { usePoScrubQuery, poScrubGet } from '@/lib/api';
 import { cn } from '@/lib/cn';
-import { FileSpreadsheet, Search, RefreshCw, AlertTriangle, ArrowUp, ArrowDown, ArrowUpDown } from 'lucide-react';
+import { FileSpreadsheet, Search, RefreshCw, AlertTriangle, ArrowUp, ArrowDown, ArrowUpDown, Maximize2, Minimize2 } from 'lucide-react';
 
 const cell = (c) => String(c ?? '').trim();
 const nonEmpty = (row) => row.filter((c) => cell(c) !== '').length;
@@ -50,6 +50,20 @@ export default function POScrubReport() {
   const [q, setQ] = useState('');
   const [sort, setSort] = useState({ col: null, dir: 'asc' }); // click a header to sort
   const [refreshing, setRefreshing] = useState(false);
+  const [isFull, setIsFull] = useState(false);
+  const rootRef = useRef(null);
+
+  // Native fullscreen on the report container.
+  const toggleFull = () => {
+    const el = rootRef.current;
+    if (!document.fullscreenElement) el?.requestFullscreen?.();
+    else document.exitFullscreen?.();
+  };
+  useEffect(() => {
+    const onFs = () => setIsFull(document.fullscreenElement === rootRef.current);
+    document.addEventListener('fullscreenchange', onFs);
+    return () => document.removeEventListener('fullscreenchange', onFs);
+  }, []);
 
   const sheets = data?.sheets ?? [];
   // Keep the active tab valid if the sheet list changes.
@@ -124,7 +138,7 @@ export default function POScrubReport() {
     <>
       <Topbar title="PO Scrub Report" subtitle={data?.title || 'Purchase-order scrub tracker'} />
 
-      <div className="flex min-h-0 flex-1 flex-col gap-4 p-4">
+      <div ref={rootRef} className={cn('flex min-h-0 flex-1 flex-col gap-4 bg-bg p-4', isFull && 'overflow-hidden')}>
         {/* Toolbar: tab bar + search + refresh */}
         <Card className="shrink-0">
           <CardContent className="p-0">
@@ -145,6 +159,15 @@ export default function POScrubReport() {
                   className="inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1 text-xs font-semibold text-primary transition hover:bg-muted disabled:opacity-50"
                 >
                   <RefreshCw size={13} className={cn((refreshing || isFetching) && 'animate-spin')} /> Refresh
+                </button>
+                <button
+                  type="button"
+                  onClick={toggleFull}
+                  title={isFull ? 'Exit full screen' : 'View full screen'}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-border px-2 py-1 text-xs font-semibold text-primary transition hover:bg-muted"
+                >
+                  {isFull ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+                  <span className="hidden sm:inline">{isFull ? 'Exit' : 'Full screen'}</span>
                 </button>
               </div>
             </div>
