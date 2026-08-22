@@ -138,7 +138,7 @@ export default function POScrubReport() {
                   <div className="font-semibold">Couldn't load the PO Scrub sheet.</div>
                   <div className="mt-0.5 text-xs">{error.message}</div>
                   <div className="mt-1.5 text-xs text-muted-fg">
-                    Check that the Apps Script Web App is deployed and <code>PO_SCRUB_URL</code> / <code>PO_SCRUB_TOKEN</code> are set on the server.
+                    Check that <code>PO_SCRUB_SHEET_ID</code> and <code>po-scrub-oauth.json</code> are present on the server (run the one-time consent script if needed).
                   </div>
                 </div>
               </div>
