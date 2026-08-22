@@ -175,19 +175,29 @@ export default function POScrubReport() {
           <Card>
             <CardContent className="p-0">
               {shaped.titles.length > 0 && (
-                <div className="flex flex-wrap gap-2 border-b border-border bg-emerald-500/10 px-4 py-2.5">
+                <div className="flex flex-wrap items-center gap-2 border-b border-border bg-gradient-to-r from-emerald-500/20 via-emerald-500/5 to-transparent px-4 py-2.5">
+                  <span className="h-2 w-2 shrink-0 rounded-full bg-emerald-500 shadow-[0_0_8px] shadow-emerald-500/50" />
                   {shaped.titles.map((t, i) => (
-                    <span key={i} className="text-sm font-bold text-emerald-800 dark:text-emerald-200">{t}</span>
+                    <span key={i} className="text-sm font-extrabold tracking-tight text-emerald-800 dark:text-emerald-200">{t}</span>
                   ))}
                 </div>
               )}
-              <div className="overflow-x-auto">
-                <table className="w-full border-collapse text-sm">
-                  <thead className="sticky top-0 z-10 bg-muted/60 backdrop-blur">
-                    <tr className="border-b border-border">
-                      <th className="px-2 py-2 text-right text-[10px] font-semibold text-muted-fg">#</th>
+              {/* Fixed-height scroll box → the horizontal scrollbar stays visible
+                  even at the top; header + first two columns (#, PO) freeze. */}
+              <div className="po-scroll max-h-[68vh] overflow-auto rounded-b-xl">
+                <table className="min-w-full border-separate border-spacing-0 text-sm">
+                  <thead>
+                    <tr>
+                      <th className="sticky left-0 top-0 z-30 w-11 min-w-[2.75rem] border-b border-r border-border bg-muted px-2 py-2.5 text-right text-[10px] font-bold text-muted-fg">#</th>
                       {Array.from({ length: shaped.cols }).map((_, c) => (
-                        <th key={c} className={cn('whitespace-nowrap px-3 py-2 text-[11px] font-bold uppercase tracking-wider text-muted-fg', colNumeric[c] ? 'text-right' : 'text-left')}>
+                        <th
+                          key={c}
+                          className={cn(
+                            'sticky top-0 z-20 whitespace-nowrap border-b border-border bg-muted px-3 py-2.5 text-[11px] font-bold uppercase tracking-wider text-muted-fg',
+                            colNumeric[c] ? 'text-right' : 'text-left',
+                            c === 0 && 'left-[2.75rem] z-30 border-r',
+                          )}
+                        >
                           {String(shaped.header[c] ?? '').trim()}
                         </th>
                       ))}
@@ -197,8 +207,8 @@ export default function POScrubReport() {
                     {bodyRows.length === 0 ? (
                       <tr><td colSpan={shaped.cols + 1} className="px-4 py-10 text-center text-sm text-muted-fg">No matching rows.</td></tr>
                     ) : bodyRows.map((row, ri) => (
-                      <tr key={ri} className="border-b border-border/50 last:border-0 odd:bg-muted/15 hover:bg-primary/5">
-                        <td className="px-2 py-2 text-right text-[10px] tabular-nums text-muted-fg/70">{ri + 1}</td>
+                      <tr key={ri} className={cn('hover:bg-primary/[0.06]', ri % 2 === 1 && 'bg-muted/25')}>
+                        <td className="sticky left-0 z-10 border-b border-r border-border/60 bg-card px-2 py-2 text-right text-[10px] tabular-nums text-muted-fg/70 shadow-[2px_0_4px_-2px_rgba(0,0,0,0.15)]">{ri + 1}</td>
                         {Array.from({ length: shaped.cols }).map((_, c) => {
                           const raw = cell(row[c]);
                           const isStatus = String(shaped.header[c] ?? '').toLowerCase().includes('status') && raw;
@@ -206,8 +216,9 @@ export default function POScrubReport() {
                             <td
                               key={c}
                               className={cn(
-                                'px-3 py-2 align-top text-[13px]',
-                                colNumeric[c] ? 'whitespace-nowrap text-right tabular-nums font-medium' : 'max-w-[300px] whitespace-normal break-words',
+                                'border-b border-border/40 px-3 py-2 align-top text-[13px]',
+                                colNumeric[c] ? 'whitespace-nowrap text-right tabular-nums font-medium text-fg' : 'max-w-[300px] whitespace-normal break-words',
+                                c === 0 && 'sticky left-[2.75rem] z-10 border-r border-border/60 bg-card font-bold text-primary shadow-[2px_0_4px_-2px_rgba(0,0,0,0.15)]',
                               )}
                             >
                               {isStatus ? <StatusBadge value={raw} /> : raw}
