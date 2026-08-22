@@ -53,7 +53,12 @@ export function Sidebar() {
                     >
                       <Icon size={16} className="shrink-0" />
                       <span className="truncate">{r.label}</span>
-                      {!r.built && r.path !== '/' && (
+                      {r.badge && (
+                        <span className="ml-auto shrink-0 rounded-full bg-emerald-500 px-1.5 py-px text-[9px] font-bold uppercase tracking-wide text-white shadow-sm">
+                          {r.badge}
+                        </span>
+                      )}
+                      {!r.built && r.path !== '/' && !r.badge && (
                         <span className="ml-auto rounded bg-muted px-1 py-px text-[9px] text-muted-fg group-hover:bg-card">
                           stub
                         </span>
