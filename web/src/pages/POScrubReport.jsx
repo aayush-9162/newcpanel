@@ -1,18 +1,20 @@
 // PO Scrub Report — mirrors the "PO SCRUB REPORT" Google spreadsheet inside CFC
-// Hub. Every tab is fetched (as display values) from a bound Apps Script Web App,
-// proxied by the server, and rendered here as a searchable table with a tab bar.
+// Hub. Every tab is fetched (as display values) from the sheet via the server
+// proxy, and rendered here as a searchable, sortable table with a tab bar.
 import { useMemo, useState, useEffect } from 'react';
 import { Topbar } from '@/components/Topbar';
 import { Card, CardContent } from '@/components/ui/Card';
 import { usePoScrubQuery, poScrubGet } from '@/lib/api';
 import { cn } from '@/lib/cn';
-import { FileSpreadsheet, Search, RefreshCw, AlertTriangle, X } from 'lucide-react';
+import { FileSpreadsheet, Search, RefreshCw, AlertTriangle, ArrowUp, ArrowDown, ArrowUpDown } from 'lucide-react';
 
 const cell = (c) => String(c ?? '').trim();
 const nonEmpty = (row) => row.filter((c) => cell(c) !== '').length;
 const isEmptyRow = (row) => nonEmpty(row) === 0;
-// Cells that read as a number / currency / percent → right-aligned, monospaced.
+// Cells that read as a number / currency / percent → right-aligned, numeric sort.
 const isNumeric = (s) => { const t = cell(s); return t !== '' && /^[-+]?\$?\s?[\d,]+(\.\d+)?\s?%?$/.test(t); };
+// Cells that read as a M/D/YYYY date → sorted chronologically.
+const isDate = (s) => /^\d{1,2}\/\d{1,2}\/\d{2,4}$/.test(cell(s));
 
 // Split a sheet's 2D values into: leading title rows (single-cell banners), the
 // header row (first row with ≥2 filled cells), and the body rows below it
@@ -46,7 +48,7 @@ export default function POScrubReport() {
   });
   const [active, setActive] = useState(0);
   const [q, setQ] = useState('');
-  const [colFilters, setColFilters] = useState({}); // { [colIndex]: filterText }
+  const [sort, setSort] = useState({ col: null, dir: 'asc' }); // click a header to sort
   const [refreshing, setRefreshing] = useState(false);
 
   const sheets = data?.sheets ?? [];
@@ -56,32 +58,58 @@ export default function POScrubReport() {
   const sheet = sheets[active];
   const shaped = useMemo(() => (sheet ? shapeSheet(sheet.values) : null), [sheet]);
 
-  const activeColFilters = useMemo(
-    () => Object.entries(colFilters).filter(([, v]) => String(v).trim() !== '').map(([c, v]) => [Number(c), String(v).toLowerCase()]),
-    [colFilters],
-  );
-  const bodyRows = useMemo(() => {
+  // Global search (across all cells).
+  const searchedRows = useMemo(() => {
     if (!shaped) return [];
     const needle = q.trim().toLowerCase();
-    if (!needle && activeColFilters.length === 0) return shaped.body;
-    return shaped.body.filter((r) => {
-      if (needle && !r.some((c) => String(c ?? '').toLowerCase().includes(needle))) return false;
-      for (const [c, v] of activeColFilters) {
-        if (!String(r[c] ?? '').toLowerCase().includes(v)) return false;
-      }
-      return true;
-    });
-  }, [shaped, q, activeColFilters]);
+    if (!needle) return shaped.body;
+    return shaped.body.filter((r) => r.some((c) => String(c ?? '').toLowerCase().includes(needle)));
+  }, [shaped, q]);
 
-  // A column is "numeric" (right-aligned) when most of its filled cells parse as numbers.
-  const colNumeric = useMemo(() => {
+  // Per-column type: 'num' (right-aligned + numeric sort), 'date' (chronological
+  // sort), or 'text' — inferred from the majority of a column's filled cells.
+  const colType = useMemo(() => {
     if (!shaped) return [];
     return Array.from({ length: shaped.cols }).map((_, c) => {
-      let num = 0, tot = 0;
-      for (const r of shaped.body) { const v = cell(r[c]); if (v) { tot++; if (isNumeric(v)) num++; } }
-      return tot > 0 && num / tot >= 0.6;
+      let num = 0, date = 0, tot = 0;
+      for (const r of shaped.body) {
+        const v = cell(r[c]);
+        if (!v) continue;
+        tot++;
+        if (isNumeric(v)) num++; else if (isDate(v)) date++;
+      }
+      if (tot === 0) return 'text';
+      if (num / tot >= 0.6) return 'num';
+      if (date / tot >= 0.6) return 'date';
+      return 'text';
     });
   }, [shaped]);
+
+  // Sort the searched rows by the chosen column (empties always sink to the bottom).
+  const bodyRows = useMemo(() => {
+    if (sort.col == null || sort.col >= (colType.length || 0)) return searchedRows;
+    const c = sort.col, type = colType[c];
+    const keyOf = (row) => {
+      const t = cell(row[c]);
+      if (t === '') return null;
+      if (type === 'num')  { const n = parseFloat(t.replace(/[^0-9.\-]/g, '')); return Number.isFinite(n) ? n : null; }
+      if (type === 'date') { const d = new Date(t).getTime(); return Number.isFinite(d) ? d : null; }
+      return t.toLowerCase();
+    };
+    const out = [...searchedRows];
+    out.sort((ra, rb) => {
+      const a = keyOf(ra), b = keyOf(rb);
+      if (a === null && b === null) return 0;
+      if (a === null) return 1;
+      if (b === null) return -1;
+      const cmp = a < b ? -1 : a > b ? 1 : 0;
+      return sort.dir === 'asc' ? cmp : -cmp;
+    });
+    return out;
+  }, [searchedRows, sort, colType]);
+
+  // Click a header to cycle: asc → desc → off.
+  const toggleSort = (c) => setSort((s) => s.col !== c ? { col: c, dir: 'asc' } : s.dir === 'asc' ? { col: c, dir: 'desc' } : { col: null, dir: 'asc' });
 
   // Hard refresh — bypass the server cache, then refetch the query.
   const hardRefresh = async () => {
@@ -96,7 +124,7 @@ export default function POScrubReport() {
     <>
       <Topbar title="PO Scrub Report" subtitle={data?.title || 'Purchase-order scrub tracker'} />
 
-      <div className="flex flex-1 flex-col gap-4 p-4 min-h-0">
+      <div className="flex min-h-0 flex-1 flex-col gap-4 p-4">
         {/* Toolbar: tab bar + search + refresh */}
         <Card className="shrink-0">
           <CardContent className="p-0">
@@ -128,7 +156,7 @@ export default function POScrubReport() {
                   <button
                     key={s.name + i}
                     type="button"
-                    onClick={() => { setActive(i); setQ(''); setColFilters({}); }}
+                    onClick={() => { setActive(i); setQ(''); setSort({ col: null, dir: 'asc' }); }}
                     className={cn(
                       'shrink-0 whitespace-nowrap rounded-lg px-3 py-1.5 text-xs font-semibold transition',
                       i === active ? 'bg-primary text-primary-fg shadow-sm' : 'text-muted-fg hover:bg-muted',
@@ -143,7 +171,7 @@ export default function POScrubReport() {
             {/* Search */}
             {sheet && (
               <div className="flex items-center gap-2 px-4 py-2.5">
-                <div className="relative flex-1 max-w-sm">
+                <div className="relative max-w-sm flex-1">
                   <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-fg" />
                   <input
                     value={q}
@@ -152,18 +180,10 @@ export default function POScrubReport() {
                     className="w-full rounded-lg border border-border bg-card py-1.5 pl-8 pr-3 text-sm outline-none focus:border-primary/50"
                   />
                 </div>
-                {(q || activeColFilters.length > 0) && (
-                  <button
-                    type="button"
-                    onClick={() => { setQ(''); setColFilters({}); }}
-                    className="inline-flex items-center gap-1 rounded-lg border border-border px-2 py-1 text-[11px] font-semibold text-muted-fg transition hover:bg-muted"
-                  >
-                    <X size={12} /> Clear filters
-                  </button>
-                )}
                 <span className="text-[11px] text-muted-fg">
-                  {bodyRows.length} row{bodyRows.length === 1 ? '' : 's'}{(q || activeColFilters.length) && shaped ? ` of ${shaped.body.length}` : ''}
+                  {bodyRows.length} row{bodyRows.length === 1 ? '' : 's'}{q && shaped ? ` of ${shaped.body.length}` : ''}
                 </span>
+                <span className="ml-auto hidden text-[11px] italic text-muted-fg sm:inline">Click a column to sort</span>
               </div>
             )}
           </CardContent>
@@ -192,8 +212,8 @@ export default function POScrubReport() {
         ) : !sheet ? (
           <Card><CardContent className="py-16 text-center text-sm text-muted-fg">No sheets found.</CardContent></Card>
         ) : (
-          <Card className="flex flex-1 flex-col min-h-0">
-            <CardContent className="flex flex-1 flex-col min-h-0 p-0">
+          <Card className="flex min-h-0 flex-1 flex-col">
+            <CardContent className="flex min-h-0 flex-1 flex-col p-0">
               {shaped.titles.length > 0 && (
                 <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border bg-gradient-to-r from-emerald-500/20 via-emerald-500/5 to-transparent px-4 py-2.5">
                   <span className="h-2 w-2 shrink-0 rounded-full bg-emerald-500 shadow-[0_0_8px] shadow-emerald-500/50" />
@@ -202,36 +222,43 @@ export default function POScrubReport() {
                   ))}
                 </div>
               )}
-              {/* The scroll box now FILLS the card, which fills the viewport — so the
-                  page itself never scrolls and the horizontal bar is always on screen.
+              {/* The scroll box FILLS the card, which fills the viewport — so the page
+                  itself never scrolls and the horizontal bar is always on screen.
                   Header + first two columns (#, PO) freeze. */}
               <div className="po-scroll min-h-0 flex-1 overflow-auto rounded-b-xl">
                 <table className="min-w-full border-separate border-spacing-0 text-sm">
                   <thead>
                     <tr>
-                      <th className="sticky left-0 top-0 z-30 w-11 min-w-[2.75rem] border-b border-r border-border bg-muted px-2 py-2 text-right align-bottom text-[10px] font-bold text-muted-fg">#</th>
-                      {Array.from({ length: shaped.cols }).map((_, c) => (
-                        <th
-                          key={c}
-                          className={cn(
-                            'sticky top-0 z-20 border-b border-border bg-muted px-2 py-1.5 align-top',
-                            c === 0 && 'left-[2.75rem] z-30 border-r',
-                          )}
-                        >
-                          <div className={cn('whitespace-nowrap px-1 pb-1 text-[11px] font-bold uppercase tracking-wider text-muted-fg', colNumeric[c] ? 'text-right' : 'text-left')}>
-                            {String(shaped.header[c] ?? '').trim() || ' '}
-                          </div>
-                          <input
-                            value={colFilters[c] ?? ''}
-                            onChange={(e) => setColFilters((f) => ({ ...f, [c]: e.target.value }))}
-                            placeholder="filter…"
+                      <th className="sticky left-0 top-0 z-30 w-11 min-w-[2.75rem] border-b border-r border-border bg-muted px-2 py-2.5 text-right text-[10px] font-bold text-muted-fg">#</th>
+                      {Array.from({ length: shaped.cols }).map((_, c) => {
+                        const isNum = colType[c] === 'num';
+                        const sorted = sort.col === c;
+                        return (
+                          <th
+                            key={c}
                             className={cn(
-                              'w-full min-w-[80px] rounded border border-border bg-card px-1.5 py-0.5 text-[11px] font-normal normal-case tracking-normal text-fg outline-none focus:border-primary/60',
-                              colFilters[c] && 'border-primary/60 bg-primary/5',
+                              'group sticky top-0 z-20 whitespace-nowrap border-b border-border bg-muted p-0',
+                              c === 0 && 'left-[2.75rem] z-30 border-r',
                             )}
-                          />
-                        </th>
-                      ))}
+                          >
+                            <button
+                              type="button"
+                              onClick={() => toggleSort(c)}
+                              title="Sort"
+                              className={cn(
+                                'flex w-full items-center gap-1 px-3 py-2.5 text-[11px] font-bold uppercase tracking-wider transition hover:text-primary',
+                                isNum ? 'justify-end' : 'justify-start',
+                                sorted ? 'text-primary' : 'text-muted-fg',
+                              )}
+                            >
+                              <span className="truncate">{String(shaped.header[c] ?? '').trim() || ' '}</span>
+                              {sorted
+                                ? (sort.dir === 'asc' ? <ArrowUp size={12} className="shrink-0" /> : <ArrowDown size={12} className="shrink-0" />)
+                                : <ArrowUpDown size={12} className="shrink-0 opacity-0 transition group-hover:opacity-60" />}
+                            </button>
+                          </th>
+                        );
+                      })}
                     </tr>
                   </thead>
                   <tbody>
@@ -248,7 +275,7 @@ export default function POScrubReport() {
                               key={c}
                               className={cn(
                                 'border-b border-border/40 px-3 py-2 align-top text-[13px]',
-                                colNumeric[c] ? 'whitespace-nowrap text-right tabular-nums font-medium text-fg' : 'max-w-[300px] whitespace-normal break-words',
+                                colType[c] === 'num' ? 'whitespace-nowrap text-right tabular-nums font-medium text-fg' : 'max-w-[300px] whitespace-normal break-words',
                                 c === 0 && 'sticky left-[2.75rem] z-10 border-r border-border/60 bg-card font-bold text-primary shadow-[2px_0_4px_-2px_rgba(0,0,0,0.15)]',
                               )}
                             >
