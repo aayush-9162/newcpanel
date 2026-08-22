@@ -702,6 +702,22 @@ function useFloorData(store, fromDate, toDate, year) {
   const careQ  = useAnalyticsQuery('sb/care-plan',        params, opts);
   const salesQ = useAnalyticsQuery('sales',               params, opts);
 
+  // TEMP DIAGNOSTIC — dump the raw per-seller shapes so we can see which field
+  // holds the true sold-ticket count (care-plan `tickets` over-counts for some).
+  useEffect(() => {
+    try {
+      const joe = (arr, key) => (arr ?? []).find((x) => String(x?.[key] ?? x?.name ?? '').toLowerCase().includes('joe'));
+      console.log('%c[TICKET DIAG]', 'color:#e11d48;font-weight:bold', {
+        carePlanRows:  careQ.data?.rows,
+        salesBySeller: salesQ.data?.bySeller,
+        captureRows:   capQ.data?.rows,
+        joeCarePlan:   joe(careQ.data?.rows, 'name'),
+        joeSales:      (salesQ.data?.bySeller ?? []).find((x) => String(x.sellerName ?? x.name ?? '').toLowerCase().includes('joe')),
+        joeCapture:    joe(capQ.data?.rows, 'name'),
+      });
+    } catch { /* ignore */ }
+  }, [capQ.data, careQ.data, salesQ.data]);
+
   const rows = useMemo(() => {
     const byName = new Map();
     const ensure = (nm) => {
