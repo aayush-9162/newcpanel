@@ -17,7 +17,7 @@ import { fmtCurrency, fmtNumber, fmtCompactCurrency } from '@/lib/format';
 import { ROOM_RULES, roomCase, itemTypeCase } from '@/lib/salesRules';
 import { vendorDomain } from '@/data/vendorLogos';
 import {
-  Calendar, ShoppingCart, Users, Truck, Package, MapPin, Boxes, Activity, ChevronRight, Award, Percent,
+  Calendar, ShoppingCart, Users, Truck, Package, MapPin, Boxes, Activity, ChevronRight, Award, Percent, Target,
 } from 'lucide-react';
 import { cn } from '@/lib/cn';
 
@@ -306,11 +306,22 @@ export default function DashboardDaily({ store, selectedBldg, cumulative }) {
         <StatCard
           label={`Sales · ${dateShort}`}
           value={fmtNumber(orders)}
-          caption={floor.loading
+          caption={(floor.loading || floor.error)
             ? (weekdayLong || 'Latest day')
-            : floor.error
-              ? (weekdayLong || 'Latest day')
-              : `${fmtNumber(floorUps)} UPS · ${fmtNumber(floorTickets)} tkt · ${floorClosing == null ? '—' : `${floorClosing.toFixed(0)}%`} cls`}
+            : (
+              <span className="flex flex-wrap items-center gap-1.5">
+                <span className="inline-flex items-center gap-1 rounded-md bg-sky-500/10 px-1.5 py-0.5 text-[11px] font-bold tabular-nums text-sky-600 dark:text-sky-300">
+                  <Users size={11} strokeWidth={2.5} />{fmtNumber(floorUps)} UPS
+                </span>
+                <span className={cn('inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-bold tabular-nums',
+                  floorClosing == null ? 'bg-muted text-muted-fg'
+                    : floorClosing >= 50 ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-300'
+                    : floorClosing >= 30 ? 'bg-amber-500/10 text-amber-600 dark:text-amber-300'
+                    : 'bg-rose-500/10 text-rose-500 dark:text-rose-300')}>
+                  <Target size={11} strokeWidth={2.5} />{floorClosing == null ? '—' : `${floorClosing.toFixed(0)}%`} close
+                </span>
+              </span>
+            )}
           icon={ShoppingCart}
           accent="sky"
           loading={kpiQ.isLoading}
