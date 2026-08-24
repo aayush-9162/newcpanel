@@ -1804,7 +1804,7 @@ function MiniCumulative({ data, monthName, total, className }) {
         </div>
         <div className="mt-1 flex gap-2 text-[8px] font-semibold">
           <span className="flex items-center gap-1"><span className="inline-block h-1 w-2.5 rounded-full bg-emerald-600" />TY</span>
-          <span className="flex items-center gap-1 text-muted-fg"><span className="inline-block h-1 w-2.5 rounded-full bg-slate-400" />LY</span>
+          <span className="flex items-center gap-1 text-muted-fg"><span className="inline-block h-1 w-2.5 rounded-full bg-yellow-500" />LY</span>
         </div>
       </div>
       <div className="h-full flex-1">
@@ -1816,11 +1816,11 @@ function MiniCumulative({ data, monthName, total, className }) {
                 <stop offset="100%" stopColor="#10b981" stopOpacity={0} />
               </linearGradient>
               <linearGradient id="cumLy" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="#94a3b8" stopOpacity={0.18} />
-                <stop offset="100%" stopColor="#94a3b8" stopOpacity={0} />
+                <stop offset="0%" stopColor="#eab308" stopOpacity={0.18} />
+                <stop offset="100%" stopColor="#eab308" stopOpacity={0} />
               </linearGradient>
             </defs>
-            <Area type="monotone" dataKey="lyRun" name="Last Year" stroke="#94a3b8" strokeWidth={2} fill="url(#cumLy)" dot={false} isAnimationActive={false} />
+            <Area type="monotone" dataKey="lyRun" name="Last Year" stroke="#eab308" strokeWidth={2} fill="url(#cumLy)" dot={false} isAnimationActive={false} />
             <Area type="monotone" dataKey="tyRun" name="This Year" stroke="#059669" strokeWidth={2.5} fill="url(#cumTy)" dot={false} connectNulls={false} isAnimationActive={false}
               activeDot={{ r: 3.5, fill: '#059669', strokeWidth: 0 }} />
             <RTooltip contentStyle={{ background: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: 10, fontSize: 11 }}
