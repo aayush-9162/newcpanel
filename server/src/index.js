@@ -295,6 +295,44 @@ app.get('/api/po-scrub', async (req, res) => {
   }
 });
 
+// ─── Item Label / Location Lookup (ALB = Aisle·Level·Bay) ────────────────────
+// Floor Sales enriches each sold item with its current stock locations from the
+// inventory API (building 1/2 = store floor, 999 = warehouse). No auth on the
+// upstream. We batch per-item lookups server-side (CORS-free), cache briefly.
+//   POST /api/floor/labels  { itemIds: ["1181993", ...] }  → { labels: { id: {count, labels} } }
+const INVENTORY_URL = (process.env.INVENTORY_URL || 'http://192.168.0.211:3000').replace(/\/+$/, '');
+const _labelCache = new Map(); // itemId → { at, data }
+async function fetchLabels(itemId) {
+  const hit = _labelCache.get(itemId);
+  if (hit && Date.now() - hit.at < 5 * 60 * 1000) return hit.data;
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), 8_000);
+  try {
+    const r = await fetch(`${INVENTORY_URL}/api/inventory/${encodeURIComponent(itemId)}/labels`, { signal: ac.signal });
+    const j = await r.json().catch(() => ({}));
+    const data = { count: Number(j.count) || 0, labels: Array.isArray(j.labels) ? j.labels : [] };
+    _labelCache.set(itemId, { at: Date.now(), data });
+    return data;
+  } catch {
+    return { count: null, labels: [], error: true }; // null count = lookup failed
+  } finally {
+    clearTimeout(timer);
+  }
+}
+app.post('/api/floor/labels', async (req, res) => {
+  const ids = Array.isArray(req.body?.itemIds) ? req.body.itemIds.map((x) => String(x).trim()).filter(Boolean) : [];
+  if (!ids.length) return res.json({ ok: true, labels: {} });
+  const unique = [...new Set(ids)].slice(0, 800); // safety cap
+  const out = {};
+  const LIMIT = 10;
+  for (let i = 0; i < unique.length; i += LIMIT) {
+    const batch = unique.slice(i, i + LIMIT);
+    const results = await Promise.all(batch.map((id) => fetchLabels(id).then((d) => [id, d])));
+    for (const [id, d] of results) out[id] = d;
+  }
+  res.json({ ok: true, labels: out });
+});
+
 const cache = new Map();
 const TTL_MS = 5_000;
 

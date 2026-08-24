@@ -150,6 +150,29 @@ export function usePoScrubQuery(options = {}) {
   return useQuery({ queryKey: ['po-scrub'], queryFn: () => poScrubGet(false), ...options });
 }
 
+// Floor Sales — batch item label/location (ALB) lookup. Returns { [itemId]: {count, labels[]} }.
+export async function floorLabelsGet(itemIds = []) {
+  const res = await authFetch('/api/floor/labels', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ itemIds }),
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok || json.ok === false) throw new Error(json.message || json.error || `label lookup failed (${res.status})`);
+  return json.labels || {};
+}
+
+export function useFloorLabelsQuery(itemIds = [], options = {}) {
+  const key = [...new Set(itemIds.map(String))].sort();
+  return useQuery({
+    queryKey: ['floor-labels', key],
+    queryFn: () => floorLabelsGet(key),
+    enabled: key.length > 0,
+    staleTime: 5 * 60 * 1000,
+    ...options,
+  });
+}
+
 // ─── Admin: manage the email → role access list (admin only) ────────────────
 export async function adminListUsers() {
   const res = await authFetch('/api/admin/users');
