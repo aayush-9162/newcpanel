@@ -67,10 +67,15 @@ export default function DashboardDaily({ store, selectedBldg, cumulative }) {
   const custSql = `
     WITH w AS (SELECT CAST(MAX(wrt_cng_bdat) AS DATE) AS d FROM SaleWRT WHERE wrt_pft_ctr = ${selectedBldg} AND wrt_cng_bdat < CAST(GETDATE() AS DATE)),
          dayc AS (
-           SELECT DISTINCT sd.CustomerId
+           -- Only customers who actually bought that day (positive spend), so the
+           -- count aligns with the Sales tile (which counts revenue>0 orders) and
+           -- can never exceed it. Excludes $0 / return / no-sale tickets.
+           SELECT sd.CustomerId
            FROM SalespersonDaily sd CROSS JOIN w
            WHERE ${spdStore} AND sd.SaleDate >= w.d AND sd.SaleDate < DATEADD(DAY, 1, w.d)
              AND sd.CustomerId IS NOT NULL AND LTRIM(RTRIM(sd.CustomerId)) <> ''
+           GROUP BY sd.CustomerId
+           HAVING SUM(ISNULL(sd.SaleSplitAmt, 0)) > 0
          )
     SELECT
       (SELECT COUNT(*) FROM dayc) AS customers,
@@ -422,6 +427,7 @@ export default function DashboardDaily({ store, selectedBldg, cumulative }) {
               INNER JOIN fc ON fc.CustomerId = sd.CustomerId
               WHERE sd.SaleDate >= '${dayStr}' AND sd.SaleDate < DATEADD(DAY, 1, '${dayStr}') AND ${spdStore}
               GROUP BY sd.CustomerId
+              HAVING SUM(ISNULL(sd.SaleSplitAmt, 0)) > 0
               ORDER BY SUM(sd.SaleSplitAmt) DESC
             ` : undefined,
             detailsColumns: [

@@ -719,10 +719,15 @@ In order to be iterable, non-array objects must have a [Symbol.iterator]() metho
   `,u=Ce(c,[]),f=((ie=(jt=u.data)==null?void 0:jt.rows)==null?void 0:ie[0])??{},d=Number(f.orders)||0,m=Number(f.revenue)||0,p=f.day||null,h=p?Tm(p).toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric"}):"",g=p?`${Tm(p).getDate()} ${Tm(p).toLocaleDateString("en-US",{month:"short"})}`:"Latest day",b=p?Tm(p).toLocaleDateString("en-US",{weekday:"long"}):"",x=`
     WITH w AS (SELECT CAST(MAX(wrt_cng_bdat) AS DATE) AS d FROM SaleWRT WHERE wrt_pft_ctr = ${t} AND wrt_cng_bdat < CAST(GETDATE() AS DATE)),
          dayc AS (
-           SELECT DISTINCT sd.CustomerId
+           -- Only customers who actually bought that day (positive spend), so the
+           -- count aligns with the Sales tile (which counts revenue>0 orders) and
+           -- can never exceed it. Excludes $0 / return / no-sale tickets.
+           SELECT sd.CustomerId
            FROM SalespersonDaily sd CROSS JOIN w
            WHERE ${a} AND sd.SaleDate >= w.d AND sd.SaleDate < DATEADD(DAY, 1, w.d)
              AND sd.CustomerId IS NOT NULL AND LTRIM(RTRIM(sd.CustomerId)) <> ''
+           GROUP BY sd.CustomerId
+           HAVING SUM(ISNULL(sd.SaleSplitAmt, 0)) > 0
          )
     SELECT
       (SELECT COUNT(*) FROM dayc) AS customers,
@@ -832,6 +837,7 @@ In order to be iterable, non-array objects must have a [Symbol.iterator]() metho
               INNER JOIN fc ON fc.CustomerId = sd.CustomerId
               WHERE sd.SaleDate >= '${p}' AND sd.SaleDate < DATEADD(DAY, 1, '${p}') AND ${a}
               GROUP BY sd.CustomerId
+              HAVING SUM(ISNULL(sd.SaleSplitAmt, 0)) > 0
               ORDER BY SUM(sd.SaleSplitAmt) DESC
             `:void 0,detailsColumns:[{key:"custType",label:"Type",render:se=>i.jsx("span",{className:Q("inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold",se.custType==="New"?"bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-200":"bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-200"),children:se.custType})},{key:"CustomerName",label:"Customer"},{key:"firstSale",label:"First Sale",render:se=>se.firstSale?new Date(se.firstSale).toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric",timeZone:"UTC"}):"—"},{key:"orders",label:"Sales",align:"right",render:se=>I(Number(se.orders)||0)},{key:"spent",label:"Spent",align:"right",render:se=>i.jsx("span",{className:"font-semibold",children:V(Number(se.spent)||0)})}],detailsEmpty:"No customers yesterday"})}),i.jsx(Om,{label:`Gross Margin · ${O}`,value:z!=null?`${z.toFixed(1)}%`:"—",caption:z!=null?`${he(R)} profit · ${M?"on target":"below 55%"}`:"cost not posted yet",icon:Rd,accent:z==null||M?"emerald":"amber",loading:E.isLoading||u.isLoading,onClick:z!=null&&p?l({title:`Gross Margin · ${O} · ${n}`,icon:Rd,accent:M?"emerald":"amber",headline:`${z.toFixed(1)}%`,subtitle:`${V(R)} profit · ${V(k)} written sales − ${V(_)} cost · ${F}`,detailsDb:"sql",detailsSql:`
               SELECT TOP 500
