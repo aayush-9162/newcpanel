@@ -359,14 +359,10 @@ export default function DashboardDaily({ store, selectedBldg, cumulative }) {
           icon={Boxes}
           accent="primary"
           loading={unitsQ.isLoading}
-          onClick={openDetail({
-            title: `Items Sold · ${dateShort} · ${storeLabel}`,
-            icon: Boxes,
-            accent: 'primary',
-            headline: fmtNumber(units),
-            subtitle: `Every item sold on ${dayLabel || 'the latest day'}`,
-            detailsDb: 'sql',
-            detailsSql: `
+          onClick={openDetail((() => {
+            // Shared CTE: the day's item lines for the store. Level 1 groups them
+            // by type (Sofa, Loveseat…); clicking a type drills into its items.
+            const baseCTE = `
               WITH m AS (SELECT MAX(SaleDate) AS d FROM SalesItemDetail WHERE LEFT(CAST(SaleNo AS VARCHAR(20)), 1) = '${selectedBldg}' AND SaleDate < CAST(GETDATE() AS DATE)),
                    base AS (
                      SELECT CAST(SaleNo AS VARCHAR(20))                 AS SaleNo,
@@ -376,23 +372,46 @@ export default function DashboardDaily({ store, selectedBldg, cumulative }) {
                             UPPER(ISNULL(Description2, ''))             AS d2
                      FROM SalesItemDetail CROSS JOIN m
                      WHERE SaleDate = m.d AND LEFT(CAST(SaleNo AS VARCHAR(20)), 1) = '${selectedBldg}'
-                   )
-              SELECT SaleNo, ItemID, VendorID, Description,
-                     (${roomCase})     AS Room,
-                     (${itemTypeCase}) AS ItemType
-              FROM base
-              ORDER BY SaleNo, ItemID
-            `,
-            detailsColumns: [
+                   )`;
+            const itemCols = [
               { key: 'SaleNo',      label: 'Sale #' },
               { key: 'ItemID',      label: 'Item ID' },
               { key: 'VendorID',    label: 'Vendor' },
               { key: 'Description',  label: 'Description', render: (r) => r.Description || '—' },
               { key: 'Room',        label: 'Room', render: (r) => <span className="rounded-md bg-muted px-1.5 py-0.5 text-[11px] font-medium">{r.Room}</span> },
-              { key: 'ItemType',    label: 'Type', render: (r) => <span className="text-muted-fg">{r.ItemType}</span> },
-            ],
-            detailsEmpty: 'No items sold yesterday',
-          })}
+            ];
+            return {
+              title: `Items Sold · ${dateShort} · ${storeLabel}`,
+              icon: Boxes,
+              accent: 'primary',
+              headline: fmtNumber(units),
+              subtitle: 'By item type — click a type to see its items',
+              detailsDb: 'sql',
+              detailsSql: `${baseCTE}
+                SELECT (${itemTypeCase}) AS ItemType, COUNT(*) AS units
+                FROM base GROUP BY (${itemTypeCase}) ORDER BY units DESC`,
+              detailsColumns: [
+                { key: 'ItemType', label: 'Type', render: (r) => <span className="font-semibold">{r.ItemType}</span> },
+                { key: 'units',    label: 'Units', align: 'right', render: (r) => fmtNumber(Number(r.units) || 0) },
+              ],
+              onRowClick: (row) => ({
+                title: `${row.ItemType} · ${dateShort} · ${storeLabel}`,
+                icon: Boxes,
+                accent: 'primary',
+                subtitle: `${fmtNumber(Number(row.units) || 0)} ${row.ItemType} sold`,
+                detailsDb: 'sql',
+                detailsSql: `${baseCTE}, typed AS (
+                    SELECT SaleNo, ItemID, VendorID, Description, (${roomCase}) AS Room, (${itemTypeCase}) AS ItemType FROM base
+                  )
+                  SELECT SaleNo, ItemID, VendorID, Description, Room, ItemType
+                  FROM typed WHERE ItemType = '${String(row.ItemType).replace(/'/g, "''")}'
+                  ORDER BY SaleNo, ItemID`,
+                detailsColumns: itemCols,
+                detailsEmpty: `No ${row.ItemType} items`,
+              }),
+              detailsEmpty: 'No items sold yesterday',
+            };
+          })())}
         />
         <StatCard
           label={`Customers · ${dateShort}`}

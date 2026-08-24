@@ -880,37 +880,62 @@ export default function Dashboard() {
             accent="primary"
             subtitle={thisMonthOrders > 0 ? `${(monthUnits / thisMonthOrders).toFixed(1)} per sale` : 'Units sold this month'}
             loading={itemCatQ.isLoading}
-            onClick={openDetail({
-              title: `Items Sold · ${monthName} · ${store === 'ARDEN' ? 'Arden (S1)' : 'Waynesville (S2)'}`,
-              icon: Boxes,
-              accent: 'primary',
-              headline: fmtNumber(monthUnits),
-              subtitle: 'Every item line sold this month',
-              detailsDb: 'sql',
-              detailsSql: `
+            onClick={openDetail((() => {
+              const storeLabel = store === 'ARDEN' ? 'Arden (S1)' : 'Waynesville (S2)';
+              const baseCTE = `
                 WITH m AS (SELECT MAX(SaleDate) AS d FROM SalesItemDetail),
                      mb AS (SELECT DATEFROMPARTS(YEAR(d), MONTH(d), 1) AS mStart,
-                                   DATEADD(MONTH, 1, DATEFROMPARTS(YEAR(d), MONTH(d), 1)) AS mEnd FROM m)
-                SELECT TOP 1000
-                       s.SaleDate,
-                       CAST(s.SaleNo AS VARCHAR(20))            AS SaleNo,
-                       LTRIM(RTRIM(s.ItemID))                   AS ItemID,
-                       LTRIM(RTRIM(s.VendorID))                 AS VendorID,
-                       LTRIM(RTRIM(ISNULL(s.Description2, ''))) AS Description
-                FROM SalesItemDetail s CROSS JOIN mb
-                WHERE s.SaleDate >= mb.mStart AND s.SaleDate < mb.mEnd
-                  AND LEFT(CAST(s.SaleNo AS VARCHAR(20)), 1) = '${selectedBldg}'
-                ORDER BY s.SaleDate DESC, SaleNo
-              `,
-              detailsColumns: [
+                                   DATEADD(MONTH, 1, DATEFROMPARTS(YEAR(d), MONTH(d), 1)) AS mEnd FROM m),
+                     base AS (
+                       SELECT s.SaleDate,
+                              CAST(s.SaleNo AS VARCHAR(20))            AS SaleNo,
+                              LTRIM(RTRIM(s.ItemID))                   AS ItemID,
+                              LTRIM(RTRIM(s.VendorID))                 AS VendorID,
+                              LTRIM(RTRIM(ISNULL(s.Description2, ''))) AS Description,
+                              UPPER(ISNULL(s.Description2, ''))        AS d2
+                       FROM SalesItemDetail s CROSS JOIN mb
+                       WHERE s.SaleDate >= mb.mStart AND s.SaleDate < mb.mEnd
+                         AND LEFT(CAST(s.SaleNo AS VARCHAR(20)), 1) = '${selectedBldg}'
+                     )`;
+              const itemCols = [
                 { key: 'SaleDate',    label: 'Date', render: (r) => r.SaleDate ? new Date(r.SaleDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' }) : '—' },
                 { key: 'SaleNo',      label: 'Sale #' },
                 { key: 'ItemID',      label: 'Item ID' },
                 { key: 'VendorID',    label: 'Vendor' },
                 { key: 'Description', label: 'Description', render: (r) => r.Description || '—' },
-              ],
-              detailsEmpty: 'No items sold this month yet',
-            })}
+              ];
+              return {
+                title: `Items Sold · ${monthName} · ${storeLabel}`,
+                icon: Boxes,
+                accent: 'primary',
+                headline: fmtNumber(monthUnits),
+                subtitle: 'By item type — click a type to see its items',
+                detailsDb: 'sql',
+                detailsSql: `${baseCTE}
+                  SELECT (${itemTypeCase}) AS ItemType, COUNT(*) AS units
+                  FROM base GROUP BY (${itemTypeCase}) ORDER BY units DESC`,
+                detailsColumns: [
+                  { key: 'ItemType', label: 'Type', render: (r) => <span className="font-semibold">{r.ItemType}</span> },
+                  { key: 'units',    label: 'Units', align: 'right', render: (r) => fmtNumber(Number(r.units) || 0) },
+                ],
+                onRowClick: (row) => ({
+                  title: `${row.ItemType} · ${monthName} · ${storeLabel}`,
+                  icon: Boxes,
+                  accent: 'primary',
+                  subtitle: `${fmtNumber(Number(row.units) || 0)} ${row.ItemType} sold this month`,
+                  detailsDb: 'sql',
+                  detailsSql: `${baseCTE}, typed AS (
+                      SELECT SaleDate, SaleNo, ItemID, VendorID, Description, (${itemTypeCase}) AS ItemType FROM base
+                    )
+                    SELECT TOP 1000 SaleDate, SaleNo, ItemID, VendorID, Description
+                    FROM typed WHERE ItemType = '${String(row.ItemType).replace(/'/g, "''")}'
+                    ORDER BY SaleDate DESC, SaleNo`,
+                  detailsColumns: itemCols,
+                  detailsEmpty: `No ${row.ItemType} items`,
+                }),
+                detailsEmpty: 'No items sold this month yet',
+              };
+            })())}
           />
           <HeroStat
             label={`Customers · ${monthName}`}
