@@ -36,8 +36,13 @@ const MODES = [
 
 // ALB = Aisle·Level·Bay location string for a stock label.
 const albOf = (l) => [l.aisle, l.level, l.bay].filter((x) => String(x ?? '').trim() !== '').join('·') || '—';
-// Descriptions arrive prefixed with the item's long id + " | " — drop it.
+// Descriptions arrive as "<long id> | NAME | TYPE" — drop the id prefix and
+// split the trailing type (e.g. SOFA) so it can sit on its own line.
 const cleanName = (s) => String(s ?? '').replace(/^\s*\d+\s*\|\s*/, '').trim();
+const splitName = (s) => {
+  const parts = cleanName(s).split('|').map((x) => x.trim()).filter(Boolean);
+  return { name: parts[0] || '', type: parts.slice(1).join(' · ') };
+};
 
 const STATUS = {
   refill:  { label: 'Refill from warehouse', tone: 'amber',   icon: Truck,        blurb: 'Floor spot empty — stock waiting in the warehouse' },
@@ -317,7 +322,10 @@ function ItemCard({ it, store }) {
       {/* Header */}
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <div className="truncate text-sm font-bold leading-tight" title={it.description}>{cleanName(it.description) || it.itemId}</div>
+          <div className="truncate text-sm font-bold leading-tight" title={it.description}>{splitName(it.description).name || it.itemId}</div>
+          {splitName(it.description).type && (
+            <div className="truncate text-[11px] font-bold uppercase tracking-wide text-primary/80">{splitName(it.description).type}</div>
+          )}
           <div className="mt-0.5 truncate text-[11px] text-muted-fg">
             {it.vendor && <span className="font-semibold text-fg/70">{it.vendor}</span>}{it.vendor ? ' · ' : ''}#{it.itemId}{it.cat ? ` · ${it.cat}` : ''}
           </div>
