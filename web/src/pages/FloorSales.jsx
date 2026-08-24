@@ -34,9 +34,8 @@ const MODES = [
   { id: 'monthly', label: 'Monthly' },
 ];
 
-// ALB = Aisle·Level·Bay. Building 999 = warehouse; 1/2 = a store floor.
+// ALB = Aisle·Level·Bay location string for a stock label.
 const albOf = (l) => [l.aisle, l.level, l.bay].filter((x) => String(x ?? '').trim() !== '').join('·') || '—';
-const buildingName = (b) => Number(b) === 999 ? 'Warehouse' : `Store ${b}`;
 
 const STATUS = {
   refill:  { label: 'Refill from warehouse', tone: 'amber',   icon: Truck,        blurb: 'Floor spot empty — stock waiting in the warehouse' },
@@ -114,17 +113,20 @@ export default function FloorSales() {
     return [...byId.values()].map((e) => {
       const lk = labelsMap[e.itemId];
       const labels = lk?.labels ?? [];
-      const floor = labels.filter((l) => Number(l.building) === Number(store));
-      const wh = labels.filter((l) => Number(l.building) === 999);
-      const otherStore = labels.filter((l) => Number(l.building) !== 999 && Number(l.building) !== Number(store));
+      const inB = (b) => labels.filter((l) => Number(l.building) === b);
+      const s1 = inB(1).length, s2 = inB(2).length, wh = inB(999).length;
+      const floorQty = store === 1 ? s1 : s2;
+      const otherStoreQty = store === 1 ? s2 : s1;
+      // ALB locations for the SELECTED store's floor only (deduped).
+      const floorAlb = [...new Set(inB(store).map(albOf))].filter((x) => x && x !== '—');
       let status;
-      if (!lk || lk.count == null) status = labelsQ.isLoading ? 'unknown' : 'unknown';
-      else if (floor.length > 0) status = 'onfloor';
-      else if (wh.length > 0 || otherStore.length > 0) status = 'refill';
+      if (!lk || lk.count == null) status = 'unknown';
+      else if (floorQty > 0) status = 'onfloor';
+      else if (wh > 0 || otherStoreQty > 0) status = 'refill';
       else status = 'reorder';
-      return { ...e, salesCount: e.sales.size, labels, floor, wh, otherStore, onHand: lk?.count ?? null, status };
+      return { ...e, salesCount: e.sales.size, s1, s2, wh, floorQty, floorAlb, onHand: lk?.count ?? null, status };
     }).sort((a, b) => (b.qty - a.qty) || String(a.itemId).localeCompare(String(b.itemId)));
-  }, [rows, labelsMap, store, labelsQ.isLoading]);
+  }, [rows, labelsMap, store]);
 
   const filtered = useMemo(() => {
     const n = q.trim().toLowerCase();
@@ -148,9 +150,8 @@ export default function FloorSales() {
     ItemID: i.itemId, Vendor: i.vendor, Category: i.cat, Description: i.description,
     QtySold: i.qty, Sales: i.salesCount, LastSold: i.lastSold,
     Status: STATUS[i.status].label,
-    FloorALB: i.floor.map(albOf).join(' | '),
-    WarehouseALB: i.wh.map(albOf).join(' | '),
-    OnHand: i.onHand,
+    S1: i.s1, S2: i.s2, WH_999: i.wh, OnHand: i.onHand,
+    [`S${store}_ALB`]: i.floorAlb.join(' | '),
   })), `floor-sales-${STORES.find((s) => s.value === store)?.code}-${range.from}.csv`);
 
   const storeMeta = STORES.find((s) => s.value === store);
@@ -284,47 +285,77 @@ function HeroChip({ icon: Icon, tone, label, value }) {
   );
 }
 
-function AlbTag({ label, tone, prefix }) {
-  const t = TONE[tone];
+// One building's on-hand quantity cell (S1 / S2 / 999).
+function StockCell({ code, qty, highlight, warehouse, loading }) {
+  const has = qty > 0;
   return (
-    <span className={cn('inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-bold tabular-nums', t.chip)}>
-      <MapPin size={11} />{prefix ? `${prefix} ` : ''}{label}
-    </span>
+    <div className={cn(
+      'flex flex-col items-center rounded-lg border py-1.5',
+      highlight ? 'border-primary/50 bg-primary/10'
+        : warehouse ? 'border-amber-500/40 bg-amber-500/10'
+        : 'border-border bg-muted/20',
+    )}>
+      <span className={cn('text-[9px] font-bold uppercase tracking-wider',
+        highlight ? 'text-primary' : warehouse ? 'text-amber-600 dark:text-amber-300' : 'text-muted-fg')}>{code}</span>
+      <span className={cn('text-lg font-extrabold tabular-nums leading-none',
+        loading ? 'text-muted-fg/40' : has ? 'text-fg' : 'text-muted-fg/30')}>
+        {loading ? '·' : fmtNumber(qty)}
+      </span>
+    </div>
   );
 }
 
 function ItemCard({ it, store }) {
   const meta = STATUS[it.status];
   const tone = TONE[meta.tone];
+  const loading = it.onHand == null;
   return (
-    <div className={cn('flex flex-col gap-2 rounded-xl border bg-card p-3 shadow-sm', tone.ring)}>
+    <div className={cn('relative flex flex-col gap-3 overflow-hidden rounded-xl border bg-card p-3 pl-4 shadow-sm transition hover:shadow-md', tone.ring)}>
+      <span className={cn('absolute inset-y-0 left-0 w-1.5', tone.dot)} />
+      {/* Header */}
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <div className="truncate text-sm font-bold" title={it.description}>{it.description || it.itemId}</div>
-          <div className="truncate text-[11px] text-muted-fg">
-            {it.vendor && <span className="font-semibold">{it.vendor}</span>}{it.vendor ? ' · ' : ''}#{it.itemId}{it.cat ? ` · ${it.cat}` : ''}
+          <div className="truncate text-sm font-bold leading-tight" title={it.description}>{it.description || it.itemId}</div>
+          <div className="mt-0.5 truncate text-[11px] text-muted-fg">
+            {it.vendor && <span className="font-semibold text-fg/70">{it.vendor}</span>}{it.vendor ? ' · ' : ''}#{it.itemId}{it.cat ? ` · ${it.cat}` : ''}
           </div>
         </div>
         {it.qty > 1 && (
-          <span className="shrink-0 rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-bold tabular-nums text-primary">×{it.qty}</span>
+          <span className="shrink-0 rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-bold tabular-nums text-primary" title="Units sold in this period">×{it.qty}</span>
         )}
       </div>
 
-      {/* Locations / ALB */}
-      <div className="flex flex-wrap items-center gap-1.5">
-        {it.floor.length > 0 && it.floor.map((l, i) => <AlbTag key={'f' + i} tone="emerald" prefix="Floor" label={albOf(l)} />)}
-        {it.wh.length > 0 && it.wh.map((l, i) => <AlbTag key={'w' + i} tone="amber" prefix="WH" label={albOf(l)} />)}
-        {it.otherStore.length > 0 && it.otherStore.map((l, i) => <AlbTag key={'o' + i} tone="slate" prefix={buildingName(l.building)} label={albOf(l)} />)}
-        {it.labels.length === 0 && it.onHand === 0 && <span className="text-[11px] font-semibold text-rose-500 dark:text-rose-300">Empty spot · no stock anywhere</span>}
-        {it.onHand == null && <span className="text-[11px] italic text-muted-fg">location lookup pending…</span>}
+      {/* On-hand by building — S1 · S2 · 999 (warehouse) */}
+      <div>
+        <div className="mb-1 flex items-center gap-1 text-[9px] font-bold uppercase tracking-wider text-muted-fg">
+          <MapPin size={10} /> On hand{loading && <span className="italic normal-case tracking-normal">· checking…</span>}
+        </div>
+        <div className="grid grid-cols-3 gap-1.5">
+          <StockCell code="S1"  qty={it.s1} highlight={store === 1} loading={loading} />
+          <StockCell code="S2"  qty={it.s2} highlight={store === 2} loading={loading} />
+          <StockCell code="999" qty={it.wh} warehouse loading={loading} />
+        </div>
+        {it.floorAlb.length > 0 ? (
+          <div className="mt-1.5 flex flex-wrap items-center gap-1">
+            <span className="text-[9px] font-bold uppercase tracking-wider text-muted-fg">Floor spot · S{store}</span>
+            {it.floorAlb.map((a, i) => (
+              <span key={i} className="inline-flex items-center gap-1 rounded-md bg-primary/10 px-1.5 py-0.5 text-[11px] font-bold tabular-nums text-primary">
+                <MapPin size={10} />{a}
+              </span>
+            ))}
+          </div>
+        ) : it.status === 'refill' ? (
+          <div className="mt-1.5 text-[11px] font-semibold text-amber-600 dark:text-amber-300">Floor spot cleared — refill from warehouse (999)</div>
+        ) : it.status === 'reorder' ? (
+          <div className="mt-1.5 text-[11px] font-semibold text-rose-500 dark:text-rose-300">Floor spot empty — no stock anywhere</div>
+        ) : null}
       </div>
 
-      {/* Footer: status + when sold + on-hand */}
+      {/* Footer: status + on-hand total + when sold */}
       <div className="mt-auto flex flex-wrap items-center gap-2 border-t border-border/60 pt-2 text-[11px]">
         <span className={cn('inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-semibold', tone.chip)}>
           <span className={cn('h-1.5 w-1.5 rounded-full', tone.dot)} />{meta.label}
         </span>
-        {it.onHand != null && <span className="text-muted-fg">{fmtNumber(it.onHand)} on hand</span>}
         <span className="ml-auto inline-flex items-center gap-1 text-muted-fg"><Clock size={11} />{shortDate(it.lastSold)}</span>
       </div>
     </div>
