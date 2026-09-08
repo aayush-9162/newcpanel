@@ -484,78 +484,94 @@ export default function DashboardDaily({ store, selectedBldg, cumulative }) {
           })())}
         />
         <StatCard
-          label={`Customers · ${dateShort}`}
+          label={`Customer Analysis · ${dateShort}`}
           value={fmtNumber(customers)}
           caption={customers ? `${fmtNumber(newC)} new · ${fmtNumber(returning)} returning` : 'no customers'}
           icon={Users}
           accent="violet"
           loading={custQ.isLoading}
-          onClick={openDetail({
-            title: `Customers · ${dateShort} · ${storeLabel}`,
-            icon: Users,
-            accent: 'violet',
-            headline: fmtNumber(customers),
-            subtitle: customers
-              ? `${fmtNumber(newC)} new · ${fmtNumber(returning)} returning on ${dayLabel || 'the latest day'}`
-              : 'No customers yesterday',
-            detailsDb: 'sql',
-            detailsSql: dayStr ? `
-              -- Spend is the ACTUAL SaleWRT revenue of each sale, attributed to
-              -- the sale's customer — so the Spent column sums to the day's total
-              -- sales (unmapped sales fall into 'Unattributed' to keep it exact).
-              WITH saleRev AS (
-                     SELECT CAST(S.wrt_so_no AS VARCHAR(20)) AS SaleNo, SUM(S.wrt_sls) AS amount
-                     FROM SaleWRT S
-                     WHERE S.wrt_cng_bdat >= '${dayStr}' AND S.wrt_cng_bdat < DATEADD(DAY, 1, '${dayStr}') AND S.wrt_pft_ctr = ${selectedBldg}
-                     GROUP BY CAST(S.wrt_so_no AS VARCHAR(20))
-                   ),
-                   saleCust AS (
-                     SELECT CAST(sd.SalesNo AS VARCHAR(20)) AS SaleNo,
-                            MAX(LTRIM(RTRIM(sd.CustomerId))) AS CustomerId,
-                            MAX(sd.CustomerName)             AS CustomerName
-                     FROM SalespersonDaily sd
-                     WHERE sd.SaleDate >= '${dayStr}' AND sd.SaleDate < DATEADD(DAY, 1, '${dayStr}') AND ${spdStore}
-                       AND sd.CustomerId IS NOT NULL AND LTRIM(RTRIM(sd.CustomerId)) <> ''
-                     GROUP BY CAST(sd.SalesNo AS VARCHAR(20))
-                   ),
-                   fc AS (
-                     SELECT LTRIM(RTRIM(sd.CustomerId)) AS CustomerId, MIN(sd.SaleDate) AS firstSale
-                     FROM SalespersonDaily sd
-                     WHERE sd.CustomerId IS NOT NULL AND LTRIM(RTRIM(sd.CustomerId)) <> ''
-                     GROUP BY LTRIM(RTRIM(sd.CustomerId))
-                   ),
-                   joined AS (
-                     SELECT sr.SaleNo, sr.amount, sc.CustomerId, sc.CustomerName
-                     FROM saleRev sr LEFT JOIN saleCust sc ON sc.SaleNo = sr.SaleNo
-                   )
-              SELECT j.CustomerId,
-                     MAX(COALESCE(j.CustomerName, 'Unattributed')) AS CustomerName,
-                     MIN(fc.firstSale) AS firstSale,
-                     CASE WHEN j.CustomerId IS NULL THEN ''
-                          WHEN CAST(MIN(fc.firstSale) AS DATE) = '${dayStr}' THEN 'New' ELSE 'Returning' END AS custType,
-                     SUM(j.amount) AS spent,
-                     COUNT(DISTINCT j.SaleNo) AS orders
-              FROM joined j
-              LEFT JOIN fc ON fc.CustomerId = j.CustomerId
-              GROUP BY j.CustomerId
-              ORDER BY spent DESC
-            ` : undefined,
-            detailsColumns: [
-              { key: 'custType', label: 'Type', render: (r) => r.custType ? (
-                <span className={cn('inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold',
-                  r.custType === 'New'
-                    ? 'bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-200'
-                    : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-200')}>
-                  {r.custType}
-                </span>
-              ) : <span className="text-muted-fg">—</span> },
-              { key: 'CustomerName', label: 'Customer' },
-              { key: 'firstSale',    label: 'First Sale', render: (r) => r.firstSale ? new Date(r.firstSale).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' }) : '—' },
-              { key: 'orders',       label: 'Sales', align: 'right', render: (r) => fmtNumber(Number(r.orders) || 0) },
-              { key: 'spent',        label: 'Spent', align: 'right', render: (r) => <span className="font-semibold">{fmtCurrency(Number(r.spent) || 0)}</span> },
-            ],
-            detailsEmpty: 'No customers yesterday',
-          })}
+          onClick={openDetail((() => {
+            const fmtD = (d) => d ? new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' }) : '—';
+            return {
+              title: `Customer Analysis · ${dateShort} · ${storeLabel}`,
+              icon: Users,
+              accent: 'violet',
+              headline: fmtNumber(customers),
+              subtitle: `Today's buyers with their history — loyalty, tenure & recency · click a customer for their past purchases`,
+              detailsDb: 'sql',
+              // Today's buyers (real SaleWRT spend) enriched with lifetime loyalty
+              // signals from SalespersonDaily: visits, first purchase, last visit.
+              detailsSql: dayStr ? `
+                WITH todayCust AS (
+                  SELECT sc.CustomerId, MAX(sc.CustomerName) AS CustomerName, SUM(sr.amount) AS todaySpent
+                  FROM (SELECT CAST(S.wrt_so_no AS VARCHAR(20)) AS SaleNo, SUM(S.wrt_sls) AS amount
+                        FROM SaleWRT S
+                        WHERE S.wrt_cng_bdat >= '${dayStr}' AND S.wrt_cng_bdat < DATEADD(DAY, 1, '${dayStr}') AND S.wrt_pft_ctr = ${selectedBldg}
+                        GROUP BY CAST(S.wrt_so_no AS VARCHAR(20))) sr
+                  JOIN (SELECT CAST(sd.SalesNo AS VARCHAR(20)) AS SaleNo, MAX(LTRIM(RTRIM(sd.CustomerId))) AS CustomerId, MAX(sd.CustomerName) AS CustomerName
+                        FROM SalespersonDaily sd
+                        WHERE sd.SaleDate >= '${dayStr}' AND sd.SaleDate < DATEADD(DAY, 1, '${dayStr}') AND ${spdStore}
+                          AND sd.CustomerId IS NOT NULL AND LTRIM(RTRIM(sd.CustomerId)) <> ''
+                        GROUP BY CAST(sd.SalesNo AS VARCHAR(20))) sc ON sc.SaleNo = sr.SaleNo
+                  GROUP BY sc.CustomerId
+                ),
+                hist AS (
+                  SELECT LTRIM(RTRIM(sd.CustomerId)) AS CustomerId,
+                         MIN(sd.SaleDate) AS firstSale,
+                         MAX(CASE WHEN sd.SaleDate < '${dayStr}' THEN sd.SaleDate END) AS lastPrior,
+                         COUNT(DISTINCT sd.SalesNo) AS lifeOrders,
+                         COUNT(DISTINCT CASE WHEN sd.SaleDate < '${dayStr}' THEN sd.SalesNo END) AS priorOrders
+                  FROM SalespersonDaily sd
+                  WHERE LTRIM(RTRIM(sd.CustomerId)) IN (SELECT CustomerId FROM todayCust)
+                  GROUP BY LTRIM(RTRIM(sd.CustomerId))
+                )
+                SELECT t.CustomerId, t.CustomerName, t.todaySpent,
+                       h.firstSale, h.lastPrior, ISNULL(h.lifeOrders, 1) AS lifeOrders,
+                       CASE WHEN ISNULL(h.priorOrders, 0) = 0 THEN 'New' ELSE 'Returning' END AS custType
+                FROM todayCust t LEFT JOIN hist h ON h.CustomerId = t.CustomerId
+                ORDER BY t.todaySpent DESC
+              ` : undefined,
+              detailsColumns: [
+                { key: 'CustomerName', label: 'Customer', render: (r) => <span className="font-semibold">{r.CustomerName || '—'}</span> },
+                { key: 'custType', label: 'Type', render: (r) => (
+                  <span className={cn('inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold',
+                    r.custType === 'New'
+                      ? 'bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-200'
+                      : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-200')}>{r.custType}</span>
+                )},
+                { key: 'todaySpent', label: 'Today', align: 'right', render: (r) => <span className="font-semibold">{fmtCurrency(Number(r.todaySpent) || 0)}</span> },
+                { key: 'lifeOrders', label: 'Visits', align: 'right', render: (r) => fmtNumber(Number(r.lifeOrders) || 0) },
+                { key: 'firstSale',  label: 'Customer Since', render: (r) => fmtD(r.firstSale) },
+                { key: 'lastPrior',  label: 'Last Visit', render: (r) => r.lastPrior ? fmtD(r.lastPrior) : <span className="text-muted-fg">first time</span> },
+              ],
+              detailsEmpty: 'No customers yesterday',
+              // Click a customer → their full purchase history (real SaleWRT $).
+              onRowClick: (row) => ({
+                title: `${row.CustomerName || 'Customer'} · Purchase History`,
+                icon: Users,
+                accent: 'violet',
+                subtitle: `${fmtNumber(Number(row.lifeOrders) || 0)} visit${Number(row.lifeOrders) === 1 ? '' : 's'} · customer since ${fmtD(row.firstSale)}`,
+                detailsDb: 'sql',
+                detailsSql: `
+                  WITH ch AS (
+                    SELECT DISTINCT CAST(sd.SalesNo AS VARCHAR(20)) AS SaleNo
+                    FROM SalespersonDaily sd
+                    WHERE LTRIM(RTRIM(sd.CustomerId)) = '${String(row.CustomerId).replace(/'/g, "''")}'
+                  )
+                  SELECT CAST(S.wrt_so_no AS VARCHAR(20)) AS SaleNo, MAX(S.wrt_cng_bdat) AS SaleDate, SUM(S.wrt_sls) AS amount
+                  FROM SaleWRT S
+                  JOIN ch ON CAST(S.wrt_so_no AS VARCHAR(20)) = ch.SaleNo
+                  GROUP BY CAST(S.wrt_so_no AS VARCHAR(20))
+                  ORDER BY MAX(S.wrt_cng_bdat) DESC`,
+                detailsColumns: [
+                  { key: 'SaleDate', label: 'Date', render: (r) => fmtD(r.SaleDate) },
+                  { key: 'SaleNo',   label: 'Sale #' },
+                  { key: 'amount',   label: 'Amount', align: 'right', render: (r) => <span className="font-semibold">{fmtCurrency(Number(r.amount) || 0)}</span> },
+                ],
+                detailsEmpty: 'No purchase history found',
+              }),
+            };
+          })())}
         />
         <StatCard
           label={`Gross Margin · ${gmDateShort}`}
