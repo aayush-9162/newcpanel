@@ -510,6 +510,33 @@ export default function DashboardDaily({ store, selectedBldg, cumulative }) {
               accent: 'violet',
               headline: fmtNumber(customers),
               subtitle: `Today's buyers with their history — loyalty, tenure & recency · click a customer for their past purchases`,
+              // New vs Returning split (count + $ spent today), computed from the
+              // exact rows shown so it always ties out to the table below.
+              headlineAside: (rows) => {
+                if (!rows || rows.length === 0) return null;
+                const sum = (a) => a.reduce((t, r) => t + (Number(r.todaySpent) || 0), 0);
+                const newR = rows.filter((r) => r.custType === 'New');
+                const retR = rows.filter((r) => r.custType === 'Returning');
+                const Pill = ({ label, count, amount, tone }) => (
+                  <div className={cn('flex flex-col items-end rounded-lg border px-3 py-1.5 leading-tight', tone)}>
+                    <div className="flex items-baseline gap-1.5">
+                      <span className="text-[10px] font-semibold uppercase tracking-wider opacity-80">{label}</span>
+                      <span className="text-lg font-bold tabular-nums leading-none">{fmtNumber(count)}</span>
+                    </div>
+                    <span className="text-[11px] font-semibold tabular-nums opacity-90">{fmtCurrency(amount)}</span>
+                  </div>
+                );
+                return (
+                  <div className="flex items-stretch gap-2">
+                    <Pill label="New" count={newR.length} amount={sum(newR)}
+                      tone="border-violet-200 bg-violet-50 text-violet-700 dark:border-violet-900/40 dark:bg-violet-900/20 dark:text-violet-200" />
+                    <Pill label="Returning" count={retR.length} amount={sum(retR)}
+                      tone="border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/40 dark:bg-emerald-900/20 dark:text-emerald-200" />
+                    <Pill label="Total" count={rows.length} amount={sum(rows)}
+                      tone="border-border bg-muted/40 text-fg" />
+                  </div>
+                );
+              },
               detailsDb: 'sql',
               // Today's buyers (real SaleWRT spend) enriched with lifetime loyalty
               // signals from SalespersonDaily: visits, first purchase, last visit.

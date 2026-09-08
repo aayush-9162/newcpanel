@@ -79,7 +79,7 @@ function Panel({ drilldown, onClose }) {
 
   const {
     title, icon: Icon, accent = 'primary',
-    headline, fullHeadline, subtitle,
+    headline, fullHeadline, subtitle, headlineAside,
     breakdown,
     detailsDb, detailsSql, detailsValues = [], detailsColumns, detailsEmpty,
     loadRows, onRowClick,
@@ -178,11 +178,20 @@ function Panel({ drilldown, onClose }) {
           </button>
         </div>
 
-        {/* Headline value */}
+        {/* Headline value (+ optional summary aside on the right). The aside may
+            be a node, or a function of the loaded rows so it can summarize the
+            exact records shown (e.g. New vs Returning counts and $ totals). */}
         {headline && (
           <div className="border-b border-border px-5 pt-4 pb-3">
-            <div title={fullHeadline || undefined} className={cn('text-3xl md:text-4xl font-extrabold tabular-nums leading-none', textAccent)}>
-              {headline}
+            <div className="flex items-end justify-between gap-4 flex-wrap">
+              <div title={fullHeadline || undefined} className={cn('text-3xl md:text-4xl font-extrabold tabular-nums leading-none', textAccent)}>
+                {headline}
+              </div>
+              {headlineAside && (
+                <div className="ml-auto">
+                  {typeof headlineAside === 'function' ? headlineAside(rows) : headlineAside}
+                </div>
+              )}
             </div>
           </div>
         )}
