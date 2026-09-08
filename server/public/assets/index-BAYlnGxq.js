@@ -877,15 +877,26 @@ In order to be iterable, non-array objects must have a [Symbol.iterator]() metho
                         GROUP BY CAST(sd.SalesNo AS VARCHAR(20))) sc ON sc.SaleNo = sr.SaleNo
                   GROUP BY sc.CustomerId
                 ),
-                hist AS (
+                orders AS (
+                  -- Collapse each order to its FIRST posting date. SalespersonDaily
+                  -- carries one row per accounting posting/adjustment, so a single
+                  -- order shows up on several dates; MIN(SaleDate) per SalesNo is the
+                  -- real order date (later rows are reversals/adjustments).
                   SELECT LTRIM(RTRIM(sd.CustomerId)) AS CustomerId,
-                         MIN(sd.SaleDate) AS firstSale,
-                         MAX(CASE WHEN sd.SaleDate < '${p}' THEN sd.SaleDate END) AS lastPrior,
-                         COUNT(DISTINCT sd.SalesNo) AS lifeOrders,
-                         COUNT(DISTINCT CASE WHEN sd.SaleDate < '${p}' THEN sd.SalesNo END) AS priorOrders
+                         CAST(sd.SalesNo AS VARCHAR(20)) AS SaleNo,
+                         MIN(sd.SaleDate) AS orderDate
                   FROM SalespersonDaily sd
                   WHERE LTRIM(RTRIM(sd.CustomerId)) IN (SELECT CustomerId FROM todayCust)
-                  GROUP BY LTRIM(RTRIM(sd.CustomerId))
+                  GROUP BY LTRIM(RTRIM(sd.CustomerId)), CAST(sd.SalesNo AS VARCHAR(20))
+                ),
+                hist AS (
+                  SELECT CustomerId,
+                         MIN(orderDate) AS firstSale,
+                         MAX(CASE WHEN orderDate < '${p}' THEN orderDate END) AS lastPrior,
+                         COUNT(*) AS lifeOrders,
+                         COUNT(CASE WHEN orderDate < '${p}' THEN 1 END) AS priorOrders
+                  FROM orders
+                  GROUP BY CustomerId
                 )
                 SELECT t.CustomerId, t.CustomerName, t.todaySpent,
                        h.firstSale, h.lastPrior, ISNULL(h.lifeOrders, 1) AS lifeOrders,
@@ -898,21 +909,34 @@ In order to be iterable, non-array objects must have a [Symbol.iterator]() metho
                     FROM SalespersonDaily sd
                     WHERE LTRIM(RTRIM(sd.CustomerId)) = '${String(ge.CustomerId).replace(/'/g,"''")}'
                   )
-                  SELECT CAST(S.wrt_so_no AS VARCHAR(20)) AS SaleNo, MAX(S.wrt_cng_bdat) AS SaleDate, SUM(S.wrt_sls) AS amount
+                  SELECT CAST(S.wrt_so_no AS VARCHAR(20)) AS SaleNo, MIN(S.wrt_cng_bdat) AS SaleDate, SUM(S.wrt_sls) AS amount
                   FROM SaleWRT S
                   JOIN ch ON CAST(S.wrt_so_no AS VARCHAR(20)) = ch.SaleNo
                   GROUP BY CAST(S.wrt_so_no AS VARCHAR(20))
-                  ORDER BY MAX(S.wrt_cng_bdat) DESC`,detailsColumns:[{key:"SaleDate",label:"Date",render:Oe=>ie(Oe.SaleDate)},{key:"SaleNo",label:"Sale #"},{key:"amount",label:"Amount",align:"right",render:Oe=>i.jsx("span",{className:"font-semibold",children:V(Number(Oe.amount)||0)})}],detailsEmpty:"No purchase history found",onRowClick:Oe=>({title:`Sale ${Oe.SaleNo} · ${ge.CustomerName||"Customer"}`,icon:ur,accent:"violet",subtitle:`Items on this purchase · ${ie(Oe.SaleDate)}`,detailsDb:"sql",detailsSql:`
-                    SELECT ItemID, VendorID, Description, (${ei}) AS Room, (${cn}) AS ItemType
-                    FROM (
+                  ORDER BY MIN(S.wrt_cng_bdat) DESC`,detailsColumns:[{key:"SaleDate",label:"Date",render:Oe=>ie(Oe.SaleDate)},{key:"SaleNo",label:"Sale #"},{key:"amount",label:"Amount",align:"right",render:Oe=>i.jsx("span",{className:"font-semibold",children:V(Number(Oe.amount)||0)})}],detailsEmpty:"No purchase history found",onRowClick:Oe=>({title:`Sale ${Oe.SaleNo} · ${ge.CustomerName||"Customer"}`,icon:ur,accent:"violet",subtitle:`Items on this purchase · ${ie(Oe.SaleDate)}`,detailsDb:"sql",detailsSql:`
+                    WITH cur AS (
                       SELECT LTRIM(RTRIM(ItemID))                  AS ItemID,
                              LTRIM(RTRIM(VendorID))                AS VendorID,
                              LTRIM(RTRIM(ISNULL(Description2, ''))) AS Description,
                              UPPER(ISNULL(Description2, ''))       AS d2
                       FROM SalesItemDetail
                       WHERE CAST(SaleNo AS VARCHAR(20)) = '${String(Oe.SaleNo).replace(/'/g,"''")}'
+                    ),
+                    his AS (
+                      SELECT LTRIM(RTRIM(sls_his_item_id))          AS ItemID,
+                             LTRIM(RTRIM(sls_his_vend_id))          AS VendorID,
+                             LTRIM(RTRIM(ISNULL(sls_his_desc_2, ''))) AS Description,
+                             UPPER(ISNULL(sls_his_desc_2, ''))      AS d2
+                      FROM SaleDtlHis
+                      WHERE CAST(sls_his_so_no AS VARCHAR(20)) = '${String(Oe.SaleNo).replace(/'/g,"''")}'
+                    )
+                    SELECT ItemID, VendorID, Description, (${ei}) AS Room, (${cn}) AS ItemType
+                    FROM (
+                      SELECT * FROM cur
+                      UNION ALL
+                      SELECT * FROM his WHERE NOT EXISTS (SELECT 1 FROM cur)
                     ) t
-                    ORDER BY ItemID`,detailsColumns:[{key:"ItemID",label:"Item ID"},{key:"VendorID",label:"Vendor"},{key:"Description",label:"Description",render:Cr=>Cr.Description||"—"},{key:"Room",label:"Room",render:Cr=>i.jsx("span",{className:"rounded-md bg-muted px-1.5 py-0.5 text-[11px] font-medium",children:Cr.Room})},{key:"ItemType",label:"Type",render:Cr=>i.jsx("span",{className:"text-muted-fg",children:Cr.ItemType})}],detailsEmpty:"Item detail is only kept for recent sales — not stored for this older purchase."})})}})())}),i.jsx(_m,{label:`Gross Margin · ${C}`,value:U!=null?`${U.toFixed(1)}%`:"—",caption:U!=null?`${he(D)} profit · ${P?"on target":"below 55%"}`:"cost not posted yet",icon:Pd,accent:U==null||P?"emerald":"amber",loading:E.isLoading||u.isLoading,onClick:U!=null&&p?l({title:`Gross Margin · ${C} · ${n}`,icon:Pd,accent:P?"emerald":"amber",headline:`${U.toFixed(1)}%`,subtitle:`${V(D)} profit · ${V(k)} written sales − ${V(R)} cost · ${_}`,detailsDb:"sql",detailsSql:`
+                    ORDER BY ItemID`,detailsColumns:[{key:"ItemID",label:"Item ID"},{key:"VendorID",label:"Vendor"},{key:"Description",label:"Description",render:Cr=>Cr.Description||"—"},{key:"Room",label:"Room",render:Cr=>i.jsx("span",{className:"rounded-md bg-muted px-1.5 py-0.5 text-[11px] font-medium",children:Cr.Room})},{key:"ItemType",label:"Type",render:Cr=>i.jsx("span",{className:"text-muted-fg",children:Cr.ItemType})}],detailsEmpty:"No item lines recorded for this sale."})})}})())}),i.jsx(_m,{label:`Gross Margin · ${C}`,value:U!=null?`${U.toFixed(1)}%`:"—",caption:U!=null?`${he(D)} profit · ${P?"on target":"below 55%"}`:"cost not posted yet",icon:Pd,accent:U==null||P?"emerald":"amber",loading:E.isLoading||u.isLoading,onClick:U!=null&&p?l({title:`Gross Margin · ${C} · ${n}`,icon:Pd,accent:P?"emerald":"amber",headline:`${U.toFixed(1)}%`,subtitle:`${V(D)} profit · ${V(k)} written sales − ${V(R)} cost · ${_}`,detailsDb:"sql",detailsSql:`
               SELECT TOP 500
                      CAST(SalesNo AS VARCHAR(20))         AS SalesNo,
                      MAX(CustomerName)                    AS CustomerName,

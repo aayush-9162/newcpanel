@@ -515,15 +515,26 @@ export default function DashboardDaily({ store, selectedBldg, cumulative }) {
                         GROUP BY CAST(sd.SalesNo AS VARCHAR(20))) sc ON sc.SaleNo = sr.SaleNo
                   GROUP BY sc.CustomerId
                 ),
-                hist AS (
+                orders AS (
+                  -- Collapse each order to its FIRST posting date. SalespersonDaily
+                  -- carries one row per accounting posting/adjustment, so a single
+                  -- order shows up on several dates; MIN(SaleDate) per SalesNo is the
+                  -- real order date (later rows are reversals/adjustments).
                   SELECT LTRIM(RTRIM(sd.CustomerId)) AS CustomerId,
-                         MIN(sd.SaleDate) AS firstSale,
-                         MAX(CASE WHEN sd.SaleDate < '${dayStr}' THEN sd.SaleDate END) AS lastPrior,
-                         COUNT(DISTINCT sd.SalesNo) AS lifeOrders,
-                         COUNT(DISTINCT CASE WHEN sd.SaleDate < '${dayStr}' THEN sd.SalesNo END) AS priorOrders
+                         CAST(sd.SalesNo AS VARCHAR(20)) AS SaleNo,
+                         MIN(sd.SaleDate) AS orderDate
                   FROM SalespersonDaily sd
                   WHERE LTRIM(RTRIM(sd.CustomerId)) IN (SELECT CustomerId FROM todayCust)
-                  GROUP BY LTRIM(RTRIM(sd.CustomerId))
+                  GROUP BY LTRIM(RTRIM(sd.CustomerId)), CAST(sd.SalesNo AS VARCHAR(20))
+                ),
+                hist AS (
+                  SELECT CustomerId,
+                         MIN(orderDate) AS firstSale,
+                         MAX(CASE WHEN orderDate < '${dayStr}' THEN orderDate END) AS lastPrior,
+                         COUNT(*) AS lifeOrders,
+                         COUNT(CASE WHEN orderDate < '${dayStr}' THEN 1 END) AS priorOrders
+                  FROM orders
+                  GROUP BY CustomerId
                 )
                 SELECT t.CustomerId, t.CustomerName, t.todaySpent,
                        h.firstSale, h.lastPrior, ISNULL(h.lifeOrders, 1) AS lifeOrders,
@@ -558,11 +569,11 @@ export default function DashboardDaily({ store, selectedBldg, cumulative }) {
                     FROM SalespersonDaily sd
                     WHERE LTRIM(RTRIM(sd.CustomerId)) = '${String(row.CustomerId).replace(/'/g, "''")}'
                   )
-                  SELECT CAST(S.wrt_so_no AS VARCHAR(20)) AS SaleNo, MAX(S.wrt_cng_bdat) AS SaleDate, SUM(S.wrt_sls) AS amount
+                  SELECT CAST(S.wrt_so_no AS VARCHAR(20)) AS SaleNo, MIN(S.wrt_cng_bdat) AS SaleDate, SUM(S.wrt_sls) AS amount
                   FROM SaleWRT S
                   JOIN ch ON CAST(S.wrt_so_no AS VARCHAR(20)) = ch.SaleNo
                   GROUP BY CAST(S.wrt_so_no AS VARCHAR(20))
-                  ORDER BY MAX(S.wrt_cng_bdat) DESC`,
+                  ORDER BY MIN(S.wrt_cng_bdat) DESC`,
                 detailsColumns: [
                   { key: 'SaleDate', label: 'Date', render: (r) => fmtD(r.SaleDate) },
                   { key: 'SaleNo',   label: 'Sale #' },
@@ -576,15 +587,32 @@ export default function DashboardDaily({ store, selectedBldg, cumulative }) {
                   accent: 'violet',
                   subtitle: `Items on this purchase · ${fmtD(sale.SaleDate)}`,
                   detailsDb: 'sql',
+                  // Item lines live in two places: SalesItemDetail (recent/open
+                  // sales) and SaleDtlHis (posted history, keyed by sls_his_so_no).
+                  // Use the recent rows when present, otherwise fall back to
+                  // history so older purchases still show their items.
                   detailsSql: `
-                    SELECT ItemID, VendorID, Description, (${roomCase}) AS Room, (${itemTypeCase}) AS ItemType
-                    FROM (
+                    WITH cur AS (
                       SELECT LTRIM(RTRIM(ItemID))                  AS ItemID,
                              LTRIM(RTRIM(VendorID))                AS VendorID,
                              LTRIM(RTRIM(ISNULL(Description2, ''))) AS Description,
                              UPPER(ISNULL(Description2, ''))       AS d2
                       FROM SalesItemDetail
                       WHERE CAST(SaleNo AS VARCHAR(20)) = '${String(sale.SaleNo).replace(/'/g, "''")}'
+                    ),
+                    his AS (
+                      SELECT LTRIM(RTRIM(sls_his_item_id))          AS ItemID,
+                             LTRIM(RTRIM(sls_his_vend_id))          AS VendorID,
+                             LTRIM(RTRIM(ISNULL(sls_his_desc_2, ''))) AS Description,
+                             UPPER(ISNULL(sls_his_desc_2, ''))      AS d2
+                      FROM SaleDtlHis
+                      WHERE CAST(sls_his_so_no AS VARCHAR(20)) = '${String(sale.SaleNo).replace(/'/g, "''")}'
+                    )
+                    SELECT ItemID, VendorID, Description, (${roomCase}) AS Room, (${itemTypeCase}) AS ItemType
+                    FROM (
+                      SELECT * FROM cur
+                      UNION ALL
+                      SELECT * FROM his WHERE NOT EXISTS (SELECT 1 FROM cur)
                     ) t
                     ORDER BY ItemID`,
                   detailsColumns: [
@@ -594,7 +622,7 @@ export default function DashboardDaily({ store, selectedBldg, cumulative }) {
                     { key: 'Room',        label: 'Room', render: (r) => <span className="rounded-md bg-muted px-1.5 py-0.5 text-[11px] font-medium">{r.Room}</span> },
                     { key: 'ItemType',    label: 'Type', render: (r) => <span className="text-muted-fg">{r.ItemType}</span> },
                   ],
-                  detailsEmpty: 'Item detail is only kept for recent sales — not stored for this older purchase.',
+                  detailsEmpty: 'No item lines recorded for this sale.',
                 }),
               }),
             };
