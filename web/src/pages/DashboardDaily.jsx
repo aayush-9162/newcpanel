@@ -518,8 +518,8 @@ export default function DashboardDaily({ store, selectedBldg, cumulative }) {
                 orders AS (
                   -- Collapse each order to its FIRST posting date. SalespersonDaily
                   -- carries one row per accounting posting/adjustment, so a single
-                  -- order shows up on several dates; MIN(SaleDate) per SalesNo is the
-                  -- real order date (later rows are reversals/adjustments).
+                  -- order shows up on several dates -- MIN(SaleDate) per SalesNo is
+                  -- the real order date (later rows are reversals/adjustments).
                   SELECT LTRIM(RTRIM(sd.CustomerId)) AS CustomerId,
                          CAST(sd.SalesNo AS VARCHAR(20)) AS SaleNo,
                          MIN(sd.SaleDate) AS orderDate
