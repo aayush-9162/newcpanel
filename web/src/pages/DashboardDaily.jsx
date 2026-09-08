@@ -492,6 +492,18 @@ export default function DashboardDaily({ store, selectedBldg, cumulative }) {
           loading={custQ.isLoading}
           onClick={openDetail((() => {
             const fmtD = (d) => d ? new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' }) : '—';
+            // Recency label relative to the dashboard's "today" (dayStr). Turns a
+            // bare repeated date into a useful signal — e.g. a 6-year win-back.
+            const relAgo = (d) => {
+              if (!d) return '';
+              const then = new Date(d), now = new Date(dayStr);
+              let m = (now.getUTCFullYear() - then.getUTCFullYear()) * 12 + (now.getUTCMonth() - then.getUTCMonth());
+              if (now.getUTCDate() < then.getUTCDate()) m -= 1;
+              if (m < 1) return 'this month';
+              if (m < 12) return `${m}mo ago`;
+              const y = Math.floor(m / 12), r = m % 12;
+              return `${y}y${r ? ` ${r}mo` : ''} ago`;
+            };
             return {
               title: `Customer Analysis · ${dateShort} · ${storeLabel}`,
               icon: Users,
@@ -553,7 +565,9 @@ export default function DashboardDaily({ store, selectedBldg, cumulative }) {
                 { key: 'todaySpent', label: 'Today', align: 'right', render: (r) => <span className="font-semibold">{fmtCurrency(Number(r.todaySpent) || 0)}</span> },
                 { key: 'lifeOrders', label: 'Visits', align: 'right', render: (r) => fmtNumber(Number(r.lifeOrders) || 0) },
                 { key: 'firstSale',  label: 'Customer Since', render: (r) => fmtD(r.firstSale) },
-                { key: 'lastPrior',  label: 'Last Visit', render: (r) => r.lastPrior ? fmtD(r.lastPrior) : <span className="text-muted-fg">first time</span> },
+                { key: 'lastPrior',  label: 'Last Visit', render: (r) => r.lastPrior
+                  ? <span>{fmtD(r.lastPrior)}<span className="ml-1 text-[11px] text-muted-fg">· {relAgo(r.lastPrior)}</span></span>
+                  : <span className="text-muted-fg">first time</span> },
               ],
               detailsEmpty: 'No customers yesterday',
               // Click a customer → their full purchase history (real SaleWRT $).
