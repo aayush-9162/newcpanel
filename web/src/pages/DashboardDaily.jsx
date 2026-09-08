@@ -517,23 +517,23 @@ export default function DashboardDaily({ store, selectedBldg, cumulative }) {
                 const sum = (a) => a.reduce((t, r) => t + (Number(r.todaySpent) || 0), 0);
                 const newR = rows.filter((r) => r.custType === 'New');
                 const retR = rows.filter((r) => r.custType === 'Returning');
-                const Pill = ({ label, count, amount, tone }) => (
-                  <div className={cn('flex flex-col items-end rounded-lg border px-3 py-1.5 leading-tight', tone)}>
-                    <div className="flex items-baseline gap-1.5">
-                      <span className="text-[10px] font-semibold uppercase tracking-wider opacity-80">{label}</span>
-                      <span className="text-lg font-bold tabular-nums leading-none">{fmtNumber(count)}</span>
+                const Stat = ({ label, count, amount, dot }) => (
+                  <div className="px-3.5 first:pl-3 last:pr-3">
+                    <div className="flex items-center gap-1.5">
+                      {dot && <span className={cn('h-1.5 w-1.5 rounded-full', dot)} />}
+                      <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-fg">{label}</span>
                     </div>
-                    <span className="text-[11px] font-semibold tabular-nums opacity-90">{fmtCurrency(amount)}</span>
+                    <div className="mt-0.5 flex items-baseline gap-1.5">
+                      <span className="text-base font-bold tabular-nums text-fg leading-none">{fmtNumber(count)}</span>
+                      <span className="text-[11px] font-medium tabular-nums text-muted-fg">{fmtCurrency(amount)}</span>
+                    </div>
                   </div>
                 );
                 return (
-                  <div className="flex items-stretch gap-2">
-                    <Pill label="New" count={newR.length} amount={sum(newR)}
-                      tone="border-violet-200 bg-violet-50 text-violet-700 dark:border-violet-900/40 dark:bg-violet-900/20 dark:text-violet-200" />
-                    <Pill label="Returning" count={retR.length} amount={sum(retR)}
-                      tone="border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/40 dark:bg-emerald-900/20 dark:text-emerald-200" />
-                    <Pill label="Total" count={rows.length} amount={sum(rows)}
-                      tone="border-border bg-muted/40 text-fg" />
+                  <div className="flex items-center divide-x divide-border rounded-xl border border-border bg-muted/30 py-1.5">
+                    <Stat label="New" count={newR.length} amount={sum(newR)} dot="bg-violet-500" />
+                    <Stat label="Returning" count={retR.length} amount={sum(retR)} dot="bg-emerald-500" />
+                    <Stat label="Total" count={rows.length} amount={sum(rows)} />
                   </div>
                 );
               },
