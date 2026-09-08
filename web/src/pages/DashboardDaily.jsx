@@ -517,23 +517,28 @@ export default function DashboardDaily({ store, selectedBldg, cumulative }) {
                 const sum = (a) => a.reduce((t, r) => t + (Number(r.todaySpent) || 0), 0);
                 const newR = rows.filter((r) => r.custType === 'New');
                 const retR = rows.filter((r) => r.custType === 'Returning');
-                const Stat = ({ label, count, amount, dot }) => (
-                  <div className="px-3.5 first:pl-3 last:pr-3">
+                const Stat = ({ label, count, amount, cls }) => (
+                  <div className={cn('flex flex-col gap-1 px-4 py-2', cls.bg)}>
                     <div className="flex items-center gap-1.5">
-                      {dot && <span className={cn('h-1.5 w-1.5 rounded-full', dot)} />}
-                      <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-fg">{label}</span>
+                      <span className={cn('h-2 w-2 rounded-full', cls.dot)} />
+                      <span className={cn('text-[10px] font-bold uppercase tracking-wider', cls.label)}>{label}</span>
                     </div>
-                    <div className="mt-0.5 flex items-baseline gap-1.5">
-                      <span className="text-base font-bold tabular-nums text-fg leading-none">{fmtNumber(count)}</span>
-                      <span className="text-[11px] font-medium tabular-nums text-muted-fg">{fmtCurrency(amount)}</span>
+                    <div className="flex items-baseline gap-2">
+                      <span className="text-xl font-extrabold tabular-nums text-fg leading-none">{fmtNumber(count)}</span>
+                      <span className={cn('text-[13px] font-bold tabular-nums', cls.amt)}>{fmtCurrency(amount)}</span>
                     </div>
                   </div>
                 );
                 return (
-                  <div className="flex items-center divide-x divide-border rounded-xl border border-border bg-muted/30 py-1.5">
-                    <Stat label="New" count={newR.length} amount={sum(newR)} dot="bg-violet-500" />
-                    <Stat label="Returning" count={retR.length} amount={sum(retR)} dot="bg-emerald-500" />
-                    <Stat label="Total" count={rows.length} amount={sum(rows)} />
+                  <div className="flex items-stretch divide-x divide-border overflow-hidden rounded-xl border border-border shadow-sm">
+                    <Stat label="New" count={newR.length} amount={sum(newR)} cls={{
+                      bg: 'bg-violet-50 dark:bg-violet-900/20', dot: 'bg-violet-500',
+                      label: 'text-violet-600 dark:text-violet-300', amt: 'text-violet-700 dark:text-violet-300' }} />
+                    <Stat label="Returning" count={retR.length} amount={sum(retR)} cls={{
+                      bg: 'bg-emerald-50 dark:bg-emerald-900/20', dot: 'bg-emerald-500',
+                      label: 'text-emerald-600 dark:text-emerald-300', amt: 'text-emerald-700 dark:text-emerald-300' }} />
+                    <Stat label="Total" count={rows.length} amount={sum(rows)} cls={{
+                      bg: 'bg-muted/40', dot: 'bg-fg/40', label: 'text-muted-fg', amt: 'text-fg' }} />
                   </div>
                 );
               },
