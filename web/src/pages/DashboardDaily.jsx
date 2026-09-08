@@ -500,34 +500,55 @@ export default function DashboardDaily({ store, selectedBldg, cumulative }) {
               : 'No customers yesterday',
             detailsDb: 'sql',
             detailsSql: dayStr ? `
-              WITH fc AS (
-                     SELECT sd.CustomerId, MIN(sd.SaleDate) AS firstSale
+              -- Spend is the ACTUAL SaleWRT revenue of each sale, attributed to
+              -- the sale's customer — so the Spent column sums to the day's total
+              -- sales (unmapped sales fall into 'Unattributed' to keep it exact).
+              WITH saleRev AS (
+                     SELECT CAST(S.wrt_so_no AS VARCHAR(20)) AS SaleNo, SUM(S.wrt_sls) AS amount
+                     FROM SaleWRT S
+                     WHERE S.wrt_cng_bdat >= '${dayStr}' AND S.wrt_cng_bdat < DATEADD(DAY, 1, '${dayStr}') AND S.wrt_pft_ctr = ${selectedBldg}
+                     GROUP BY CAST(S.wrt_so_no AS VARCHAR(20))
+                   ),
+                   saleCust AS (
+                     SELECT CAST(sd.SalesNo AS VARCHAR(20)) AS SaleNo,
+                            MAX(LTRIM(RTRIM(sd.CustomerId))) AS CustomerId,
+                            MAX(sd.CustomerName)             AS CustomerName
+                     FROM SalespersonDaily sd
+                     WHERE sd.SaleDate >= '${dayStr}' AND sd.SaleDate < DATEADD(DAY, 1, '${dayStr}') AND ${spdStore}
+                       AND sd.CustomerId IS NOT NULL AND LTRIM(RTRIM(sd.CustomerId)) <> ''
+                     GROUP BY CAST(sd.SalesNo AS VARCHAR(20))
+                   ),
+                   fc AS (
+                     SELECT LTRIM(RTRIM(sd.CustomerId)) AS CustomerId, MIN(sd.SaleDate) AS firstSale
                      FROM SalespersonDaily sd
                      WHERE sd.CustomerId IS NOT NULL AND LTRIM(RTRIM(sd.CustomerId)) <> ''
-                     GROUP BY sd.CustomerId
+                     GROUP BY LTRIM(RTRIM(sd.CustomerId))
+                   ),
+                   joined AS (
+                     SELECT sr.SaleNo, sr.amount, sc.CustomerId, sc.CustomerName
+                     FROM saleRev sr LEFT JOIN saleCust sc ON sc.SaleNo = sr.SaleNo
                    )
-              SELECT sd.CustomerId,
-                     MAX(sd.CustomerName) AS CustomerName,
-                     MIN(fc.firstSale)    AS firstSale,
-                     CASE WHEN CAST(MIN(fc.firstSale) AS DATE) = '${dayStr}' THEN 'New' ELSE 'Returning' END AS custType,
-                     SUM(sd.SaleSplitAmt)      AS spent,
-                     COUNT(DISTINCT sd.SalesNo) AS orders
-              FROM SalespersonDaily sd
-              INNER JOIN fc ON fc.CustomerId = sd.CustomerId
-              WHERE sd.SaleDate >= '${dayStr}' AND sd.SaleDate < DATEADD(DAY, 1, '${dayStr}') AND ${spdStore}
-              GROUP BY sd.CustomerId
-              HAVING SUM(ISNULL(sd.SaleSplitAmt, 0)) > 0
-              ORDER BY SUM(sd.SaleSplitAmt) DESC
+              SELECT j.CustomerId,
+                     MAX(COALESCE(j.CustomerName, 'Unattributed')) AS CustomerName,
+                     MIN(fc.firstSale) AS firstSale,
+                     CASE WHEN j.CustomerId IS NULL THEN ''
+                          WHEN CAST(MIN(fc.firstSale) AS DATE) = '${dayStr}' THEN 'New' ELSE 'Returning' END AS custType,
+                     SUM(j.amount) AS spent,
+                     COUNT(DISTINCT j.SaleNo) AS orders
+              FROM joined j
+              LEFT JOIN fc ON fc.CustomerId = j.CustomerId
+              GROUP BY j.CustomerId
+              ORDER BY spent DESC
             ` : undefined,
             detailsColumns: [
-              { key: 'custType', label: 'Type', render: (r) => (
+              { key: 'custType', label: 'Type', render: (r) => r.custType ? (
                 <span className={cn('inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold',
                   r.custType === 'New'
                     ? 'bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-200'
                     : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-200')}>
                   {r.custType}
                 </span>
-              )},
+              ) : <span className="text-muted-fg">—</span> },
               { key: 'CustomerName', label: 'Customer' },
               { key: 'firstSale',    label: 'First Sale', render: (r) => r.firstSale ? new Date(r.firstSale).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' }) : '—' },
               { key: 'orders',       label: 'Sales', align: 'right', render: (r) => fmtNumber(Number(r.orders) || 0) },
