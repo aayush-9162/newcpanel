@@ -594,7 +594,7 @@ export default function DashboardDaily({ store, selectedBldg, cumulative }) {
                     { key: 'Room',        label: 'Room', render: (r) => <span className="rounded-md bg-muted px-1.5 py-0.5 text-[11px] font-medium">{r.Room}</span> },
                     { key: 'ItemType',    label: 'Type', render: (r) => <span className="text-muted-fg">{r.ItemType}</span> },
                   ],
-                  detailsEmpty: 'No item lines for this sale',
+                  detailsEmpty: 'Item detail is only kept for recent sales — not stored for this older purchase.',
                 }),
               }),
             };
