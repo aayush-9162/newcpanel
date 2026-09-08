@@ -1,6 +1,12 @@
 node_modules
 .env
 .env.example
+google-sa.json
+*-sa.json
+po-scrub-oauth.json
+
+# Local ad-hoc DB query helper (holds credentials) — never commit.
+_q.mjs
 
 # Runtime data — the server writes to these (users, roles). Not tracked so a
 # `git pull` never conflicts with live edits. Bootstrapped from seeds on a fresh
