@@ -569,6 +569,33 @@ export default function DashboardDaily({ store, selectedBldg, cumulative }) {
                   { key: 'amount',   label: 'Amount', align: 'right', render: (r) => <span className="font-semibold">{fmtCurrency(Number(r.amount) || 0)}</span> },
                 ],
                 detailsEmpty: 'No purchase history found',
+                // Click a past purchase → its item lines.
+                onRowClick: (sale) => ({
+                  title: `Sale ${sale.SaleNo} · ${row.CustomerName || 'Customer'}`,
+                  icon: Boxes,
+                  accent: 'violet',
+                  subtitle: `Items on this purchase · ${fmtD(sale.SaleDate)}`,
+                  detailsDb: 'sql',
+                  detailsSql: `
+                    SELECT ItemID, VendorID, Description, (${roomCase}) AS Room, (${itemTypeCase}) AS ItemType
+                    FROM (
+                      SELECT LTRIM(RTRIM(ItemID))                  AS ItemID,
+                             LTRIM(RTRIM(VendorID))                AS VendorID,
+                             LTRIM(RTRIM(ISNULL(Description2, ''))) AS Description,
+                             UPPER(ISNULL(Description2, ''))       AS d2
+                      FROM SalesItemDetail
+                      WHERE CAST(SaleNo AS VARCHAR(20)) = '${String(sale.SaleNo).replace(/'/g, "''")}'
+                    ) t
+                    ORDER BY ItemID`,
+                  detailsColumns: [
+                    { key: 'ItemID',      label: 'Item ID' },
+                    { key: 'VendorID',    label: 'Vendor' },
+                    { key: 'Description',  label: 'Description', render: (r) => r.Description || '—' },
+                    { key: 'Room',        label: 'Room', render: (r) => <span className="rounded-md bg-muted px-1.5 py-0.5 text-[11px] font-medium">{r.Room}</span> },
+                    { key: 'ItemType',    label: 'Type', render: (r) => <span className="text-muted-fg">{r.ItemType}</span> },
+                  ],
+                  detailsEmpty: 'No item lines for this sale',
+                }),
               }),
             };
           })())}
