@@ -338,15 +338,58 @@ export default function DashboardDaily({ store, selectedBldg, cumulative }) {
             subtitle: `Every distinct sale ticket on ${dayLabel || 'the latest day'}`,
             detailsDb: 'sql',
             detailsSql: dayStr ? `
-              SELECT CAST(S.wrt_so_no AS VARCHAR(20)) AS SaleNo, SUM(S.wrt_sls) AS amount
-              FROM SaleWRT S
-              WHERE S.wrt_cng_bdat >= '${dayStr}' AND S.wrt_cng_bdat < DATEADD(DAY, 1, '${dayStr}') AND S.wrt_pft_ctr = ${selectedBldg}
-              GROUP BY CAST(S.wrt_so_no AS VARCHAR(20))
-              HAVING SUM(S.wrt_sls) > 0
-              ORDER BY amount DESC
+              WITH day AS (
+                SELECT CAST(S.wrt_so_no AS VARCHAR(20)) AS SaleNo, SUM(S.wrt_sls) AS amount
+                FROM SaleWRT S
+                WHERE S.wrt_cng_bdat >= '${dayStr}' AND S.wrt_cng_bdat < DATEADD(DAY, 1, '${dayStr}') AND S.wrt_pft_ctr = ${selectedBldg}
+                GROUP BY CAST(S.wrt_so_no AS VARCHAR(20)) HAVING SUM(S.wrt_sls) > 0
+              ),
+              cust AS (
+                SELECT CAST(sd.SalesNo AS VARCHAR(20)) AS SaleNo, MAX(sd.CustomerName) AS CustomerName, MAX(sd.CustomerId) AS CustomerId
+                FROM SalespersonDaily sd
+                WHERE sd.SaleDate >= '${dayStr}' AND sd.SaleDate < DATEADD(DAY, 1, '${dayStr}') AND ${spdStore}
+                GROUP BY CAST(sd.SalesNo AS VARCHAR(20))
+              ),
+              hist AS (
+                SELECT sd.CustomerId,
+                       MIN(sd.SaleDate) AS firstEver,
+                       MIN(CASE WHEN sd.SaleDate < '${dayStr}' THEN sd.SaleDate END) AS firstPrior,
+                       MAX(CASE WHEN sd.SaleDate < '${dayStr}' THEN sd.SaleDate END) AS lastPrior
+                FROM SalespersonDaily sd
+                WHERE sd.CustomerId IS NOT NULL AND LTRIM(RTRIM(sd.CustomerId)) <> ''
+                GROUP BY sd.CustomerId
+              )
+              SELECT day.SaleNo, day.amount,
+                     MAX(c.CustomerName) AS CustomerName,
+                     MAX(COALESCE(NULLIF(LTRIM(RTRIM(SR.DeliveryCity)), ''), NULLIF(LTRIM(RTRIM(SR.BillingCity)), ''), 'Unknown')) AS City,
+                     MAX(CASE WHEN h.lastPrior IS NULL THEN 'New' ELSE 'Returning' END) AS custType,
+                     MAX(h.firstEver)  AS firstPurchase,
+                     MAX(h.lastPrior)  AS lastPurchase
+              FROM day
+              LEFT JOIN cust c   ON c.SaleNo = day.SaleNo
+              LEFT JOIN hist h   ON h.CustomerId = c.CustomerId
+              LEFT JOIN SaleRV SR ON CAST(SR.sales_no AS VARCHAR(20)) = day.SaleNo
+              GROUP BY day.SaleNo, day.amount
+              ORDER BY day.amount DESC
             ` : undefined,
             detailsColumns: [
-              { key: 'SaleNo', label: 'Sale #' },
+              { key: 'SaleNo',       label: 'Sale #' },
+              { key: 'CustomerName', label: 'Customer', render: (r) => r.CustomerName || '—' },
+              { key: 'City',         label: 'Area', render: (r) => r.City || '—' },
+              { key: 'custType',     label: 'Type', render: (r) => {
+                const isNew = r.custType !== 'Returning';
+                const fmtD = (d) => d ? new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' }) : '—';
+                const title = isNew
+                  ? 'First purchase — this sale'
+                  : `First purchase: ${fmtD(r.firstPurchase)}  ·  Last purchase: ${fmtD(r.lastPurchase)}`;
+                return (
+                  <span title={title} className={cn('inline-flex cursor-help rounded-full px-2 py-0.5 text-[10px] font-semibold',
+                    isNew ? 'bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-200'
+                          : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-200')}>
+                    {isNew ? 'New' : 'Returning'}
+                  </span>
+                );
+              } },
               { key: 'amount', label: 'Amount', align: 'right', render: (r) => <span className="font-semibold">{fmtCurrency(Number(r.amount) || 0)}</span> },
             ],
             detailsEmpty: 'No sales yesterday',
