@@ -302,7 +302,16 @@ export default function POScrubReport() {
                                 c === 0 && 'sticky left-[2.75rem] z-10 border-r border-border/60 bg-card font-bold text-primary shadow-[2px_0_4px_-2px_rgba(0,0,0,0.15)]',
                               )}
                             >
-                              {isStatus ? <StatusBadge value={raw} /> : raw}
+                              {isStatus ? (
+                                <StatusBadge value={raw} />
+                              ) : colType[c] === 'num' ? (
+                                raw
+                              ) : (
+                                // Long free-text (e.g. Remarks) is clamped to keep
+                                // rows compact; hovering expands it in place, and the
+                                // full text is also available as a native tooltip.
+                                <div className="line-clamp-3 cursor-help transition-all hover:line-clamp-none" title={raw}>{raw}</div>
+                              )}
                             </td>
                           );
                         })}
