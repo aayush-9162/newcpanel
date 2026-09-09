@@ -81,7 +81,7 @@ const TOOLS = [
   },
   {
     label: 'Inventory Scrub',
-    description: 'Inventory scrub and cleanup tool',
+    description: 'Inventory scrub and reconciliation',
     href: 'http://192.168.0.211.nip.io:4700/',
     icon: PackageSearch,          // background decoration / fallback
     iconSrc: '/inventoryscrub.svg',
