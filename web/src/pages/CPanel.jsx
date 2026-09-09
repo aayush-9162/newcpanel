@@ -14,7 +14,7 @@ import { useAuth } from '@/auth/AuthProvider';
 import {
   LayoutGrid, ExternalLink, ClipboardEdit, Sparkles, Search,
   // External tool icons
-  ListChecks, BarChart3, Globe2, Video, Store, FileBarChart, Clock, Truck, FileText, MessagesSquare, Package,
+  ListChecks, BarChart3, Globe2, Video, Store, FileBarChart, Clock, Truck, FileText, MessagesSquare, Package, PackageSearch,
 } from 'lucide-react';
 
 // ─── External tools (open in new tab) ────────────────────────────────────────
@@ -78,6 +78,14 @@ const TOOLS = [
     href: 'http://192.168.0.211:5000/login',
     icon: Package,
     accent: 'sky',
+  },
+  {
+    label: 'Inventory Scrub',
+    description: 'Inventory scrub and cleanup tool',
+    href: 'http://192.168.0.211.nip.io:4700/',
+    icon: PackageSearch,          // background decoration / fallback
+    iconSrc: '/inventoryscrub.svg',
+    accent: 'emerald',
   },
   {
     label: 'Daily Forms',

@@ -18,14 +18,20 @@ export function LauncherCard({
   to,
   icon: Icon,
   logo,          // optional brand domain — shows the real logo on a white tile
+  iconSrc,       // optional local image (e.g. a custom SVG that is its own tile)
   accent = 'primary',
   badge,
   external,
 }) {
   const p = STAT_PALETTE[accent] || STAT_PALETTE.primary;
 
-  // Logo tile (white, so brand marks read cleanly) or the accent icon tile.
-  const iconTile = logo ? (
+  // A custom image icon that already carries its own background/shape — render
+  // it edge-to-edge on the tile (no white wrapper) so its own styling shows.
+  const iconTile = iconSrc ? (
+    <div className="h-9 w-9 overflow-hidden rounded-xl shadow-md ring-2 ring-black/5 transition-transform duration-300 group-hover:scale-110 group-hover:rotate-3">
+      <img src={iconSrc} alt={label} className="h-full w-full object-cover" />
+    </div>
+  ) : logo ? (
     <div className="grid h-9 w-9 place-items-center overflow-hidden rounded-xl bg-white p-1.5 shadow-md ring-2 ring-black/5 transition-transform duration-300 group-hover:scale-110">
       <BrandLogo
         domain={logo}
