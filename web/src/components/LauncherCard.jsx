@@ -67,8 +67,12 @@ export function LauncherCard({
           {iconTile}
 
           {badge && (
-            <span className="rounded-full bg-gradient-to-r from-emerald-500 to-teal-500 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-white shadow">
-              {badge}
+            <span className="relative inline-flex">
+              {/* pulsing halo so a freshly-added tool visibly stands out */}
+              <span className="absolute -inset-0.5 animate-ping rounded-full bg-emerald-400/60" />
+              <span className="relative animate-pulse rounded-full bg-gradient-to-r from-emerald-500 to-teal-500 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-white shadow-lg shadow-emerald-500/40 ring-1 ring-white/50">
+                {badge}
+              </span>
             </span>
           )}
           {!badge && external && (

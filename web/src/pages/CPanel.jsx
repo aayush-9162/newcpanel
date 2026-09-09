@@ -86,6 +86,7 @@ const TOOLS = [
     icon: PackageSearch,          // background decoration / fallback
     iconSrc: '/inventoryscrub.svg',
     accent: 'emerald',
+    badge: 'NEW',
   },
   {
     label: 'Daily Forms',
