@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
 import { Sidebar } from './Sidebar.jsx';
+import { ScrollToTop } from './ScrollToTop.jsx';
 
 export function Layout() {
   const mainRef = useRef(null);
@@ -19,6 +20,7 @@ export function Layout() {
       <main ref={mainRef} className="flex flex-1 flex-col overflow-y-auto">
         <Outlet />
       </main>
+      <ScrollToTop targetRef={mainRef} />
     </div>
   );
 }
