@@ -988,51 +988,95 @@ function YearlyDualTable({ rows, loading, mode }) {
   );
 }
 
+// A milestone month — cells at/above this get a green highlight (like the
+// reference report where the seven-figure months stand out).
+const MILESTONE = 1_000_000;
+
+// Format a YoY change like the reference: two decimals, integer part padded to
+// two digits (7.3 → "07.30%"). Direction is shown by colour, not a sign.
+function fmtYoY(v) {
+  const s = Math.abs(v).toFixed(2);
+  const [int, dec] = s.split('.');
+  return `${int.padStart(2, '0')}.${dec}%`;
+}
+
+// One year's cell: amount, plus the % change vs the previous year (green up /
+// red down). Milestone months (≥ $1M) get a soft green background.
+function YearCell({ value, prev, total }) {
+  const v = Number(value) || 0;
+  const p = Number(prev) || 0;
+  const pc = (v && p) ? ((v - p) / p) * 100 : null;
+  const big = !total && v >= MILESTONE;
+  return (
+    <td className={cn('px-4 py-2.5 text-right num', big && 'bg-emerald-100/70 dark:bg-emerald-900/30')}>
+      {v ? (
+        <span className="inline-flex items-baseline justify-end gap-2 whitespace-nowrap">
+          <span className={cn(total ? 'font-bold' : 'font-semibold', big && 'text-emerald-800 dark:text-emerald-200')}>
+            {fmtCurrency(v)}
+          </span>
+          {pc != null && (
+            <span className={cn('text-[11px] font-bold tabular-nums',
+              pc >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400')}>
+              {fmtYoY(pc)}
+            </span>
+          )}
+        </span>
+      ) : '—'}
+    </td>
+  );
+}
+
 function FourYearTable({ rows, loading }) {
   const today = new Date();
   const yr = today.getFullYear();
+  const curMonthName = today.toLocaleString('en-US', { month: 'long' });
   return (
-    <table className="w-full text-sm">
-      <thead className="bg-muted/60 text-[11px] uppercase tracking-wider text-muted-fg">
-        <tr>
-          <th className="px-4 py-2.5 text-left">Month</th>
-          <th className="px-4 py-2.5 text-right">{yr - 3}</th>
-          <th className="px-4 py-2.5 text-right">{yr - 2}</th>
-          <th className="px-4 py-2.5 text-right">{yr - 1}</th>
-          <th className="px-4 py-2.5 text-right">{yr}</th>
-        </tr>
-      </thead>
-      <tbody>
-        {loading ? (
-          <tr><td colSpan={5} className="py-8 text-center text-muted-fg">Loading…</td></tr>
-        ) : rows.map((r) => (
-          <tr key={r.MonthName} className="border-t border-border">
-            <td className="px-4 py-2.5 font-medium">{r.MonthName.slice(0, 3)}</td>
-            <td className="px-4 py-2.5 text-right num text-muted-fg">{Number(r.earlier) ? fmtCurrency(Number(r.earlier)) : '—'}</td>
-            <td className="px-4 py-2.5 text-right num text-muted-fg">{Number(r.prevYear) ? fmtCurrency(Number(r.prevYear)) : '—'}</td>
-            <td className="px-4 py-2.5 text-right num text-muted-fg">{Number(r.lastYear) ? fmtCurrency(Number(r.lastYear)) : '—'}</td>
-            <td className="px-4 py-2.5 text-right num font-semibold">{Number(r.thisYear) ? fmtCurrency(Number(r.thisYear)) : '—'}</td>
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead className="bg-muted/60 text-[11px] font-semibold uppercase tracking-wider text-muted-fg">
+          <tr>
+            <th className="px-4 py-2.5 text-left">Month</th>
+            <th className="px-4 py-2.5 text-right">{yr - 3}</th>
+            <th className="px-4 py-2.5 text-right">{yr - 2}</th>
+            <th className="px-4 py-2.5 text-right">{yr - 1}</th>
+            <th className="px-4 py-2.5 text-right">{yr}</th>
           </tr>
-        ))}
-        {!loading && rows.length > 0 && (() => {
-          const t = rows.reduce((acc, r) => ({
-            earlier: acc.earlier + (Number(r.earlier) || 0),
-            prevYear: acc.prevYear + (Number(r.prevYear) || 0),
-            lastYear: acc.lastYear + (Number(r.lastYear) || 0),
-            thisYear: acc.thisYear + (Number(r.thisYear) || 0),
-          }), { earlier: 0, prevYear: 0, lastYear: 0, thisYear: 0 });
-          return (
-            <tr className="border-t-2 border-border bg-muted/30 font-semibold">
-              <td className="px-4 py-2.5">Total</td>
-              <td className="px-4 py-2.5 text-right num text-muted-fg">{fmtCurrency(t.earlier)}</td>
-              <td className="px-4 py-2.5 text-right num text-muted-fg">{fmtCurrency(t.prevYear)}</td>
-              <td className="px-4 py-2.5 text-right num text-muted-fg">{fmtCurrency(t.lastYear)}</td>
-              <td className="px-4 py-2.5 text-right num">{fmtCurrency(t.thisYear)}</td>
-            </tr>
-          );
-        })()}
-      </tbody>
-    </table>
+        </thead>
+        <tbody>
+          {loading ? (
+            <tr><td colSpan={5} className="py-8 text-center text-muted-fg">Loading…</td></tr>
+          ) : rows.map((r) => {
+            const isCur = r.MonthName === curMonthName;
+            return (
+              <tr key={r.MonthName} className={cn('border-t border-border', isCur && 'bg-amber-100/60 dark:bg-amber-900/20')}>
+                <td className={cn('px-4 py-2.5 font-medium', isCur && 'font-bold text-amber-800 dark:text-amber-200')}>{r.MonthName}</td>
+                <YearCell value={r.earlier} prev={null} />
+                <YearCell value={r.prevYear} prev={r.earlier} />
+                <YearCell value={r.lastYear} prev={r.prevYear} />
+                <YearCell value={r.thisYear} prev={r.lastYear} />
+              </tr>
+            );
+          })}
+          {!loading && rows.length > 0 && (() => {
+            const t = rows.reduce((acc, r) => ({
+              earlier: acc.earlier + (Number(r.earlier) || 0),
+              prevYear: acc.prevYear + (Number(r.prevYear) || 0),
+              lastYear: acc.lastYear + (Number(r.lastYear) || 0),
+              thisYear: acc.thisYear + (Number(r.thisYear) || 0),
+            }), { earlier: 0, prevYear: 0, lastYear: 0, thisYear: 0 });
+            return (
+              <tr className="border-t-2 border-border bg-muted/40 font-semibold">
+                <td className="px-4 py-2.5">Total</td>
+                <YearCell value={t.earlier} prev={null} total />
+                <YearCell value={t.prevYear} prev={t.earlier} total />
+                <YearCell value={t.lastYear} prev={t.prevYear} total />
+                <YearCell value={t.thisYear} prev={t.lastYear} total />
+              </tr>
+            );
+          })()}
+        </tbody>
+      </table>
+    </div>
   );
 }
 
