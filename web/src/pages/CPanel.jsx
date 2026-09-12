@@ -4,6 +4,7 @@
 //   2) Forms — internal routes to in-app form pages
 
 import { useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { Topbar } from '@/components/Topbar';
 import { HeroBanner } from '@/components/HeroStat';
 import { LauncherCard } from '@/components/LauncherCard';
@@ -125,19 +126,16 @@ export default function CPanel() {
         title="Quick Access"
         subtitle="External Tools & Company Forms"
         actions={(
-          <a
-            href="/vendors"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="group inline-flex items-center gap-2 rounded-lg bg-gradient-to-r from-blue-600 to-indigo-500 px-3 py-1.5 text-xs font-bold uppercase tracking-wide text-white shadow-md shadow-indigo-500/30 ring-1 ring-white/20 transition hover:-translate-y-0.5 hover:shadow-lg hover:shadow-indigo-500/40 active:scale-95"
-            title="Open vendor websites & price sheets in a new tab"
+          <Link
+            to="/vendors"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-1.5 text-xs font-semibold text-fg/80 transition hover:bg-muted hover:text-fg"
+            title="Vendor websites & price sheets"
           >
-            <Store size={14} />
+            <Store size={14} className="text-primary" />
             <span className="hidden sm:inline">Vendor Website / Price List</span>
             <span className="sm:hidden">Vendors</span>
-            <span className="rounded-full bg-white/20 px-1.5 py-0.5 text-[10px] tabular-nums">{VENDORS.length}</span>
-            <ExternalLink size={13} className="transition-transform group-hover:-translate-y-0.5 group-hover:translate-x-0.5" />
-          </a>
+            <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] tabular-nums text-muted-fg">{VENDORS.length}</span>
+          </Link>
         )}
       />
       <div className="flex flex-1 flex-col gap-6 p-5 animate-fade-in">
