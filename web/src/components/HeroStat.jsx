@@ -15,6 +15,7 @@
 // tabs from a summary page).
 import { Sparkline } from './Sparkline.jsx';
 import { BrandLogo } from './BrandLogo';
+import { vendorLogoSrc } from '@/data/vendorLogoFiles';
 import { cn } from '@/lib/cn';
 
 export const STAT_PALETTE = {
@@ -137,10 +138,10 @@ export function HeroStat({
         </div>
 
         <div className="mt-1.5 flex items-center gap-2.5">
-          {logo ? (
+          {vendorLogoSrc(logo) ? (
             <div className="grid h-9 w-9 shrink-0 place-items-center overflow-hidden rounded-lg bg-white p-1 shadow-md ring-2 ring-black/5">
               <BrandLogo
-                domain={logo}
+                src={vendorLogoSrc(logo)}
                 name={typeof label === 'string' ? label : ''}
                 imgClassName="h-full w-full object-contain"
                 fallback={Icon ? <Icon size={16} strokeWidth={2.25} className="text-slate-500" /> : null}

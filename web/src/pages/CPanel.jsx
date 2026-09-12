@@ -10,6 +10,7 @@ import { HeroBanner } from '@/components/HeroStat';
 import { LauncherCard } from '@/components/LauncherCard';
 import { FORMS } from '@/data/forms';
 import { VENDORS } from '@/data/vendors';
+import { VENDOR_LOGOS } from '@/data/vendorLogoFiles';
 import { BrandLogo } from '@/components/BrandLogo';
 import { useAuth } from '@/auth/AuthProvider';
 import {
@@ -179,27 +180,14 @@ export default function CPanel() {
           ))}
         </div>
 
-        {/* Vendor sites — many, so compact + searchable */}
-        <VendorSites />
-
       </div>
     </>
   );
 }
 
-// ─── Vendor logo — white tile with the brand logo, initials as last resort ───
-function VendorLogo({ name, domain }) {
-  const initials = name.split(/[\s&/-]+/).filter(Boolean).map((s) => s[0]).slice(0, 2).join('').toUpperCase();
-  return (
-    <div className="grid h-12 w-12 shrink-0 place-items-center overflow-hidden rounded-lg bg-white p-1.5 ring-1 ring-border">
-      <BrandLogo
-        domain={domain}
-        name={name}
-        imgClassName="h-full w-full object-contain"
-        fallback={<span className="text-sm font-bold text-primary">{initials || '?'}</span>}
-      />
-    </div>
-  );
+// Vendor initials — last-resort fallback when no logo file exists.
+function initialsOf(name) {
+  return String(name || '').split(/[\s&/-]+/).filter(Boolean).map((s) => s[0]).slice(0, 2).join('').toUpperCase() || '?';
 }
 
 // ─── Vendors — logo card with Website + Price Sheet buttons ──────────────────
@@ -240,26 +228,38 @@ export function VendorSites({ forceAll = false }) {
       {visible.length === 0 ? (
         <div className="rounded-xl border border-border bg-card p-6 text-center text-sm text-muted-fg">No vendor matches “{query}”.</div>
       ) : (
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
           {visible.map((v) => (
             <div
               key={v.name}
-              className="flex flex-col gap-2.5 rounded-xl border border-border bg-card p-3 transition hover:border-primary/40 hover:shadow-sm"
+              className="flex flex-col overflow-hidden rounded-xl border border-border bg-card transition hover:border-primary/40 hover:shadow-md"
             >
-              <div className="flex items-center gap-2.5">
-                <VendorLogo name={v.name} domain={v.domain} />
-                <span className="min-w-0 flex-1 truncate text-sm font-semibold" title={v.name}>{v.name}</span>
+              {/* Logo panel — framed on white so brand marks read cleanly */}
+              <div className="grid h-24 place-items-center border-b border-border bg-white p-3">
+                <BrandLogo
+                  src={VENDOR_LOGOS[v.domain]}
+                  name={v.name}
+                  imgClassName="max-h-full max-w-full object-contain"
+                  fallback={<span className="text-xl font-extrabold tracking-tight text-slate-400">{initialsOf(v.name)}</span>}
+                />
               </div>
-              <div className="flex flex-wrap gap-1.5">
-                {v.website && (
+
+              {/* Website + price-sheet buttons */}
+              <div className="flex flex-1 flex-col gap-1.5 p-2">
+                {v.website ? (
                   <a
                     href={v.website}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1 rounded-lg bg-primary/10 px-2.5 py-1 text-xs font-semibold text-primary transition hover:bg-primary/20"
+                    title={`${v.name} — website`}
+                    className="truncate rounded-md bg-blue-600 px-2 py-1.5 text-center text-xs font-bold uppercase tracking-wide text-white transition hover:bg-blue-700"
                   >
-                    <Globe2 size={12} /> Website
+                    {v.name}
                   </a>
+                ) : (
+                  <div className="truncate rounded-md bg-muted px-2 py-1.5 text-center text-xs font-bold uppercase tracking-wide text-fg/80" title={v.name}>
+                    {v.name}
+                  </div>
                 )}
                 {v.pricesheets.map((ps) => (
                   <a
@@ -267,13 +267,13 @@ export function VendorSites({ forceAll = false }) {
                     href={ps.url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1 rounded-lg bg-muted px-2.5 py-1 text-xs font-semibold text-fg/80 transition hover:bg-muted/70 hover:text-fg"
+                    className="inline-flex items-center justify-center gap-1 truncate rounded-md bg-blue-50 px-2 py-1 text-xs font-semibold text-blue-700 transition hover:bg-blue-100 dark:bg-blue-900/30 dark:text-blue-200 dark:hover:bg-blue-900/50"
                   >
                     <FileText size={12} /> {v.pricesheets.length === 1 ? 'Price Sheet' : ps.label}
                   </a>
                 ))}
                 {!v.website && v.pricesheets.length === 0 && (
-                  <span className="text-xs italic text-muted-fg">No links</span>
+                  <span className="py-1 text-center text-[11px] italic text-muted-fg">No links</span>
                 )}
               </div>
             </div>

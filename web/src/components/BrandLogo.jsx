@@ -1,25 +1,22 @@
-// BrandLogo — renders a company logo pulled from its domain, with graceful
-// fallbacks so a card never shows a broken image.
+// BrandLogo — renders a company logo with graceful fallbacks so a card never
+// shows a broken image or spams the console.
 //
-// Source cascade (advance on error):
-//   1. Clearbit Logo API   — real brand logo, transparent PNG (best quality)
-//   2. Google favicon @128  — reliable, exists for almost every live domain
-//   3. `fallback` node (a lucide icon or an initials badge)
-//
-// Logos are rendered on a white, padded tile by the caller so they read
-// cleanly regardless of the source's own background.
+// IMPORTANT: this app runs on a locked-down office network that cannot resolve
+// external hosts (logo.clearbit.com, gstatic favicons, etc. all fail with
+// ERR_NAME_NOT_RESOLVED). So we do NOT fetch logos from the internet. Instead:
+//   1. If the caller supplies a LOCAL image path via `src`, use it.
+//   2. Otherwise render the `fallback` node (a lucide icon or an initials badge).
+// To add a real logo later, drop the file in web/public/vendor-logos/ and pass
+// its path as `src` — a same-origin asset that works offline.
 
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 
-export function BrandLogo({ domain, name = '', imgClassName = 'h-full w-full object-contain', fallback = null }) {
-  const sources = useMemo(() => (domain ? [
-    `https://logo.clearbit.com/${domain}?size=128`,
-    `https://www.google.com/s2/favicons?domain=${domain}&sz=128`,
-  ] : []), [domain]);
-  const [idx, setIdx] = useState(0);
+export function BrandLogo({ src = null, name = '', imgClassName = 'h-full w-full object-contain', fallback = null }) {
+  // Track load failure so a bad local path still degrades to the fallback
+  // instead of showing a broken-image icon.
+  const [failed, setFailed] = useState(false);
 
-  const src = sources[idx];
-  if (!src) return fallback;
+  if (!src || failed) return fallback;
 
   return (
     <img
@@ -27,14 +24,15 @@ export function BrandLogo({ domain, name = '', imgClassName = 'h-full w-full obj
       alt={name ? `${name} logo` : ''}
       loading="lazy"
       referrerPolicy="no-referrer"
-      onError={() => setIdx((i) => i + 1)}
+      onError={() => setFailed(true)}
       className={imgClassName}
     />
   );
 }
 
-// A neutral lettered badge — the last-resort fallback when no logo resolves.
+// A neutral lettered badge — the default fallback when no local logo is set.
 export function InitialsBadge({ name = '?', className = '' }) {
-  const initials = name.split(/[\s&/-]+/).filter(Boolean).map((s) => s[0]).slice(0, 2).join('').toUpperCase();
+  const initials = String(name || '')
+    .split(/[\s&/-]+/).filter(Boolean).map((s) => s[0]).slice(0, 2).join('').toUpperCase();
   return <span className={className}>{initials || '?'}</span>;
 }

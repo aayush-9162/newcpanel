@@ -8,6 +8,7 @@
 import { Link } from 'react-router-dom';
 import { STAT_PALETTE } from '@/components/HeroStat';
 import { BrandLogo } from '@/components/BrandLogo';
+import { VENDOR_LOGOS } from '@/data/vendorLogoFiles';
 import { cn } from '@/lib/cn';
 import { ExternalLink, ArrowRight } from 'lucide-react';
 
@@ -31,10 +32,10 @@ export function LauncherCard({
     <div className="h-9 w-9 overflow-hidden rounded-xl shadow-md ring-2 ring-black/5 transition-transform duration-300 group-hover:scale-110 group-hover:rotate-3">
       <img src={iconSrc} alt={label} className="h-full w-full object-cover" />
     </div>
-  ) : logo ? (
+  ) : (logo && VENDOR_LOGOS[logo]) ? (
     <div className="grid h-9 w-9 place-items-center overflow-hidden rounded-xl bg-white p-1.5 shadow-md ring-2 ring-black/5 transition-transform duration-300 group-hover:scale-110">
       <BrandLogo
-        domain={logo}
+        src={VENDOR_LOGOS[logo]}
         name={label}
         imgClassName="h-full w-full object-contain"
         fallback={<Icon size={16} strokeWidth={2.25} className="text-slate-500" />}
