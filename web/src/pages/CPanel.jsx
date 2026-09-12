@@ -234,17 +234,18 @@ export function VendorSites({ forceAll = false }) {
               key={v.name}
               className="flex flex-col overflow-hidden rounded-xl border border-border bg-card transition hover:border-primary/40 hover:shadow-md"
             >
-              {/* Logo panel — framed on white so brand marks read cleanly */}
-              <div className="grid h-24 place-items-center border-b border-border bg-white p-3">
+              {/* Logo panel — fixed height, image strictly bounded & centered so
+                  every logo renders at a consistent size and never overlaps. */}
+              <div className="flex h-20 items-center justify-center overflow-hidden border-b border-border bg-white px-3">
                 <BrandLogo
                   src={VENDOR_LOGOS[v.domain]}
                   name={v.name}
-                  imgClassName="max-h-full max-w-full object-contain"
-                  fallback={<span className="text-xl font-extrabold tracking-tight text-slate-400">{initialsOf(v.name)}</span>}
+                  imgClassName="max-h-12 max-w-[80%] w-auto object-contain"
+                  fallback={<span className="text-lg font-extrabold tracking-tight text-slate-400">{initialsOf(v.name)}</span>}
                 />
               </div>
 
-              {/* Website + price-sheet buttons */}
+              {/* Website + price-sheet buttons (separate section, below the logo) */}
               <div className="flex flex-1 flex-col gap-1.5 p-2">
                 {v.website ? (
                   <a
@@ -272,9 +273,6 @@ export function VendorSites({ forceAll = false }) {
                     <FileText size={12} /> {v.pricesheets.length === 1 ? 'Price Sheet' : ps.label}
                   </a>
                 ))}
-                {!v.website && v.pricesheets.length === 0 && (
-                  <span className="py-1 text-center text-[11px] italic text-muted-fg">No links</span>
-                )}
               </div>
             </div>
           ))}
