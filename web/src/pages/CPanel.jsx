@@ -236,12 +236,12 @@ export function VendorSites({ forceAll = false }) {
             >
               {/* Logo panel — fixed height, image strictly bounded & centered so
                   every logo renders at a consistent size and never overlaps. */}
-              <div className="flex h-20 items-center justify-center overflow-hidden border-b border-border bg-white px-3">
+              <div className="flex h-20 items-center justify-center overflow-hidden border-b border-border bg-white p-2.5">
                 <BrandLogo
                   src={VENDOR_LOGOS[v.domain]}
                   name={v.name}
-                  imgClassName="max-h-12 max-w-[80%] w-auto object-contain"
-                  fallback={<span className="text-lg font-extrabold tracking-tight text-slate-400">{initialsOf(v.name)}</span>}
+                  imgClassName="h-full w-full object-contain"
+                  fallback={<span className="text-2xl font-extrabold tracking-tight text-slate-400">{initialsOf(v.name)}</span>}
                 />
               </div>
 
