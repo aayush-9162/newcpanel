@@ -14,7 +14,7 @@ import { useAuth } from '@/auth/AuthProvider';
 import {
   LayoutGrid, ExternalLink, ClipboardEdit, Sparkles, Search,
   // External tool icons
-  ListChecks, BarChart3, Globe2, Video, Store, FileBarChart, Clock, Truck, FileText, MessagesSquare, Package, PackageSearch,
+  ListChecks, BarChart3, Globe2, Video, Store, FileBarChart, Clock, Truck, FileText, MessagesSquare, Package, PackageSearch, LineChart,
 } from 'lucide-react';
 
 // ─── External tools (open in new tab) ────────────────────────────────────────
@@ -102,6 +102,14 @@ const TOOLS = [
     icon: FileBarChart,
     accent: 'violet',
     adminOnly: true,   // only shown to the admin role
+  },
+  {
+    label: 'PC Reports',
+    description: 'Profit-center reports dashboard',
+    href: 'http://192.168.0.211:7100/dashboard',
+    icon: LineChart,
+    accent: 'sky',
+    adminOnly: true,   // super admin only
   },
 ];
 
