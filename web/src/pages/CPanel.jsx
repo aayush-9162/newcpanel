@@ -3,7 +3,7 @@
 //   1) External Tools (TMS, File Share, INFOTRACK, etc.) — open in a new tab
 //   2) Forms — internal routes to in-app form pages
 
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { Topbar } from '@/components/Topbar';
 import { HeroBanner } from '@/components/HeroStat';
 import { LauncherCard } from '@/components/LauncherCard';
@@ -14,7 +14,7 @@ import { useAuth } from '@/auth/AuthProvider';
 import {
   LayoutGrid, ExternalLink, ClipboardEdit, Sparkles, Search,
   // External tool icons
-  ListChecks, BarChart3, Globe2, Video, Store, FileBarChart, Clock, Truck, FileText, MessagesSquare, Package, PackageSearch, LineChart,
+  ListChecks, BarChart3, Globe2, Video, Store, FileBarChart, Clock, Truck, FileText, MessagesSquare, Package, PackageSearch, LineChart, ArrowDown,
 } from 'lucide-react';
 
 // ─── External tools (open in new tab) ────────────────────────────────────────
@@ -118,6 +118,17 @@ export default function CPanel() {
   const { hasRole } = useAuth();
   // Admin-only tools (e.g. Form Reports) are shown only to the Super Admin.
   const tools = TOOLS.filter((t) => !t.adminOnly || hasRole('superadmin'));
+
+  // Vendors section: controlled here so the top shortcut can expand it and
+  // scroll to it in one click.
+  const [showAllVendors, setShowAllVendors] = useState(false);
+  const vendorRef = useRef(null);
+  const openVendors = () => {
+    setShowAllVendors(true);
+    // wait a tick so the expanded rows exist before scrolling
+    requestAnimationFrame(() => vendorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+  };
+
   return (
     <>
       <Topbar title="Quick Access" subtitle="External Tools & Company Forms" />
@@ -134,6 +145,17 @@ export default function CPanel() {
           <div className="mt-2 text-sm text-muted-fg">
             External tools and company forms — everything you need, in one place.
           </div>
+          {/* Shortcut to the vendor price-sheet directory further down */}
+          <button
+            type="button"
+            onClick={openVendors}
+            className="group mt-4 inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-500 px-4 py-2 text-sm font-bold uppercase tracking-wide text-white shadow-lg shadow-indigo-500/30 ring-1 ring-white/20 transition hover:-translate-y-0.5 hover:shadow-xl hover:shadow-indigo-500/40 active:scale-95"
+          >
+            <Store size={16} />
+            Vendor Website / Price List
+            <span className="rounded-full bg-white/20 px-1.5 py-0.5 text-[10px] tabular-nums">{VENDORS.length}</span>
+            <ArrowDown size={15} className="transition-transform group-hover:translate-y-0.5" />
+          </button>
         </HeroBanner>
 
         {/* External Tools */}
@@ -163,7 +185,7 @@ export default function CPanel() {
         </div>
 
         {/* Vendor sites — many, so compact + searchable */}
-        <VendorSites />
+        <VendorSites showAll={showAllVendors} setShowAll={setShowAllVendors} sectionRef={vendorRef} />
 
       </div>
     </>
@@ -186,9 +208,8 @@ function VendorLogo({ name, domain }) {
 }
 
 // ─── Vendors — logo card with Website + Price Sheet buttons ──────────────────
-function VendorSites() {
+function VendorSites({ showAll, setShowAll, sectionRef }) {
   const [query, setQuery] = useState('');
-  const [showAll, setShowAll] = useState(false);
   const INITIAL = 12;
 
   const filtered = useMemo(() => {
@@ -201,7 +222,7 @@ function VendorSites() {
   const hidden = VENDORS.length - INITIAL;
 
   return (
-    <div className="flex flex-col gap-3">
+    <div ref={sectionRef} className="flex scroll-mt-4 flex-col gap-3">
       <div className="flex flex-wrap items-end justify-between gap-3 pt-1">
         <div className="flex items-center gap-2.5">
           <span className="grid h-8 w-8 place-items-center rounded-lg bg-primary/10 text-primary"><Store size={16} /></span>
