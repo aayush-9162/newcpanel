@@ -103,7 +103,7 @@ const TOOLS = [
     href: 'http://192.168.0.211.nip.io:1214/formreport/',
     icon: FileBarChart,
     accent: 'violet',
-    adminOnly: true,   // only shown to the admin role
+    roles: ['superadmin', 'manager', 'management'],   // owner + manager + management
   },
   {
     label: 'Office PC Reports',
@@ -118,8 +118,13 @@ const TOOLS = [
 
 export default function CPanel() {
   const { hasRole } = useAuth();
-  // Admin-only tools (e.g. Form Reports) are shown only to the Super Admin.
-  const tools = TOOLS.filter((t) => !t.adminOnly || hasRole('superadmin'));
+  // Tool visibility: a `roles` list shows the tool to any of those roles; the
+  // older `adminOnly` flag keeps a tool Super-Admin-only; otherwise it's public.
+  const tools = TOOLS.filter((t) => {
+    if (Array.isArray(t.roles)) return t.roles.some((r) => hasRole(r));
+    if (t.adminOnly) return hasRole('superadmin');
+    return true;
+  });
 
   return (
     <>
