@@ -153,17 +153,6 @@ export default function CPanel() {
           <div className="mt-2 text-sm text-muted-fg">
             External tools and company forms — everything you need, in one place.
           </div>
-          {/* Shortcut to the vendor price-sheet directory further down */}
-          <button
-            type="button"
-            onClick={openVendors}
-            className="group mt-4 inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-500 px-4 py-2 text-sm font-bold uppercase tracking-wide text-white shadow-lg shadow-indigo-500/30 ring-1 ring-white/20 transition hover:-translate-y-0.5 hover:shadow-xl hover:shadow-indigo-500/40 active:scale-95"
-          >
-            <Store size={16} />
-            Vendor Website / Price List
-            <span className="rounded-full bg-white/20 px-1.5 py-0.5 text-[10px] tabular-nums">{VENDORS.length}</span>
-            <ArrowDown size={15} className="transition-transform group-hover:translate-y-0.5" />
-          </button>
         </HeroBanner>
 
         {/* External Tools */}
