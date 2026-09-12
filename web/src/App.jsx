@@ -1,6 +1,7 @@
 import { Routes, Route } from 'react-router-dom';
 import { Layout } from '@/components/Layout.jsx';
 import CPanel from '@/pages/CPanel.jsx';
+import Vendors from '@/pages/Vendors.jsx';
 import Dashboard from '@/pages/Dashboard.jsx';
 import Admin from '@/pages/Admin.jsx';
 import StubPage from '@/pages/StubPage.jsx';
@@ -37,6 +38,7 @@ import InventoryRequestForm from '@/pages/forms/InventoryRequestForm.jsx';
 // Path → element map. Anything not in here falls through to StubPage.
 const built = {
   '/': <CPanel />,
+  '/vendors': <Vendors />,
   '/dashboard': <Dashboard />,
   '/admin': <Admin />,
 

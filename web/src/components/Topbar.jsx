@@ -14,7 +14,7 @@ const TONES = {
   success: 'bg-success/10 text-success hover:bg-success/20',
 };
 
-export function Topbar({ title, subtitle }) {
+export function Topbar({ title, subtitle, actions }) {
   const [dark, setDark] = useState(() => document.documentElement.classList.contains('dark'));
   const [refreshing, setRefreshing] = useState(false);
   const qc = useQueryClient();
@@ -44,6 +44,8 @@ export function Topbar({ title, subtitle }) {
         <h1 className="text-lg font-semibold tracking-tight truncate">{title}</h1>
         {subtitle && <p className="text-xs text-muted-fg truncate">{subtitle}</p>}
       </div>
+
+      {actions && <div className="ml-3 flex shrink-0 items-center">{actions}</div>}
 
       <div className="ml-auto flex items-center gap-1.5 min-w-0">
         <div className="hidden md:flex items-center gap-1 overflow-x-auto min-w-0">

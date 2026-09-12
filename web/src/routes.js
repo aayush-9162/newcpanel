@@ -39,6 +39,9 @@ export const routes = [
   // Home — Control Panel is visible to everyone. Dashboard is for the owner
   // (admin) + viewer — NOT managers or salespeople.
   { path: '/',            label: 'Quick Access', icon: Home,            group: 'Home', built: true },
+  // Opened in a new tab from the Quick Access header — not shown in the sidebar
+  // (group 'Hidden' is not part of the sidebar ORDER).
+  { path: '/vendors',     label: 'Vendors & Price Sheets', icon: Home, group: 'Hidden', built: true },
   { path: '/dashboard',   label: 'Dashboard',     icon: LayoutDashboard, group: 'Home', built: true, home: true, roles: ['admin', 'viewer'] },
   { path: '/admin',       label: 'User Management', icon: UserCog,       group: 'Home', built: true, roles: ADMIN_ONLY },
 
@@ -88,7 +91,8 @@ export const routes = [
 // A route is accessible if the user's allowedRoutes cover its path. Quick
 // Access ('/') is always allowed so no one is ever locked out of the landing.
 export function isRouteAllowed(routePath, allowedRoutes) {
-  if (routePath === '/') return true;
+  // Quick Access and the vendor directory it links to are open to any signed-in user.
+  if (routePath === '/' || routePath === '/vendors') return true;
   if (allowedRoutes === '*' || allowedRoutes === true) return true;
   return Array.isArray(allowedRoutes) && allowedRoutes.includes(routePath);
 }
@@ -96,7 +100,7 @@ export function isRouteAllowed(routePath, allowedRoutes) {
 // Routes an admin may toggle per role in the /admin permissions matrix.
 // Excludes only '/' (Quick Access is always on). User Management ('/admin') and
 // Tracker Report ('/tracker') ARE listed so they can be granted when needed.
-export const PERMISSIONABLE_ROUTES = routes.filter((r) => r.path !== '/');
+export const PERMISSIONABLE_ROUTES = routes.filter((r) => r.path !== '/' && r.path !== '/vendors');
 
 // External links shown in the topbar on every page. (Cleared — these tools are
 // launched from the Quick Access portal instead.)
