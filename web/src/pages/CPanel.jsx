@@ -104,12 +104,13 @@ const TOOLS = [
     adminOnly: true,   // only shown to the admin role
   },
   {
-    label: 'PC Reports',
+    label: 'Office PC Reports',
     description: 'Profit-center reports dashboard',
     href: 'http://192.168.0.211:7100/dashboard',
     icon: LineChart,
     accent: 'sky',
     adminOnly: true,   // super admin only
+    badge: 'NEW',
   },
 ];
 
