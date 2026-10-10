@@ -90,14 +90,6 @@ const TOOLS = [
     accent: 'emerald',
   },
   {
-    label: 'Inventory Manager BETA',
-    description: 'Inventory management — beta',
-    href: 'http://192.168.0.180:1218/',
-    icon: Warehouse,
-    accent: 'primary',
-    badge: 'NEW',
-  },
-  {
     label: 'Daily Forms',
     description: 'Store forms portal',
     href: 'http://192.168.0.211.nip.io:1214/',
@@ -119,6 +111,14 @@ const TOOLS = [
     icon: LineChart,
     accent: 'sky',
     adminOnly: true,   // super admin only
+  },
+  {
+    label: 'Inventory Manager BETA',
+    description: 'Inventory management — beta',
+    href: 'http://192.168.0.180:1218/',
+    icon: Warehouse,
+    accent: 'primary',
+    badge: 'NEW',
   },
 ];
 
