@@ -16,7 +16,7 @@ import { useAuth } from '@/auth/AuthProvider';
 import {
   LayoutGrid, ExternalLink, ClipboardEdit, Sparkles, Search,
   // External tool icons
-  ListChecks, BarChart3, Globe2, Video, Store, FileBarChart, Clock, Truck, FileText, MessagesSquare, Package, PackageSearch, LineChart,
+  ListChecks, BarChart3, Globe2, Video, Store, FileBarChart, Clock, Truck, FileText, MessagesSquare, Package, PackageSearch, LineChart, Warehouse,
 } from 'lucide-react';
 
 // ─── External tools (open in new tab) ────────────────────────────────────────
@@ -88,6 +88,13 @@ const TOOLS = [
     icon: PackageSearch,          // background decoration / fallback
     iconSrc: '/inventoryscrub.svg',
     accent: 'emerald',
+  },
+  {
+    label: 'Inventory Manager BETA',
+    description: 'Inventory management — beta',
+    href: 'http://192.168.0.180:1218/',
+    icon: Warehouse,
+    accent: 'primary',
     badge: 'NEW',
   },
   {
@@ -112,7 +119,6 @@ const TOOLS = [
     icon: LineChart,
     accent: 'sky',
     adminOnly: true,   // super admin only
-    badge: 'NEW',
   },
 ];
 
