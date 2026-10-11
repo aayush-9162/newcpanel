@@ -60,18 +60,42 @@ const TIMING = {
 };
 
 // ── Dates ────────────────────────────────────────────────────────────────────
+const validMD = (mo, dd) => mo >= 1 && mo <= 12 && dd >= 1 && dd <= 31;
 function parseDates(s) {
   const out = [];
   const re = /(\d{1,2})\/(\d{1,2})\/(\d{2,4})/g;
   let m;
   while ((m = re.exec(String(s ?? '')))) {
     let y = Number(m[3]); if (y < 100) y += 2000;
-    const d = new Date(y, Number(m[1]) - 1, Number(m[2]));
+    const mo = Number(m[1]), dd = Number(m[2]);
+    if (!validMD(mo, dd)) continue;
+    const d = new Date(y, mo - 1, dd);
     if (!Number.isNaN(d.getTime())) out.push(d);
   }
   return out;
 }
-const today0 = () => { const t = new Date(); t.setHours(0, 0, 0, 0); return t; };
+// Dates the team writes into remarks / scrub notes as updates. Includes full
+// M/D/YYYY dates and year-less "…DATE - 10/19" notes (year inferred as the one
+// nearest today). Year-less fragments are only taken right after the word
+// DATE, so item codes like "T609-1/3" are never read as dates.
+function parseNoteDates(s) {
+  const text = String(s ?? '');
+  const out = parseDates(text);
+  const re = /DATE\s*[-:]?\s*(\d{1,2})\/(\d{1,2})(?!\s*\/\s*\d)/gi;
+  const t0 = today0();
+  let m;
+  while ((m = re.exec(text))) {
+    const mo = Number(m[1]), dd = Number(m[2]);
+    if (!validMD(mo, dd)) continue;
+    let d = new Date(t0.getFullYear(), mo - 1, dd);
+    const diff = daysBetween(d, t0);
+    if (diff < -183) d = new Date(t0.getFullYear() + 1, mo - 1, dd);
+    else if (diff > 183) d = new Date(t0.getFullYear() - 1, mo - 1, dd);
+    out.push(d);
+  }
+  return out;
+}
+function today0() { const t = new Date(); t.setHours(0, 0, 0, 0); return t; }
 const daysBetween = (a, b) => Math.round((a - b) / 86400000);
 const fmtD = (d) => (d ? d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—');
 function spanText(days) {
@@ -176,8 +200,22 @@ function buildRecords(shaped, vendor, gid) {
     const orig = v('origQty') ? toNum(v('origQty')) : null;
     const rem = cols.remQty != null && v('remQty') !== '' ? toNum(v('remQty')) : null;
     const portEta = latestOf('portEta'), vendorEta = latestOf('vendorEta'), estDel = latestOf('estDel');
-    const eta = portEta || vendorEta || estDel;
-    const etaSrc = portEta ? 'Arrival at port' : vendorEta ? 'Vendor expected' : estDel ? 'Est. delivery' : null;
+    // The team keeps the sheet current by writing revised dates into REMARKS
+    // and the scrub notes (e.g. "D631-00/01 - 10/27/2026", "EST LOAD DATE -
+    // 10/19"), while the date columns keep the original. The PO's real
+    // expected date is the most recent date the sheet gives anywhere.
+    const candidates = [
+      ...(portEta ? [{ d: portEta, src: 'Arrival at port' }] : []),
+      ...(vendorEta ? [{ d: vendorEta, src: 'Vendor expected' }] : []),
+      ...(estDel ? [{ d: estDel, src: 'Est. delivery' }] : []),
+      ...[...vals('remarks'), ...vals('remarks2')].flatMap((t) => parseNoteDates(t).map((d) => ({ d, src: 'Updated in remarks', note: t }))),
+      ...g.history.flatMap((h) => parseNoteDates(h.value).map((d) => ({ d, src: `Updated at scrub ${h.label}`, note: h.value }))),
+    ];
+    const best = candidates.reduce((a, c) => (!a || c.d > a.d ? c : a), null);
+    const eta = best?.d || null;
+    const etaSrc = best?.src || null;
+    const etaNote = best?.note || null;
+    const etaUpdated = !!best?.note;           // came from remarks / scrub, not a date column
     const target = parseDates(v('target'))[0] || null;
     const targetWeeks = cols.target != null ? ((shaped.header[cols.target] || '').match(/(\d+)\s*WEEK/i)?.[1] || null) : null;
     const poDate = parseDates(v('poDate'))[0] || null;
@@ -192,7 +230,7 @@ function buildRecords(shaped, vendor, gid) {
       poDate, ageDays: poDate ? daysBetween(t0, poDate) : null,
       orig, rem, receivedQty: orig != null && rem != null ? Math.max(0, orig - rem) : null,
       vendorQty: v('vendorQty') ? toNum(v('vendorQty')) : null,
-      eta, etaSrc, etaDays, timing, portEta, vendorEta, estDel, target, targetWeeks,
+      eta, etaSrc, etaNote, etaUpdated, etaDays, timing, portEta, vendorEta, estDel, target, targetWeeks,
       lateVsTarget: eta && target && !received ? daysBetween(eta, target) : null,
       invoices: rows.map((r) => ({ no: v('invoiceNo', r), date: v('invoiceDate', r), qty: v('invQty', r) })).filter((x) => x.no || x.date || x.qty),
       remarks: [...vals('remarks'), ...vals('remarks2')],
@@ -281,9 +319,12 @@ function POCard({ rec, showVendor, onOpen }) {
       <div className="xl:col-span-3">
         <TimingChip rec={rec} />
         {rec.eta && (
-          <div className={cn('mt-1.5 text-[12px]', rec.etaFlagged && 'font-semibold text-rose-600 dark:text-rose-300')}>
+          <div className={cn('mt-1.5 text-[12px]', rec.etaFlagged && !rec.etaUpdated && 'font-semibold text-rose-600 dark:text-rose-300')} title={rec.etaNote || undefined}>
             <span className="text-muted-fg">{rec.etaSrc}:</span> <b>{fmtD(rec.eta)}</b>
           </div>
+        )}
+        {rec.etaUpdated && (rec.vendorEta || rec.portEta || rec.estDel) && (
+          <div className="text-[10px] text-muted-fg">original date {fmtD(rec.portEta || rec.vendorEta || rec.estDel)}</div>
         )}
         {rec.lateVsTarget != null && (rec.lateVsTarget > 0
           ? <div className="mt-0.5 text-[11px] font-semibold text-rose-600 dark:text-rose-300">{spanText(rec.lateVsTarget)} later than target</div>
@@ -328,9 +369,10 @@ function PODrawer({ rec, sheetUrl, onClose }) {
   const milestones = [
     { label: 'PO placed', date: rec.poDate, placed: true },
     { label: `Target${rec.targetWeeks ? ` (PO + ${rec.targetWeeks} wk)` : ''}`, date: rec.target, target: true },
-    { label: 'Vendor expected date', date: rec.vendorEta, flagged: rec.etaFlagged },
-    { label: 'Arrival at port', date: rec.portEta, flagged: rec.etaFlagged },
-    { label: 'Est. delivery', date: rec.estDel },
+    { label: `Vendor expected date${rec.etaUpdated ? ' (original)' : ''}`, date: rec.vendorEta, flagged: rec.etaFlagged && !rec.etaUpdated, superseded: rec.etaUpdated },
+    { label: `Arrival at port${rec.etaUpdated ? ' (original)' : ''}`, date: rec.portEta, flagged: rec.etaFlagged && !rec.etaUpdated, superseded: rec.etaUpdated },
+    { label: 'Est. delivery', date: rec.estDel, superseded: rec.etaUpdated },
+    ...(rec.etaUpdated ? [{ label: `Current expected — ${rec.etaSrc.toLowerCase()}`, date: rec.eta, note: rec.etaNote, current: true }] : []),
   ].filter((m) => m.date).sort((a, b) => a.date - b.date);
   const stat = (label, value, tone) => (
     <div className="rounded-lg border border-border bg-card px-3 py-2">
@@ -386,15 +428,17 @@ function PODrawer({ rec, sheetUrl, onClose }) {
               <ol className="relative ml-2 border-l-2 border-border pl-4">
                 {milestones.map((m, i) => {
                   const d = daysBetween(m.date, t0);
-                  const late = !m.target && !m.placed && d < 0 && rec.timing !== 'received';
+                  // A superseded original date is history, not lateness.
+                  const late = !m.target && !m.placed && !m.superseded && d < 0 && rec.timing !== 'received';
                   return (
                     <li key={i} className="relative pb-3 last:pb-0">
                       <span className={cn('absolute -left-[23px] top-1 h-3 w-3 rounded-full ring-2 ring-bg',
-                        m.target ? 'bg-violet-500' : late ? 'bg-rose-500' : d < 0 ? 'bg-slate-400' : 'bg-sky-500')} />
-                      <div className="text-[11px] font-semibold text-muted-fg">{m.label}</div>
-                      <div className={cn('text-sm font-bold', (late || m.flagged) && 'text-rose-600 dark:text-rose-300')}>
-                        {fmtD(m.date)} <span className="text-[11px] font-medium text-muted-fg">· {rel(d)}</span>
+                        m.target ? 'bg-violet-500' : m.current ? 'bg-emerald-500' : late ? 'bg-rose-500' : d < 0 || m.superseded ? 'bg-slate-400' : 'bg-sky-500')} />
+                      <div className={cn('text-[11px] font-semibold', m.current ? 'text-emerald-700 dark:text-emerald-300' : 'text-muted-fg')}>{m.label}</div>
+                      <div className={cn('text-sm font-bold', (late || m.flagged) && 'text-rose-600 dark:text-rose-300', m.superseded && 'font-medium text-muted-fg line-through decoration-1')}>
+                        {fmtD(m.date)} <span className="text-[11px] font-medium text-muted-fg no-underline">· {rel(d)}</span>
                       </div>
+                      {m.note && <div className="mt-0.5 text-[11px] italic text-muted-fg">“{m.note}”</div>}
                     </li>
                   );
                 })}
