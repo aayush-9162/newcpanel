@@ -14,7 +14,7 @@ import { fmtNumber } from '@/lib/format';
 import { cn } from '@/lib/cn';
 import {
   FileSpreadsheet, Search, RefreshCw, AlertTriangle, ArrowUp, ArrowDown, ArrowUpDown,
-  Maximize2, Minimize2, ChevronRight, CheckCircle2, Clock, Flag, Circle, Package, History,
+  Maximize2, Minimize2, ChevronRight, CheckCircle2, Clock, Flag, Circle, Package, History, Layers,
 } from 'lucide-react';
 
 const cell = (c) => String(c ?? '').trim();
@@ -455,15 +455,39 @@ export default function POScrubReport() {
                       ) : rows.map((g) => {
                         const S = STATUS[g.status] || STATUS.none;
                         const isOpen = open.has(g.key);
-                        const canOpen = g.history.length > 1;
+                        const canOpen = g.lines.length > 0 || g.history.length > 1;
+                        // Columns that carry data on the extra lines → the detail mini-table.
+                        const lineCols = g.lines.length
+                          ? shaped.coreCols.filter((c) => !(shaped.isAll && c === VENDOR_COL) && g.lines.some((ln) => cell(ln?.[c])))
+                          : [];
+                        // One cell per PO: main value + a "+N" chip for values that live
+                        // on the extra lines (hover lists them all, click opens details).
+                        const cellWithExtras = (c) => {
+                          const main = cell(g.main?.[c]);
+                          const extras = g.lines.map((ln, li) => ({ v: cell(ln?.[c]), li: li + 1 })).filter((x) => x.v);
+                          if (!extras.length) return renderCell(g, 0, g.main, c);
+                          const first = main ? null : extras[0];
+                          const rest = main ? extras : extras.slice(1);
+                          const allVals = [main, ...extras.map((x) => x.v)].filter(Boolean);
+                          return (
+                            <div className={cn('flex items-start gap-1.5', shaped.colType[c] === 'num' && 'justify-end')}>
+                              <div className="min-w-0">{first ? renderCell(g, first.li, g.lines[first.li - 1], c) : renderCell(g, 0, g.main, c)}</div>
+                              {rest.length > 0 && (
+                                <button type="button" onClick={() => toggleOpen(g.key)} title={allVals.join('\n')}
+                                  className="mt-px shrink-0 rounded-full bg-primary/10 px-1.5 text-[10px] font-bold leading-4 text-primary transition hover:bg-primary/20">
+                                  +{rest.length}
+                                </button>
+                              )}
+                            </div>
+                          );
+                        };
                         return (
                           <Fragment key={g.key}>
-                            {/* Main PO row */}
                             <tr className={cn('group/row', S.row)}>
                               <td className={cn('sticky left-0 z-10 border-b border-l-4 border-r border-border/60 px-2 py-2 text-right align-top', S.row, S.stripe)}>
                                 <div className="flex items-center justify-end gap-1">
                                   {canOpen && (
-                                    <button type="button" onClick={() => toggleOpen(g.key)} title="Scrub history"
+                                    <button type="button" onClick={() => toggleOpen(g.key)} title={isOpen ? 'Hide details' : 'Show details'}
                                       className="grid h-5 w-5 place-items-center rounded text-muted-fg transition hover:bg-black/5 hover:text-fg dark:hover:bg-white/10">
                                       <ChevronRight size={13} className={cn('transition-transform', isOpen && 'rotate-90')} />
                                     </button>
@@ -473,7 +497,12 @@ export default function POScrubReport() {
                               </td>
                               <td className={cn('sticky left-[3.5rem] z-10 whitespace-nowrap border-b border-r border-border/60 px-3 py-2 align-top font-bold text-primary', S.row)}>
                                 {renderCell(g, 0, g.main, shaped.poCol)}
-                                {g.lines.length > 0 && <div className="mt-0.5 text-[10px] font-medium text-muted-fg">+{g.lines.length} line{g.lines.length === 1 ? '' : 's'}</div>}
+                                {g.lines.length > 0 && (
+                                  <button type="button" onClick={() => toggleOpen(g.key)}
+                                    className="mt-1 flex items-center gap-1 rounded-md bg-primary/10 px-1.5 py-0.5 text-[10px] font-semibold text-primary transition hover:bg-primary/20">
+                                    <Layers size={10} /> {g.lines.length} more line{g.lines.length === 1 ? '' : 's'}
+                                  </button>
+                                )}
                               </td>
                               <td className="whitespace-nowrap border-b border-border/40 px-3 py-2 align-top"><StatusPill status={g.status} /></td>
                               <td className="border-b border-border/40 px-3 py-2 align-top">{shaped.scrubCols.length ? <ScrubValue entry={g.latest} /> : null}</td>
@@ -486,46 +515,70 @@ export default function POScrubReport() {
                                       className="whitespace-nowrap rounded-md bg-primary/10 px-2 py-0.5 text-[11px] font-bold uppercase tracking-wide text-primary transition hover:bg-primary/20">
                                       {g.vendor}
                                     </button>
-                                  ) : renderCell(g, 0, g.main, c)}
+                                  ) : cellWithExtras(c)}
                                 </td>
                               ))}
                             </tr>
 
-                            {/* Continuation lines (extra invoices / shipments) */}
-                            {g.lines.map((ln, li) => (
-                              <tr key={`${g.key}-l${li}`} className={cn('text-[12px] text-fg/80', S.row)}>
-                                <td className={cn('sticky left-0 z-10 border-b border-l-4 border-r border-border/40 px-2 py-1.5 text-right align-top text-muted-fg', S.row, S.stripe)}>↳</td>
-                                <td className={cn('sticky left-[3.5rem] z-10 border-b border-r border-border/40 px-3 py-1.5 align-top text-[11px] italic text-muted-fg', S.row)}>line {li + 2}</td>
-                                <td className="border-b border-border/30" />
-                                <td className="border-b border-border/30" />
-                                {shaped.coreCols.map((c) => (
-                                  <td key={c} className={cn('border-b border-border/30 px-3 py-1.5 align-top',
-                                    shaped.colType[c] === 'num' ? 'whitespace-nowrap text-right tabular-nums' : 'max-w-[280px] whitespace-normal break-words')}>
-                                    {cell(ln[c]) ? renderCell(g, li + 1, ln, c) : null}
-                                  </td>
-                                ))}
-                              </tr>
-                            ))}
-
-                            {/* Expanded scrub timeline */}
+                            {/* Detail panel: additional lines as a mini-table + scrub history */}
                             {isOpen && (
-                              <tr className="bg-muted/30">
-                                <td className="sticky left-0 z-10 border-b border-border/40 bg-muted/60" />
-                                <td colSpan={colTotal - 1} className="border-b border-border/40 px-3 py-3">
-                                  <div className="mb-2 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-muted-fg"><History size={12} /> Scrub history · PO {g.po}</div>
-                                  <ol className="flex flex-wrap gap-2">
-                                    {g.history.map((h, hi) => {
-                                      const ok = /^ok$/i.test(h.value);
-                                      return (
-                                        <li key={hi} className={cn('max-w-[320px] rounded-lg border px-2.5 py-1.5 text-[12px]',
-                                          ok ? 'border-emerald-300 bg-emerald-50 dark:border-emerald-800 dark:bg-emerald-950' : 'border-border bg-card',
-                                          hi === g.history.length - 1 && 'ring-2 ring-primary/30')}>
-                                          <div className="text-[10px] font-bold text-muted-fg">{h.label}{hi === g.history.length - 1 && ' · latest'}</div>
-                                          <div className={cn(ok && 'font-bold text-emerald-700 dark:text-emerald-300')}>{ok ? '✓ OK' : h.value}</div>
-                                        </li>
-                                      );
-                                    })}
-                                  </ol>
+                              <tr>
+                                <td className={cn('sticky left-0 z-10 border-b border-l-4 border-border/40 bg-muted/60', S.stripe)} />
+                                <td colSpan={colTotal - 1} className="border-b border-border/40 bg-muted/30 px-3 py-3">
+                                  <div className="sticky left-[3.5rem] flex max-w-[calc(100vw-22rem)] flex-col gap-4">
+                                    {g.lines.length > 0 && (
+                                      <div>
+                                        <div className="mb-2 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-muted-fg">
+                                          <Layers size={12} /> Additional lines · PO {g.po}
+                                          <span className="rounded-full bg-muted px-1.5 tabular-nums">{g.lines.length}</span>
+                                        </div>
+                                        <div className="max-w-full overflow-x-auto rounded-lg border border-border bg-card shadow-sm">
+                                          <table className="text-[12px]">
+                                            <thead className="bg-muted/60">
+                                              <tr>
+                                                <th className="px-2.5 py-1.5 text-left text-[10px] font-bold uppercase tracking-wider text-muted-fg">#</th>
+                                                {lineCols.map((c) => (
+                                                  <th key={c} className={cn('whitespace-nowrap px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-wider text-muted-fg',
+                                                    shaped.colType[c] === 'num' ? 'text-right' : 'text-left')}>{shaped.header[c]}</th>
+                                                ))}
+                                              </tr>
+                                            </thead>
+                                            <tbody>
+                                              {g.lines.map((ln, li) => (
+                                                <tr key={li} className="border-t border-border/60 hover:bg-muted/30">
+                                                  <td className="px-2.5 py-1.5 align-top text-[11px] font-semibold text-muted-fg">{li + 1}</td>
+                                                  {lineCols.map((c) => (
+                                                    <td key={c} className={cn('px-2.5 py-1.5 align-top',
+                                                      shaped.colType[c] === 'num' ? 'whitespace-nowrap text-right font-semibold tabular-nums' : 'max-w-[300px] whitespace-normal break-words')}>
+                                                      {cell(ln?.[c]) ? renderCell(g, li + 1, ln, c) : <span className="text-muted-fg/40">—</span>}
+                                                    </td>
+                                                  ))}
+                                                </tr>
+                                              ))}
+                                            </tbody>
+                                          </table>
+                                        </div>
+                                      </div>
+                                    )}
+                                    {g.history.length > 0 && (
+                                      <div>
+                                        <div className="mb-2 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-muted-fg"><History size={12} /> Scrub history · PO {g.po}</div>
+                                        <ol className="flex flex-wrap gap-2">
+                                          {g.history.map((h, hi) => {
+                                            const ok = /^ok$/i.test(h.value);
+                                            return (
+                                              <li key={hi} className={cn('max-w-[320px] rounded-lg border px-2.5 py-1.5 text-[12px]',
+                                                ok ? 'border-emerald-300 bg-emerald-50 dark:border-emerald-800 dark:bg-emerald-950' : 'border-border bg-card',
+                                                hi === g.history.length - 1 && 'ring-2 ring-primary/30')}>
+                                                <div className="text-[10px] font-bold text-muted-fg">{h.label}{hi === g.history.length - 1 && ' · latest'}</div>
+                                                <div className={cn(ok && 'font-bold text-emerald-700 dark:text-emerald-300')}>{ok ? '✓ OK' : h.value}</div>
+                                              </li>
+                                            );
+                                          })}
+                                        </ol>
+                                      </div>
+                                    )}
+                                  </div>
                                 </td>
                               </tr>
                             )}
