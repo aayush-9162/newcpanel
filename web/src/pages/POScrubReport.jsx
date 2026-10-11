@@ -3,7 +3,7 @@
 // The sheet is the data source, not the layout. Each vendor tab is read via the
 // server proxy (display values + cell background colours) and turned into one
 // record per PO with derived, decision-ready facts the sheet doesn't show:
-//   • arrival status — overdue / arriving soon / on track / no ETA / received
+//   • arrival status — arriving soon / on track / expected (date passed) / no ETA / received
 //   • received progress — ordered vs remaining quantity
 //   • lateness vs the target date (PO date + N weeks)
 //   • missing ACKs, invoices, remarks, scrub history, flagged values
@@ -52,9 +52,9 @@ const STATUS = {
 
 // Arrival status — the main lens of the tracker.
 const TIMING = {
-  overdue:  { label: 'Overdue',       icon: AlertCircle,   chip: 'bg-rose-100 text-rose-700 ring-rose-300 dark:bg-rose-900/50 dark:text-rose-200 dark:ring-rose-800',              rank: 0 },
-  soon:     { label: 'Arriving soon', icon: Truck,         chip: 'bg-amber-100 text-amber-800 ring-amber-300 dark:bg-amber-900/50 dark:text-amber-200 dark:ring-amber-800',      rank: 1 },
-  ontrack:  { label: 'On track',      icon: CalendarClock, chip: 'bg-sky-100 text-sky-700 ring-sky-300 dark:bg-sky-900/50 dark:text-sky-200 dark:ring-sky-800',                  rank: 2 },
+  passed:   { label: 'Expected',      icon: CalendarClock, chip: 'bg-slate-100 text-slate-700 ring-slate-300 dark:bg-slate-800 dark:text-slate-200 dark:ring-slate-700',        rank: 2 },
+  soon:     { label: 'Arriving soon', icon: Truck,         chip: 'bg-amber-100 text-amber-800 ring-amber-300 dark:bg-amber-900/50 dark:text-amber-200 dark:ring-amber-800',      rank: 0 },
+  ontrack:  { label: 'On track',      icon: CalendarClock, chip: 'bg-sky-100 text-sky-700 ring-sky-300 dark:bg-sky-900/50 dark:text-sky-200 dark:ring-sky-800',                  rank: 1 },
   noeta:    { label: 'No ETA',        icon: Hourglass,     chip: 'bg-slate-100 text-slate-600 ring-slate-300 dark:bg-slate-800 dark:text-slate-300 dark:ring-slate-700',        rank: 3 },
   received: { label: 'Received',      icon: PackageCheck,  chip: 'bg-emerald-100 text-emerald-700 ring-emerald-300 dark:bg-emerald-900/50 dark:text-emerald-200 dark:ring-emerald-800', rank: 4 },
 };
@@ -221,7 +221,7 @@ function buildRecords(shaped, vendor, gid) {
     const poDate = parseDates(v('poDate'))[0] || null;
     const received = rem === 0;
     const etaDays = eta ? daysBetween(eta, t0) : null;
-    const timing = received ? 'received' : eta == null ? 'noeta' : etaDays < 0 ? 'overdue' : etaDays <= 14 ? 'soon' : 'ontrack';
+    const timing = received ? 'received' : eta == null ? 'noeta' : etaDays < 0 ? 'passed' : etaDays <= 14 ? 'soon' : 'ontrack';
     const acks = [...new Set(vals('ack'))];
 
     return {
@@ -254,7 +254,7 @@ function StatusPill({ status, small }) {
 }
 function TimingChip({ rec, big }) {
   const t = TIMING[rec.timing] || TIMING.noeta; const Icon = t.icon;
-  const text = rec.timing === 'overdue' ? `Overdue ${spanText(rec.etaDays)}`
+  const text = rec.timing === 'passed' ? `Expected ${fmtD(rec.eta)}`
     : rec.timing === 'soon' ? (rec.etaDays === 0 ? 'Arrives today' : `Arrives in ${spanText(rec.etaDays)}`)
     : rec.timing === 'ontrack' ? `Due in ${spanText(rec.etaDays)}`
     : t.label;
@@ -797,13 +797,12 @@ function PODrawer({ rec, sheetUrl, onClose }) {
                 {milestones.map((m, i) => {
                   const d = daysBetween(m.date, t0);
                   // A superseded original date is history, not lateness.
-                  const late = !m.target && !m.placed && !m.superseded && d < 0 && rec.timing !== 'received';
                   return (
                     <li key={i} className="relative pb-3 last:pb-0">
                       <span className={cn('absolute -left-[23px] top-1 h-3 w-3 rounded-full ring-2 ring-bg',
-                        m.target ? 'bg-violet-500' : m.current ? 'bg-emerald-500' : late ? 'bg-rose-500' : d < 0 || m.superseded ? 'bg-slate-400' : 'bg-sky-500')} />
+                        m.target ? 'bg-violet-500' : m.current ? 'bg-emerald-500' : m.flagged ? 'bg-rose-500' : d < 0 || m.superseded ? 'bg-slate-400' : 'bg-sky-500')} />
                       <div className={cn('text-[11px] font-semibold', m.current ? 'text-emerald-700 dark:text-emerald-300' : 'text-muted-fg')}>{m.label}</div>
-                      <div className={cn('text-sm font-bold', (late || m.flagged) && 'text-rose-600 dark:text-rose-300', m.superseded && 'font-medium text-muted-fg line-through decoration-1')}>
+                      <div className={cn('text-sm font-bold', m.flagged && 'text-rose-600 dark:text-rose-300', m.superseded && 'font-medium text-muted-fg line-through decoration-1')}>
                         {fmtD(m.date)} <span className="text-[11px] font-medium text-muted-fg no-underline">· {rel(d)}</span>
                       </div>
                       {m.note && <div className="mt-0.5 text-[11px] italic text-muted-fg">“{m.note}”</div>}
@@ -926,7 +925,6 @@ function PODrawer({ rec, sheetUrl, onClose }) {
 // ── Page ─────────────────────────────────────────────────────────────────────
 const VIEWS = [
   { key: 'all', label: 'All POs' },
-  { key: 'overdue', label: 'Overdue', test: (r) => r.timing === 'overdue' },
   { key: 'soon', label: 'Arriving ≤ 14 days', test: (r) => r.timing === 'soon' },
   { key: 'noack', label: 'Awaiting ACK', test: (r) => !r.acks.length && r.timing !== 'received' },
   { key: 'noeta', label: 'No ETA', test: (r) => r.timing === 'noeta' },
@@ -937,7 +935,8 @@ const VIEWS = [
   { key: 'c:none', label: 'Unmarked', test: (r) => r.status === 'none', dot: STATUS.none.dot },
 ];
 const SORTS = {
-  attention: { label: 'Needs attention', fn: (a, b) => (TIMING[a.timing].rank - TIMING[b.timing].rank) || ((a.etaDays ?? 1e9) - (b.etaDays ?? 1e9)) },
+  // Flagged POs first, then by arrival: arriving soon → on track → date passed → no ETA → received.
+  attention: { label: 'Needs attention', fn: (a, b) => ((b.status === 'flag') - (a.status === 'flag')) || (TIMING[a.timing].rank - TIMING[b.timing].rank) || ((a.etaDays ?? 1e9) - (b.etaDays ?? 1e9)) },
   eta: { label: 'Arrival date', fn: (a, b) => ((a.eta?.getTime() ?? 9e15) - (b.eta?.getTime() ?? 9e15)) },
   newest: { label: 'Newest PO', fn: (a, b) => ((b.poDate?.getTime() ?? 0) - (a.poDate?.getTime() ?? 0)) },
   open: { label: 'Most qty open', fn: (a, b) => ((b.rem ?? -1) - (a.rem ?? -1)) },
@@ -981,10 +980,10 @@ export default function POScrubReport() {
   const selected = useMemo(() => records.find((r) => r.key === selectedKey) || null, [records, selectedKey]);
 
   const stats = useMemo(() => {
-    const st = { total: records.length, open: 0, overdue: 0, soon: 0, noack: 0, received: 0, openQty: 0 };
+    const st = { total: records.length, open: 0, flagged: 0, soon: 0, noack: 0, received: 0, openQty: 0 };
     for (const r of records) {
       if (r.timing !== 'received') st.open++;
-      if (r.timing === 'overdue') st.overdue++;
+      if (r.status === 'flag') st.flagged++;
       if (r.timing === 'soon') st.soon++;
       if (r.timing === 'received') st.received++;
       if (!r.acks.length && r.timing !== 'received') st.noack++;
@@ -1002,8 +1001,8 @@ export default function POScrubReport() {
       .sort(SORTS[sortKey]?.fn || SORTS.attention.fn);
   }, [records, q, view, sortKey]);
 
-  // Vendor overview (All view). Follows the active filter: with e.g. "Overdue"
-  // selected it lists only vendors that have overdue POs, with those counts.
+  // Vendor overview (All view). Follows the active filter: with e.g. "Flagged"
+  // selected it lists only vendors that have flagged POs, with those counts.
   const viewDef = VIEWS.find((x) => x.key === view) || VIEWS[0];
   const vendorSummary = useMemo(() => sheets.map((s, i) => {
     const recs = recordsByTab[i] || [];
@@ -1011,7 +1010,7 @@ export default function POScrubReport() {
     return {
       i, name: cell(s?.name), total: recs.length,
       open: recs.filter((r) => r.timing !== 'received').length,
-      overdue: recs.filter((r) => r.timing === 'overdue').length,
+      flagged: recs.filter((r) => r.status === 'flag').length,
       soon: recs.filter((r) => r.timing === 'soon').length,
       openQty: recs.reduce((t, r) => t + (r.rem > 0 ? r.rem : 0), 0),
       matched: matched.length,
@@ -1082,14 +1081,14 @@ export default function POScrubReport() {
                 <span className="mx-1 my-1 w-px shrink-0 bg-border" />
                 {sheets.map((s, i) => {
                   const recs = recordsByTab[i] || [];
-                  const overdue = recs.filter((r) => r.timing === 'overdue').length;
+                  const flagged = recs.filter((r) => r.status === 'flag').length;
                   return (
                     <button key={`${s?.name}${i}`} type="button" onClick={() => switchTab(i)}
                       className={cn('relative inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg px-3 py-1.5 text-xs font-semibold transition',
                         i === active ? 'bg-primary text-primary-fg shadow-sm' : 'text-muted-fg hover:bg-muted')}>
                       {cell(s?.name)}
                       <span className={cn('rounded-full px-1.5 text-[10px] tabular-nums', i === active ? 'bg-white/25' : 'bg-muted')}>{recs.length}</span>
-                      {overdue > 0 && <span className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-rose-500 ring-2 ring-card" title={`${overdue} overdue`} />}
+                      {flagged > 0 && <span className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-rose-500 ring-2 ring-card" title={`${flagged} flagged`} />}
                     </button>
                   );
                 })}
@@ -1122,7 +1121,7 @@ export default function POScrubReport() {
             {/* KPI cards (click to filter) */}
             <div className="grid shrink-0 grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-6">
               {kpi('all', `${scopeName} · Open POs`, fmtNumber(stats.open), Package, 'text-muted-fg', `of ${fmtNumber(stats.total)} total`)}
-              {kpi('overdue', 'Overdue', fmtNumber(stats.overdue), AlertCircle, 'text-rose-600 dark:text-rose-300', 'past expected date')}
+              {kpi('c:flag', 'Flagged', fmtNumber(stats.flagged), Flag, 'text-rose-600 dark:text-rose-300', 'marked red in sheet')}
               {kpi('soon', 'Arriving ≤ 14 days', fmtNumber(stats.soon), Truck, 'text-amber-600 dark:text-amber-300', 'plan receiving')}
               {kpi('noack', 'Awaiting ACK', fmtNumber(stats.noack), Hourglass, 'text-violet-600 dark:text-violet-300', 'no vendor ack yet')}
               {kpi('received', 'Fully received', fmtNumber(stats.received), PackageCheck, 'text-emerald-600 dark:text-emerald-300', 'remaining qty = 0')}
@@ -1160,18 +1159,18 @@ export default function POScrubReport() {
                   </div>
                   <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-6">
                     {[...vendorSummary]
-                      .sort((a, b) => (view === 'all' ? (b.overdue - a.overdue || b.openQty - a.openQty) : (b.matched - a.matched || b.matchedQty - a.matchedQty)))
+                      .sort((a, b) => (view === 'all' ? (b.flagged - a.flagged || b.openQty - a.openQty) : (b.matched - a.matched || b.matchedQty - a.matchedQty)))
                       .map((v) => (
                         // Keeps the active filter when drilling into a vendor.
                         <button key={v.i} type="button" onClick={() => { setActive(v.i); setQ(''); setSelectedKey(null); }}
                           className={cn('flex items-center justify-between gap-2 rounded-lg border px-2.5 py-2 text-left transition hover:border-primary/40 hover:shadow-sm',
                             view !== 'all' ? 'border-primary/30 bg-primary/5'
-                              : v.overdue ? 'border-rose-200 bg-rose-50/60 dark:border-rose-900 dark:bg-rose-950/40' : 'border-border bg-card')}>
+                              : v.flagged ? 'border-rose-200 bg-rose-50/60 dark:border-rose-900 dark:bg-rose-950/40' : 'border-border bg-card')}>
                           <div className="min-w-0">
                             <div className="truncate text-[12px] font-bold">{v.name}</div>
                             <div className="text-[10px] text-muted-fg">
                               {view === 'all' ? (
-                                <>{v.open} open{v.overdue > 0 && <span className="font-bold text-rose-600 dark:text-rose-300"> · {v.overdue} overdue</span>}{v.soon > 0 && <span className="font-semibold text-amber-600 dark:text-amber-300"> · {v.soon} soon</span>}</>
+                                <>{v.open} open{v.flagged > 0 && <span className="font-bold text-rose-600 dark:text-rose-300"> · {v.flagged} flagged</span>}{v.soon > 0 && <span className="font-semibold text-amber-600 dark:text-amber-300"> · {v.soon} soon</span>}</>
                               ) : (
                                 <span className="font-bold text-primary">{v.matched} {viewDef.label.toLowerCase()}</span>
                               )}
