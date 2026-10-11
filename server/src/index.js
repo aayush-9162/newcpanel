@@ -282,7 +282,7 @@ app.get('/api/po-scrub', async (req, res) => {
     const token = await getSheetsToken();
     const headers = { Authorization: `Bearer ${token}`, Accept: 'application/json' };
     // 1) Sheet metadata → visible tab titles, in order.
-    const metaR = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${PO_SCRUB_SHEET_ID}?fields=properties.title,sheets.properties(title,hidden,index)`, { headers });
+    const metaR = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${PO_SCRUB_SHEET_ID}?fields=properties.title,sheets.properties(title,hidden,index,sheetId)`, { headers });
     const meta = await metaR.json().catch(() => ({}));
     if (!metaR.ok) throw new Error(meta.error?.message || `metadata ${metaR.status}`);
     const tabs = (meta.sheets || []).map((s) => s.properties).filter((p) => p && !p.hidden).sort((a, b) => a.index - b.index);
@@ -304,9 +304,9 @@ app.get('/api/po-scrub', async (req, res) => {
       while (last >= 0 && !values[last].some((c) => c.trim() !== '')) last--;
       values = values.slice(0, last + 1);
       colors = colors.slice(0, last + 1);
-      return { name: t.title, rows: values.length, cols: values.reduce((m, r) => Math.max(m, r.length), 0), values, colors };
+      return { name: t.title, gid: t.sheetId ?? null, rows: values.length, cols: values.reduce((m, r) => Math.max(m, r.length), 0), values, colors };
     });
-    const payload = { ok: true, title: meta.properties?.title || 'PO Scrub Report', fetchedAt: new Date().toISOString(), sheets };
+    const payload = { ok: true, title: meta.properties?.title || 'PO Scrub Report', url: `https://docs.google.com/spreadsheets/d/${PO_SCRUB_SHEET_ID}/edit`, fetchedAt: new Date().toISOString(), sheets };
     poScrubCache = { at: Date.now(), payload };
     res.json(payload);
   } catch (err) {
