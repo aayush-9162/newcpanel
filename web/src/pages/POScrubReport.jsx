@@ -512,11 +512,201 @@ function POItems({ rec, q, view, setView, sectionRef }) {
   );
 }
 
+// ── Customer sales linked to this PO ─────────────────────────────────────────
+// For every sale (SO) that has items on this PO: is it still waiting on this PO,
+// waiting on other orders too, fully in stock and ready to deliver, or done?
+//   Sale_DetailRV  — open sale lines: qty to ship (in stock) vs backordered
+//   SalesOpenDaily — customer, delivery date, salesperson, totals
+//   PORecvDtls     — which open PO each backordered item is waiting on
+const PO_SALES_SUB = 'SELECT DISTINCT SONo FROM PORecvDtls WHERE PONo = ? AND SONo > 0';
+const SALE_LINES_SQL = `
+SELECT d.sale_no AS SONo, d.sale_seq AS Seq, RTRIM(d.sale_item) AS Item, RTRIM(d.sale_desc2) AS Desc2,
+       d.sale_qty AS Qty, d.sale_qty_to_ship AS ToShip, d.sale_qty_bo AS BO, d.ship_date AS ShipDate,
+       RTRIM(d.sale_open_close) AS OC, RTRIM(d.sale_item_typ) AS Typ, d.sale_loc AS Loc
+FROM Sale_DetailRV d WHERE d.sale_no IN (${PO_SALES_SUB}) ORDER BY d.sale_no, d.sale_seq`;
+const SALE_HEAD_SQL = `
+SELECT o.SalesNo AS SONo, LTRIM(RTRIM(o.CustomerName)) AS Customer, o.SaleDate, o.DeliveryDate,
+       o.SaleTotalAmt, o.BalanceDue, LTRIM(RTRIM(o.Salesperson)) AS Salesperson,
+       LTRIM(RTRIM(o.DeliveryCity)) AS City, RTRIM(o.sale_open_close) AS OC
+FROM SalesOpenDaily o WHERE o.SalesNo IN (${PO_SALES_SUB})`;
+const SALE_POS_SQL = `
+SELECT r.SONo, r.PONo, RTRIM(r.ItemId) AS ItemId, MAX(RTRIM(r.ItemDesc2)) AS Desc2,
+       MAX(r.QtyOrd) - SUM(ISNULL(r.QtyRecd, 0)) AS OpenQty, MAX(RTRIM(p.po_vend_id)) AS Vendor, MAX(p.po_due_bdat) AS Due
+FROM PORecvDtls r LEFT JOIN PORV p ON p.po_no = r.PONo
+WHERE r.SONo IN (${PO_SALES_SUB})
+GROUP BY r.SONo, r.PONo, r.Seq, r.ItemId
+HAVING MAX(r.QtyOrd) - SUM(ISNULL(r.QtyRecd, 0)) > 0`;
+
+const SALE_STATE = {
+  ready:     { label: 'Ready to deliver',        icon: PackageCheck, chip: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-200', stripe: 'border-l-emerald-500', rank: 0 },
+  thispo:    { label: 'Waiting on this PO',      icon: Hourglass,    chip: 'bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-200',       stripe: 'border-l-amber-400',   rank: 1 },
+  others:    { label: 'Also waiting on other POs', icon: AlertCircle, chip: 'bg-rose-100 text-rose-700 dark:bg-rose-900/50 dark:text-rose-200',          stripe: 'border-l-rose-500',    rank: 2 },
+  stock:     { label: 'Waiting on stock',        icon: AlertCircle,  chip: 'bg-rose-100 text-rose-700 dark:bg-rose-900/50 dark:text-rose-200',           stripe: 'border-l-rose-500',    rank: 3 },
+  delivered: { label: 'Delivered',               icon: CheckCircle2, chip: 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300',         stripe: 'border-l-slate-300 dark:border-l-slate-600', rank: 4 },
+};
+const ymdNum = (n) => { const s = String(Number(n) || ''); return s.length === 8 ? `${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6, 8)}` : ''; };
+const isoDay = (v) => { const m = cell(v).match(/^(\d{4}-\d{2}-\d{2})/); return m ? m[1] : ''; };
+
+function buildSales(poNum, poLines, lineRows, headRows, posRows) {
+  const heads = new Map((headRows || []).map((h) => [Number(h.SONo), h]));
+  const bySale = new Map();
+  const get = (so) => {
+    let s = bySale.get(so);
+    if (!s) { s = { so, lines: [], otherPos: [], thisOpen: [], thisPo: { ordered: 0, received: 0, open: 0 }, customer: '' }; bySale.set(so, s); }
+    return s;
+  };
+  for (const l of poLines || []) {
+    if (!(l.so > 0)) continue;
+    const s = get(l.so);
+    s.thisPo.ordered += l.ordered; s.thisPo.received += l.received; s.thisPo.open += l.open;
+    if (!s.customer && l.customer) s.customer = l.customer;
+  }
+  for (const r of lineRows || []) get(Number(r.SONo)).lines.push(r);
+  for (const r of posRows || []) {
+    const s = get(Number(r.SONo));
+    (Number(r.PONo) === poNum ? s.thisOpen : s.otherPos).push(r);
+  }
+  return [...bySale.values()].map((s) => {
+    const h = heads.get(s.so) || {};
+    const isOpenLine = (r) => cell(r.OC).toUpperCase() === 'OPEN';
+    const merch = s.lines.filter((r) => cell(r.Typ) === 'I' && (Number(r.Loc) > 0 || Number(r.BO) > 0)); // skip delivery / service lines
+    const open = merch.filter(isOpenLine);
+    const waitingQty = open.reduce((t, r) => t + (Number(r.BO) || 0), 0);
+    const readyQty = open.reduce((t, r) => t + (Number(r.ToShip) || 0), 0);
+    const otherQty = s.otherPos.reduce((t, r) => t + (Number(r.OpenQty) || 0), 0);
+    const thisOpenQty = s.thisOpen.reduce((t, r) => t + (Number(r.OpenQty) || 0), 0);
+    // This PO covers the sale's backorder first; only what's left needs other POs.
+    const uncovered = Math.max(0, waitingQty - Math.min(waitingQty, thisOpenQty));
+    const closed = cell(h.OC).toUpperCase() === 'CLOSED' || (s.lines.length > 0 && open.length === 0) || (!s.lines.length && !h.SONo);
+    const state = closed ? 'delivered' : waitingQty === 0 ? 'ready' : uncovered === 0 ? 'thispo' : otherQty > 0 ? 'others' : 'stock';
+    // More units on order across POs than the sale is waiting for → likely a duplicate order.
+    const extraOnOrder = !closed && (thisOpenQty + otherQty) > waitingQty;
+    // What each backordered line is waiting on.
+    const waiting = open.filter((r) => Number(r.BO) > 0).map((r) => {
+      const item = cell(r.Item);
+      const onThis = s.thisOpen.find((p) => cell(p.ItemId) === item);
+      const onOther = s.otherPos.find((p) => cell(p.ItemId) === item);
+      return { desc: cell(r.Desc2) || item, qty: Number(r.BO) || 0, source: onThis ? 'this' : onOther ? onOther : null };
+    });
+    const otherByPo = Object.values(s.otherPos.reduce((m, r) => {
+      const k = String(r.PONo);
+      m[k] = m[k] || { po: k, vendor: cell(r.Vendor), qty: 0, due: isoDay(r.Due) };
+      m[k].qty += Number(r.OpenQty) || 0;
+      return m;
+    }, {}));
+    const shipNum = Math.max(0, ...open.map((r) => Number(r.ShipDate) || 0));
+    const lastShip = Math.max(0, ...merch.map((r) => Number(r.ShipDate) || 0));
+    const delDate = isoDay(h.DeliveryDate) || ymdNum(shipNum);
+    return {
+      so: s.so, customer: cell(h.Customer) || s.customer || '—', salesperson: cell(h.Salesperson), city: cell(h.City),
+      saleDate: isoDay(h.SaleDate), total: Number(h.SaleTotalAmt) || 0, balance: Number(h.BalanceDue) || 0,
+      state, thisPo: s.thisPo, waitingQty, readyQty, waiting, otherByPo, extraOnOrder,
+      deliveryDate: delDate, asap: /ASAP/i.test(cell(h.DeliveryDate)),
+      deliveredOn: state === 'delivered' ? (isoDay(h.DeliveryDate) || ymdNum(lastShip)) : '',
+    };
+  }).sort((a, b) => SALE_STATE[a.state].rank - SALE_STATE[b.state].rank || String(a.customer).localeCompare(String(b.customer)));
+}
+
+function POSales({ poNum, poLines, itemsLoading }) {
+  const opts = { enabled: poNum != null, staleTime: 5 * 60 * 1000 };
+  const linesQ = useSqlQuery(SALE_LINES_SQL, [poNum], opts);
+  const headQ = useSqlQuery(SALE_HEAD_SQL, [poNum], opts);
+  const posQ = useSqlQuery(SALE_POS_SQL, [poNum], opts);
+  const loading = itemsLoading || linesQ.isLoading || headQ.isLoading || posQ.isLoading;
+  const error = linesQ.error || headQ.error || posQ.error;
+  const sales = useMemo(() => {
+    if (loading || error) return [];
+    try { return buildSales(poNum, poLines, linesQ.data?.rows, headQ.data?.rows, posQ.data?.rows); } catch { return []; }
+  }, [loading, error, poNum, poLines, linesQ.data, headQ.data, posQ.data]);
+  const counts = sales.reduce((m, s) => { m[s.state] = (m[s.state] || 0) + 1; return m; }, {});
+
+  return (
+    <section>
+      <h3 className="mb-2 flex flex-wrap items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-muted-fg">
+        <Store size={12} /> Customer sales on this PO
+        {sales.length > 0 && <span className="rounded-full bg-muted px-1.5 tabular-nums">{sales.length}</span>}
+        <span className="ml-1 rounded bg-sky-100 px-1.5 py-px text-[9px] font-bold text-sky-700 dark:bg-sky-900/50 dark:text-sky-200">LIVE · SYSTEM</span>
+      </h3>
+      {loading ? (
+        <div className="flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-4 text-[12px] text-muted-fg">
+          <div className="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent" /> Checking customer sales…
+        </div>
+      ) : error ? (
+        <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-[12px] text-amber-700 dark:text-amber-300">Couldn't load sales: {error.message}</div>
+      ) : sales.length === 0 ? (
+        <div className="rounded-lg border border-border bg-card px-3 py-3 text-[12px] text-muted-fg">No customer sales on this PO — it's a stock order.</div>
+      ) : (
+        <>
+          <div className="mb-2 flex flex-wrap gap-1.5">
+            {['ready', 'thispo', 'others', 'stock', 'delivered'].filter((k) => counts[k]).map((k) => {
+              const st = SALE_STATE[k]; const Icon = st.icon;
+              return <span key={k} className={cn('inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-bold', st.chip)}><Icon size={11} /> {counts[k]} {st.label.toLowerCase()}</span>;
+            })}
+          </div>
+          <div className="space-y-1.5">
+            {sales.map((s) => {
+              const st = SALE_STATE[s.state]; const Icon = st.icon;
+              const done = s.state === 'delivered';
+              return (
+                <div key={s.so} className={cn('rounded-lg border border-l-4 border-border bg-card px-3 py-2', st.stripe, done && 'opacity-75')}>
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="text-[13px] font-bold">{s.customer}</div>
+                      <div className="text-[11px] text-muted-fg">
+                        SO <b className="text-fg/80">{s.so}</b>
+                        {s.salesperson && <> · {s.salesperson}</>}{s.city && <> · {s.city}</>}
+                        {s.total > 0 && <> · ${fmtNumber(Math.round(s.total))}</>}
+                      </div>
+                    </div>
+                    <span className={cn('inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold', st.chip)}><Icon size={10} /> {st.label}</span>
+                  </div>
+
+                  <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-muted-fg">
+                    {s.thisPo.ordered > 0 && <span>From this PO: <b className={cn(s.thisPo.open ? 'text-amber-600 dark:text-amber-300' : 'text-emerald-600 dark:text-emerald-300')}>{fmtNumber(s.thisPo.received)} of {fmtNumber(s.thisPo.ordered)} received</b></span>}
+                    {!done && <span>Sale items in stock: <b className="text-fg/80">{fmtNumber(s.readyQty)} of {fmtNumber(s.readyQty + s.waitingQty)}</b></span>}
+                    {s.state === 'ready' && (s.deliveryDate
+                      ? <span className="font-semibold text-emerald-700 dark:text-emerald-300">Delivery scheduled {fmtYmd(s.deliveryDate)}</span>
+                      : <span className="font-semibold text-amber-700 dark:text-amber-300">Not scheduled yet{s.asap ? ' (ASAP)' : ''}</span>)}
+                    {done && s.deliveredOn && <span>Delivered {fmtYmd(s.deliveredOn)}</span>}
+                    {!done && s.balance > 0 && <span>Balance due <b className="text-fg/80">${fmtNumber(Math.round(s.balance))}</b></span>}
+                  </div>
+
+                  {!done && s.waiting.length > 0 && (
+                    <ul className="mt-1.5 space-y-0.5 border-t border-border/60 pt-1.5 text-[11px]">
+                      {s.waiting.map((w, i) => (
+                        <li key={i} className="flex justify-between gap-2">
+                          <span><b>{w.qty} ×</b> {w.desc}</span>
+                          <span className={cn('shrink-0 font-semibold', w.source === 'this' ? 'text-amber-700 dark:text-amber-300' : 'text-rose-600 dark:text-rose-300')}>
+                            {w.source === 'this' ? 'this PO'
+                              : w.source ? `PO ${w.source.PONo}${cell(w.source.Vendor) ? ` · ${cell(w.source.Vendor)}` : ''}${isoDay(w.source.Due) ? ` · due ${fmtYmd(isoDay(w.source.Due))}` : ''}`
+                              : 'not on an open PO'}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  {s.state === 'thispo' && <div className="mt-1 text-[11px] font-semibold text-amber-700 dark:text-amber-300">Ready to deliver once this PO's items arrive.</div>}
+                  {s.extraOnOrder && s.otherByPo.length > 0 && (
+                    <div className="mt-1 rounded bg-violet-50 px-2 py-1 text-[11px] text-violet-700 dark:bg-violet-950 dark:text-violet-200">
+                      Also on order: {s.otherByPo.map((o) => `PO ${o.po}${o.vendor ? ` (${o.vendor})` : ''} · ${o.qty} unit${o.qty === 1 ? '' : 's'}`).join(', ')} — more than this sale is waiting for; check for a duplicate order.
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </>
+      )}
+    </section>
+  );
+}
+
 function PODrawer({ rec, sheetUrl, onClose }) {
   // Live PO lines from the system — fetched as soon as the panel opens so the
   // Ordered / Received / Still open lists are ready on click.
   const poNum = /^\d+$/.test(cell(rec?.po)) ? Number(cell(rec.po)) : null;
   const itemsQ = useSqlQuery(PO_ITEMS_SQL, [poNum], { enabled: poNum != null, staleTime: 5 * 60 * 1000 });
+  const poLinesAgg = useMemo(() => aggregatePoLines(itemsQ.data?.rows), [itemsQ.data]);
   const [itemsView, setItemsView] = useState('ordered');
   const itemsRef = useRef(null);
   const openItems = (k) => {
@@ -587,6 +777,7 @@ function PODrawer({ rec, sheetUrl, onClose }) {
           <QtyBar rec={rec} compact />
 
           {poNum != null && <POItems rec={rec} q={itemsQ} view={itemsView} setView={setItemsView} sectionRef={itemsRef} />}
+          {poNum != null && <POSales poNum={poNum} poLines={poLinesAgg} itemsLoading={itemsQ.isLoading} />}
 
           <div className="grid grid-cols-2 gap-2 text-[12px]">
             <div className="rounded-lg border border-border bg-card px-3 py-2">
