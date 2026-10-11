@@ -258,6 +258,15 @@ async function getSheetsToken() {
   return _saToken.value;
 }
 
+// Sheets API colour {red,green,blue} (0–1 floats, missing = 0) → "#rrggbb".
+// White / unset backgrounds return null so the client only sees real markers.
+function sheetColorHex(c) {
+  if (!c) return null;
+  const to = (v) => Math.round(Math.min(1, Math.max(0, v ?? 0)) * 255).toString(16).padStart(2, '0');
+  const hex = `#${to(c.red)}${to(c.green)}${to(c.blue)}`;
+  return hex === '#ffffff' ? null : hex;
+}
+
 let poScrubCache = { at: 0, payload: null };
 app.get('/api/po-scrub', async (req, res) => {
   if (!PO_SCRUB_SHEET_ID) {
@@ -277,15 +286,25 @@ app.get('/api/po-scrub', async (req, res) => {
     const meta = await metaR.json().catch(() => ({}));
     if (!metaR.ok) throw new Error(meta.error?.message || `metadata ${metaR.status}`);
     const tabs = (meta.sheets || []).map((s) => s.properties).filter((p) => p && !p.hidden).sort((a, b) => a.index - b.index);
-    // 2) One batchGet for every tab's used range (FORMATTED = as displayed).
+    // 2) One grid fetch for every visible tab: display values PLUS each cell's
+    //    background colour — the sheet uses row/cell colours as status markers
+    //    (green = confirmed, yellow = pending, red = flagged).
     const qs = tabs.map((t) => `ranges=${encodeURIComponent(`'${String(t.title).replace(/'/g, "''")}'`)}`).join('&');
-    const valsR = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${PO_SCRUB_SHEET_ID}/values:batchGet?${qs}&valueRenderOption=FORMATTED_VALUE&majorDimension=ROWS`, { headers });
-    const vals = await valsR.json().catch(() => ({}));
-    if (!valsR.ok) throw new Error(vals.error?.message || `values ${valsR.status}`);
-    const ranges = vals.valueRanges || [];
-    const sheets = tabs.map((t, i) => {
-      const values = ranges[i]?.values || [];
-      return { name: t.title, rows: values.length, cols: values.reduce((m, r) => Math.max(m, r.length), 0), values };
+    const fields = 'sheets(properties.title,data.rowData.values(formattedValue,effectiveFormat.backgroundColor))';
+    const gridR = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${PO_SCRUB_SHEET_ID}?${qs}&includeGridData=true&fields=${encodeURIComponent(fields)}`, { headers });
+    const grid = await gridR.json().catch(() => ({}));
+    if (!gridR.ok) throw new Error(grid.error?.message || `grid ${gridR.status}`);
+    const byTitle = new Map((grid.sheets || []).map((s) => [s.properties?.title, s]));
+    const sheets = tabs.map((t) => {
+      const rowData = byTitle.get(t.title)?.data?.[0]?.rowData || [];
+      let values = rowData.map((r) => (r?.values || []).map((v) => String(v?.formattedValue ?? '')));
+      let colors = rowData.map((r) => (r?.values || []).map((v) => sheetColorHex(v?.effectiveFormat?.backgroundColor)));
+      // Drop trailing rows with no text (coloured end-bands, blank formatted rows).
+      let last = values.length - 1;
+      while (last >= 0 && !values[last].some((c) => c.trim() !== '')) last--;
+      values = values.slice(0, last + 1);
+      colors = colors.slice(0, last + 1);
+      return { name: t.title, rows: values.length, cols: values.reduce((m, r) => Math.max(m, r.length), 0), values, colors };
     });
     const payload = { ok: true, title: meta.properties?.title || 'PO Scrub Report', fetchedAt: new Date().toISOString(), sheets };
     poScrubCache = { at: Date.now(), payload };

@@ -1,43 +1,145 @@
-// PO Scrub Report — mirrors the "PO SCRUB REPORT" Google spreadsheet inside CFC
-// Hub. Every tab is fetched (as display values) from the sheet via the server
-// proxy, and rendered here as a searchable, sortable table with a tab bar.
-import { useMemo, useState, useEffect, useRef } from 'react';
+// PO Scrub Report — mirrors the "PO SCRUB" Google spreadsheet inside CFC Hub.
+// Every visible tab (one per vendor) is fetched via the server proxy with its
+// display values AND cell background colours. The sheet uses colour as status:
+//   green row  → Confirmed (scrubbed OK)    yellow row → Pending / follow-up
+//   red cell   → Flagged value (e.g. late)   no colour  → Unmarked
+// Rows are grouped by PO (continuation rows with a blank S.NO / PO# are extra
+// invoice / shipment lines of the PO above), and the many "SCRUB DATE – …"
+// history columns collapse into a Latest Scrub column + an expandable timeline.
+import { Fragment, useMemo, useState, useEffect, useRef } from 'react';
 import { Topbar } from '@/components/Topbar';
 import { Card, CardContent } from '@/components/ui/Card';
 import { usePoScrubQuery, poScrubGet } from '@/lib/api';
+import { fmtNumber } from '@/lib/format';
 import { cn } from '@/lib/cn';
-import { FileSpreadsheet, Search, RefreshCw, AlertTriangle, ArrowUp, ArrowDown, ArrowUpDown, Maximize2, Minimize2 } from 'lucide-react';
+import {
+  FileSpreadsheet, Search, RefreshCw, AlertTriangle, ArrowUp, ArrowDown, ArrowUpDown,
+  Maximize2, Minimize2, ChevronRight, CheckCircle2, Clock, Flag, Circle, Package, History,
+} from 'lucide-react';
 
 const cell = (c) => String(c ?? '').trim();
-const nonEmpty = (row) => row.filter((c) => cell(c) !== '').length;
-const isEmptyRow = (row) => nonEmpty(row) === 0;
-// Cells that read as a number / currency / percent → right-aligned, numeric sort.
+const nonEmpty = (row) => (row || []).filter((c) => cell(c) !== '').length;
 const isNumeric = (s) => { const t = cell(s); return t !== '' && /^[-+]?\$?\s?[\d,]+(\.\d+)?\s?%?$/.test(t); };
-// Cells that read as a M/D/YYYY date → sorted chronologically.
 const isDate = (s) => /^\d{1,2}\/\d{1,2}\/\d{2,4}$/.test(cell(s));
+const toNum = (s) => { const n = parseFloat(cell(s).replace(/[^0-9.\-]/g, '')); return Number.isFinite(n) ? n : 0; };
 
-// Split a sheet's 2D values into: leading title rows (single-cell banners), the
-// header row (first row with ≥2 filled cells), and the body rows below it
-// (fully-empty rows dropped so the table reads cleanly).
-function shapeSheet(values) {
-  const rows = values ?? [];
-  let headerIdx = rows.findIndex((r) => nonEmpty(r) >= 2);
-  if (headerIdx < 0) headerIdx = rows.length ? 0 : -1;
-  const titles = rows.slice(0, Math.max(0, headerIdx)).map((r) => r.find((c) => cell(c) !== '') || '').filter(Boolean);
-  const header = headerIdx >= 0 ? rows[headerIdx] : [];
-  const body   = (headerIdx >= 0 ? rows.slice(headerIdx + 1) : []).filter((r) => !isEmptyRow(r));
-  const cols   = Math.max(header.length, ...body.map((r) => r.length), 0);
-  return { titles, header, body, cols };
+// ── Colour → status ──────────────────────────────────────────────────────────
+function statusOfHex(hex) {
+  if (!hex || !/^#[0-9a-f]{6}$/i.test(hex)) return null;
+  const r = parseInt(hex.slice(1, 3), 16), g = parseInt(hex.slice(3, 5), 16), b = parseInt(hex.slice(5, 7), 16);
+  if (g > 150 && g > r + 25 && g > b + 25) return 'ok';            // greens
+  if (r > 200 && g > 190 && b < Math.min(r, g) - 60) return 'pending'; // yellows
+  if (r > 200 && r - g >= 35 && r - b >= 35) return 'flag';        // reds / pinks
+  return null;
+}
+// Most common status among a row's coloured cells (the row's "fill").
+function rowStatus(colorRow) {
+  const counts = {};
+  for (const h of colorRow || []) { const s = statusOfHex(h); if (s) counts[s] = (counts[s] || 0) + 1; }
+  const best = Object.entries(counts).sort((a, b) => b[1] - a[1])[0];
+  // A single red cell is a cell flag, not a red row — require a real fill.
+  if (!best) return null;
+  if (best[0] === 'flag' && best[1] < 3) return null;
+  return best[0];
 }
 
-// Colored pill for a Status-like column.
-function StatusBadge({ value }) {
-  const v = value.toLowerCase();
-  const tone = v.includes('open') ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-200'
-    : (v.includes('close') || v.includes('complete') || v.includes('done') || v.includes('received')) ? 'bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-200'
-    : (v.includes('hold') || v.includes('pending') || v.includes('back')) ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-200'
-    : 'bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-200';
-  return <span className={cn('inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold', tone)}>{value}</span>;
+const STATUS = {
+  ok:      { label: 'Confirmed', icon: CheckCircle2, pill: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-200', stripe: 'border-l-emerald-500', row: 'bg-emerald-50 dark:bg-emerald-950', dot: 'bg-emerald-500', card: 'from-emerald-500/15 text-emerald-700 dark:text-emerald-300 ring-emerald-500/30' },
+  pending: { label: 'Pending',   icon: Clock,        pill: 'bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-200',     stripe: 'border-l-amber-400',   row: 'bg-amber-50 dark:bg-amber-950',     dot: 'bg-amber-400',   card: 'from-amber-500/15 text-amber-700 dark:text-amber-300 ring-amber-500/30' },
+  flag:    { label: 'Flagged',   icon: Flag,         pill: 'bg-rose-100 text-rose-700 dark:bg-rose-900/50 dark:text-rose-200',         stripe: 'border-l-rose-500',    row: 'bg-rose-50 dark:bg-rose-950',       dot: 'bg-rose-500',    card: 'from-rose-500/15 text-rose-700 dark:text-rose-300 ring-rose-500/30' },
+  none:    { label: 'Unmarked',  icon: Circle,       pill: 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300',        stripe: 'border-l-slate-300 dark:border-l-slate-600', row: 'bg-card', dot: 'bg-slate-400', card: 'from-slate-500/10 text-slate-600 dark:text-slate-300 ring-slate-500/20' },
+};
+
+// ── Sheet → PO groups ────────────────────────────────────────────────────────
+function shapeSheet(sheet) {
+  const values = Array.isArray(sheet?.values) ? sheet.values : [];
+  const colors = Array.isArray(sheet?.colors) ? sheet.colors : [];
+  let headerIdx = values.findIndex((r) => nonEmpty(r) >= 2);
+  if (headerIdx < 0) return null;
+  const header = (values[headerIdx] || []).map(cell);
+  const cols = Math.max(header.length, ...values.slice(headerIdx + 1).map((r) => (r || []).length), 0);
+  const H = (i) => (header[i] || '').toUpperCase();
+
+  const idx = (re) => { for (let i = 0; i < cols; i++) if (re.test(H(i))) return i; return -1; };
+  const snoCol = idx(/^S\.?\s*NO/);
+  const poCol = (() => { const i = idx(/^PO\s*#|^PO\s*NO|^PO$/); return i >= 0 ? i : (snoCol === 0 ? 1 : 0); })();
+  const scrubCols = [];
+  const coreCols = [];
+  for (let i = 0; i < cols; i++) {
+    if (i === snoCol) continue;
+    if (/SCRUB\s*DATE/.test(H(i))) {
+      const m = (header[i] || '').match(/(\d{1,2}\/\d{1,2}(?:\/\d{2,4})?)/);
+      scrubCols.push({ col: i, label: m ? m[1].replace(/\/(\d{2})?(\d{2})$/, (x, a, b) => `/${b}`) : ((header[i] || '').replace(/SCRUB\s*DATE\s*-?\s*/i, '').trim() || `#${scrubCols.length + 1}`) });
+    } else if (header[i] || values.slice(headerIdx + 1).some((r) => cell(r?.[i]))) {
+      coreCols.push(i);
+    }
+  }
+  const remCol = idx(/REMAINING\s*QTY/);
+
+  // Group rows: a row with a PO# starts a PO; following rows without one are
+  // continuation lines of that PO.
+  const groups = [];
+  for (let r = headerIdx + 1; r < values.length; r++) {
+    const row = values[r] || [];
+    if (nonEmpty(row) === 0) continue;
+    const colorRow = colors[r] || [];
+    const po = cell(row[poCol]);
+    if (po || !groups.length) {
+      const st = rowStatus(colorRow) || 'none';
+      groups.push({ key: `${r}`, sno: snoCol >= 0 ? cell(row[snoCol]) : '', po, main: row, mainColors: colorRow, lines: [], lineColors: [], status: st });
+    } else {
+      const g = groups[groups.length - 1];
+      g.lines.push(row); g.lineColors.push(colorRow);
+    }
+  }
+  // Derived per-PO facts.
+  for (const g of groups) {
+    const all = [g.main, ...g.lines];
+    const allColors = [g.mainColors, ...g.lineColors];
+    // Cell-level red flags (outside a red row) → mark the PO as flagged too.
+    g.flagCells = new Set();
+    allColors.forEach((cr, li) => (cr || []).forEach((h, ci) => {
+      if (statusOfHex(h) === 'flag' && cell(all[li]?.[ci])) g.flagCells.add(`${li}:${ci}`);
+    }));
+    if (g.flagCells.size && g.status !== 'pending') g.status = 'flag';
+    // Scrub history (left → right is chronological). Combine main + lines.
+    g.history = scrubCols.map((s) => ({ label: s.label, value: all.map((r) => cell(r?.[s.col])).filter(Boolean).join(' · ') }))
+      .filter((h) => h.value);
+    g.latest = g.history.length ? g.history[g.history.length - 1] : null;
+    g.remaining = remCol >= 0 ? toNum(g.main[remCol]) : 0;
+    g.search = all.map((r) => (r || []).join(' ')).join(' ').toLowerCase();
+  }
+
+  // Column type for alignment / sorting (from main rows).
+  const colType = {};
+  for (const c of coreCols) {
+    let num = 0, date = 0, tot = 0;
+    for (const g of groups) { const v = cell(g.main[c]); if (!v) continue; tot++; if (isNumeric(v)) num++; else if (isDate(v)) date++; }
+    colType[c] = tot === 0 ? 'text' : num / tot >= 0.6 ? 'num' : date / tot >= 0.6 ? 'date' : 'text';
+  }
+  const lastScrub = [...scrubCols].reverse().find((s) => groups.some((g) => [g.main, ...g.lines].some((r) => cell(r?.[s.col]))));
+  return { header, cols, snoCol, poCol, coreCols: coreCols.filter((c) => c !== poCol), scrubCols, remCol, groups, colType, lastScrub: lastScrub?.label || null };
+}
+
+function StatusPill({ status }) {
+  const s = STATUS[status] || STATUS.none;
+  const Icon = s.icon;
+  return <span className={cn('inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-semibold', s.pill)}><Icon size={11} />{s.label}</span>;
+}
+
+function ScrubValue({ entry }) {
+  if (!entry) return <span className="text-xs text-muted-fg">—</span>;
+  const ok = /^ok$/i.test(entry.value);
+  return ok ? (
+    <span className="inline-flex items-center gap-1 whitespace-nowrap rounded-md bg-emerald-100 px-1.5 py-0.5 text-[11px] font-bold text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-200">
+      <CheckCircle2 size={11} /> OK <span className="font-medium opacity-70">· {entry.label}</span>
+    </span>
+  ) : (
+    <div className="max-w-[260px]">
+      <span className="mr-1 rounded bg-sky-100 px-1 py-px text-[10px] font-bold text-sky-700 dark:bg-sky-900/50 dark:text-sky-200">{entry.label}</span>
+      <span className="line-clamp-2 cursor-help text-[12px] hover:line-clamp-none" title={entry.value}>{entry.value}</span>
+    </div>
+  );
 }
 
 export default function POScrubReport() {
@@ -48,12 +150,13 @@ export default function POScrubReport() {
   });
   const [active, setActive] = useState(0);
   const [q, setQ] = useState('');
-  const [sort, setSort] = useState({ col: null, dir: 'asc' }); // click a header to sort
+  const [statusFilter, setStatusFilter] = useState(null);
+  const [sort, setSort] = useState({ col: null, dir: 'asc' });
+  const [open, setOpen] = useState(() => new Set());
   const [refreshing, setRefreshing] = useState(false);
   const [isFull, setIsFull] = useState(false);
   const rootRef = useRef(null);
 
-  // Native fullscreen on the report container.
   const toggleFull = () => {
     const el = rootRef.current;
     if (!document.fullscreenElement) el?.requestFullscreen?.();
@@ -65,67 +168,52 @@ export default function POScrubReport() {
     return () => document.removeEventListener('fullscreenchange', onFs);
   }, []);
 
-  const sheets = data?.sheets ?? [];
-  // Keep the active tab valid if the sheet list changes.
+  const sheets = Array.isArray(data?.sheets) ? data.sheets : [];
   useEffect(() => { if (active > sheets.length - 1) setActive(0); }, [sheets.length, active]);
 
+  // Shape every tab once (cheap) so the tab bar can show per-vendor counts.
+  const shapedAll = useMemo(() => sheets.map((s) => { try { return shapeSheet(s); } catch { return null; } }), [sheets]);
   const sheet = sheets[active];
-  const shaped = useMemo(() => (sheet ? shapeSheet(sheet.values) : null), [sheet]);
+  const shaped = shapedAll[active] || null;
 
-  // Global search (across all cells).
-  const searchedRows = useMemo(() => {
-    if (!shaped) return [];
-    const needle = q.trim().toLowerCase();
-    if (!needle) return shaped.body;
-    return shaped.body.filter((r) => r.some((c) => String(c ?? '').toLowerCase().includes(needle)));
-  }, [shaped, q]);
-
-  // Per-column type: 'num' (right-aligned + numeric sort), 'date' (chronological
-  // sort), or 'text' — inferred from the majority of a column's filled cells.
-  const colType = useMemo(() => {
-    if (!shaped) return [];
-    return Array.from({ length: shaped.cols }).map((_, c) => {
-      let num = 0, date = 0, tot = 0;
-      for (const r of shaped.body) {
-        const v = cell(r[c]);
-        if (!v) continue;
-        tot++;
-        if (isNumeric(v)) num++; else if (isDate(v)) date++;
-      }
-      if (tot === 0) return 'text';
-      if (num / tot >= 0.6) return 'num';
-      if (date / tot >= 0.6) return 'date';
-      return 'text';
-    });
+  const counts = useMemo(() => {
+    const c = { all: 0, ok: 0, pending: 0, flag: 0, none: 0, remaining: 0 };
+    for (const g of shaped?.groups || []) { c.all++; c[g.status] = (c[g.status] || 0) + 1; c.remaining += g.remaining; }
+    return c;
   }, [shaped]);
 
-  // Sort the searched rows by the chosen column (empties always sink to the bottom).
-  const bodyRows = useMemo(() => {
-    if (sort.col == null || sort.col >= (colType.length || 0)) return searchedRows;
-    const c = sort.col, type = colType[c];
-    const keyOf = (row) => {
-      const t = cell(row[c]);
-      if (t === '') return null;
-      if (type === 'num')  { const n = parseFloat(t.replace(/[^0-9.\-]/g, '')); return Number.isFinite(n) ? n : null; }
-      if (type === 'date') { const d = new Date(t).getTime(); return Number.isFinite(d) ? d : null; }
-      return t.toLowerCase();
-    };
-    const out = [...searchedRows];
-    out.sort((ra, rb) => {
-      const a = keyOf(ra), b = keyOf(rb);
-      if (a === null && b === null) return 0;
-      if (a === null) return 1;
-      if (b === null) return -1;
-      const cmp = a < b ? -1 : a > b ? 1 : 0;
-      return sort.dir === 'asc' ? cmp : -cmp;
-    });
+  const rows = useMemo(() => {
+    if (!shaped) return [];
+    const needle = q.trim().toLowerCase();
+    let out = shaped.groups.filter((g) => (!statusFilter || g.status === statusFilter) && (!needle || g.search.includes(needle)));
+    if (sort.col != null) {
+      const c = sort.col;
+      const type = c === 'latest' ? 'text' : c === 'status' ? 'text' : (shaped.colType[c] || 'text');
+      const keyOf = (g) => {
+        if (c === 'status') return STATUS[g.status]?.label || '';
+        if (c === 'latest') return g.latest ? `${g.latest.label} ${g.latest.value}`.toLowerCase() : null;
+        const t = cell(g.main[c]);
+        if (!t) return null;
+        if (type === 'num') return toNum(t);
+        if (type === 'date') { const d = new Date(t).getTime(); return Number.isFinite(d) ? d : null; }
+        return t.toLowerCase();
+      };
+      out = [...out].sort((ga, gb) => {
+        const a = keyOf(ga), b = keyOf(gb);
+        if (a === null && b === null) return 0;
+        if (a === null) return 1;
+        if (b === null) return -1;
+        const cmp = a < b ? -1 : a > b ? 1 : 0;
+        return sort.dir === 'asc' ? cmp : -cmp;
+      });
+    }
     return out;
-  }, [searchedRows, sort, colType]);
+  }, [shaped, q, statusFilter, sort]);
 
-  // Click a header to cycle: asc → desc → off.
   const toggleSort = (c) => setSort((s) => s.col !== c ? { col: c, dir: 'asc' } : s.dir === 'asc' ? { col: c, dir: 'desc' } : { col: null, dir: 'asc' });
+  const toggleOpen = (k) => setOpen((s) => { const n = new Set(s); n.has(k) ? n.delete(k) : n.add(k); return n; });
+  const switchTab = (i) => { setActive(i); setQ(''); setStatusFilter(null); setSort({ col: null, dir: 'asc' }); setOpen(new Set()); };
 
-  // Hard refresh — bypass the server cache, then refetch the query.
   const hardRefresh = async () => {
     setRefreshing(true);
     try { await poScrubGet(true); await refetch(); } catch { /* surfaced via query error */ }
@@ -133,86 +221,86 @@ export default function POScrubReport() {
   };
 
   const fetchedAt = data?.fetchedAt ? new Date(data.fetchedAt) : null;
+  const colTotal = shaped ? shaped.coreCols.length + 4 : 1;
+
+  const SortHead = ({ col, label, align = 'left', className }) => {
+    const sorted = sort.col === col;
+    return (
+      <th className={cn('group sticky top-0 z-20 whitespace-nowrap border-b border-border bg-muted p-0', className)}>
+        <button type="button" onClick={() => toggleSort(col)} title={label}
+          className={cn('flex w-full items-center gap-1 px-3 py-2.5 text-[11px] font-bold uppercase tracking-wider transition hover:text-primary',
+            align === 'right' ? 'justify-end' : 'justify-start', sorted ? 'text-primary' : 'text-muted-fg')}>
+          <span className="max-w-[160px] truncate">{label || ' '}</span>
+          {sorted ? (sort.dir === 'asc' ? <ArrowUp size={12} className="shrink-0" /> : <ArrowDown size={12} className="shrink-0" />)
+            : <ArrowUpDown size={12} className="shrink-0 opacity-0 transition group-hover:opacity-60" />}
+        </button>
+      </th>
+    );
+  };
+
+  const renderCell = (g, li, row, c) => {
+    const raw = cell(row?.[c]);
+    if (!raw) return <span className="text-muted-fg/40">—</span>;
+    const flagged = g.flagCells.has(`${li}:${c}`);
+    const isNum = shaped.colType[c] === 'num';
+    const inner = isNum ? raw
+      : <span className="line-clamp-3 cursor-help hover:line-clamp-none" title={raw}>{raw}</span>;
+    return flagged
+      ? <span className="inline-block rounded bg-rose-200/80 px-1 font-semibold text-rose-800 ring-1 ring-rose-400/60 dark:bg-rose-900/60 dark:text-rose-100" title="Flagged in sheet">{inner}</span>
+      : inner;
+  };
 
   return (
     <>
       <Topbar title="PO Scrub Report" subtitle={data?.title || 'Purchase-order scrub tracker'} />
 
-      <div ref={rootRef} className={cn('flex min-h-0 flex-1 flex-col gap-4 bg-bg p-4', isFull && 'overflow-hidden')}>
-        {/* Toolbar: tab bar + search + refresh */}
+      <div ref={rootRef} className={cn('flex min-h-0 flex-1 flex-col gap-3 bg-bg p-4', isFull && 'overflow-hidden')}>
+        {/* Toolbar + vendor tabs */}
         <Card className="shrink-0">
           <CardContent className="p-0">
             <div className="flex flex-wrap items-center gap-2 border-b border-border bg-gradient-to-r from-emerald-500/10 via-transparent to-transparent px-4 py-3">
               <FileSpreadsheet size={16} className="text-emerald-600 dark:text-emerald-400" />
               <span className="text-sm font-semibold">{data?.title || 'PO Scrub Report'}</span>
-              {sheets.length > 0 && <span className="text-[11px] text-muted-fg">· {sheets.length} sheet{sheets.length === 1 ? '' : 's'}</span>}
+              {sheets.length > 0 && <span className="text-[11px] text-muted-fg">· {sheets.length} vendor{sheets.length === 1 ? '' : 's'}</span>}
               <div className="ml-auto flex items-center gap-2">
                 {fetchedAt && (
                   <span className="hidden text-[11px] text-muted-fg sm:inline">
                     Updated {fetchedAt.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
                   </span>
                 )}
-                <button
-                  type="button"
-                  onClick={hardRefresh}
-                  disabled={refreshing || isFetching}
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1 text-xs font-semibold text-primary transition hover:bg-muted disabled:opacity-50"
-                >
+                <button type="button" onClick={hardRefresh} disabled={refreshing || isFetching}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1 text-xs font-semibold text-primary transition hover:bg-muted disabled:opacity-50">
                   <RefreshCw size={13} className={cn((refreshing || isFetching) && 'animate-spin')} /> Refresh
                 </button>
-                <button
-                  type="button"
-                  onClick={toggleFull}
-                  title={isFull ? 'Exit full screen' : 'View full screen'}
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-border px-2 py-1 text-xs font-semibold text-primary transition hover:bg-muted"
-                >
+                <button type="button" onClick={toggleFull} title={isFull ? 'Exit full screen' : 'View full screen'}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-border px-2 py-1 text-xs font-semibold text-primary transition hover:bg-muted">
                   {isFull ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
                   <span className="hidden sm:inline">{isFull ? 'Exit' : 'Full screen'}</span>
                 </button>
               </div>
             </div>
 
-            {/* Tab bar */}
             {sheets.length > 0 && (
-              <div className="flex gap-1 overflow-x-auto border-b border-border px-2 py-2">
-                {sheets.map((s, i) => (
-                  <button
-                    key={s.name + i}
-                    type="button"
-                    onClick={() => { setActive(i); setQ(''); setSort({ col: null, dir: 'asc' }); }}
-                    className={cn(
-                      'shrink-0 whitespace-nowrap rounded-lg px-3 py-1.5 text-xs font-semibold transition',
-                      i === active ? 'bg-primary text-primary-fg shadow-sm' : 'text-muted-fg hover:bg-muted',
-                    )}
-                  >
-                    {s.name}
-                  </button>
-                ))}
-              </div>
-            )}
-
-            {/* Search */}
-            {sheet && (
-              <div className="flex items-center gap-2 px-4 py-2.5">
-                <div className="relative max-w-sm flex-1">
-                  <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-fg" />
-                  <input
-                    value={q}
-                    onChange={(e) => setQ(e.target.value)}
-                    placeholder={`Search ${sheet.name}…`}
-                    className="w-full rounded-lg border border-border bg-card py-1.5 pl-8 pr-3 text-sm outline-none focus:border-primary/50"
-                  />
-                </div>
-                <span className="text-[11px] text-muted-fg">
-                  {bodyRows.length} row{bodyRows.length === 1 ? '' : 's'}{q && shaped ? ` of ${shaped.body.length}` : ''}
-                </span>
-                <span className="ml-auto hidden text-[11px] italic text-muted-fg sm:inline">Click a column to sort</span>
+              <div className="flex gap-1 overflow-x-auto px-2 py-2">
+                {sheets.map((s, i) => {
+                  const sh = shapedAll[i];
+                  const n = sh?.groups?.length || 0;
+                  const flags = sh?.groups?.filter((g) => g.status === 'flag').length || 0;
+                  return (
+                    <button key={s.name + i} type="button" onClick={() => switchTab(i)}
+                      className={cn('relative inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg px-3 py-1.5 text-xs font-semibold transition',
+                        i === active ? 'bg-primary text-primary-fg shadow-sm' : 'text-muted-fg hover:bg-muted')}>
+                      {s.name.trim()}
+                      <span className={cn('rounded-full px-1.5 text-[10px] tabular-nums', i === active ? 'bg-white/25' : 'bg-muted')}>{n}</span>
+                      {flags > 0 && <span className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-rose-500 ring-2 ring-card" title={`${flags} flagged`} />}
+                    </button>
+                  );
+                })}
               </div>
             )}
           </CardContent>
         </Card>
 
-        {/* Body */}
         {isLoading ? (
           <div className="grid place-items-center py-16 text-sm text-muted-fg">
             <div className="flex flex-col items-center gap-3"><div className="h-7 w-7 animate-spin rounded-full border-2 border-primary border-t-transparent" />Loading sheet…</div>
@@ -225,103 +313,154 @@ export default function POScrubReport() {
                 <div>
                   <div className="font-semibold">Couldn't load the PO Scrub sheet.</div>
                   <div className="mt-0.5 text-xs">{error.message}</div>
-                  <div className="mt-1.5 text-xs text-muted-fg">
-                    Check that <code>PO_SCRUB_SHEET_ID</code> and <code>po-scrub-oauth.json</code> are present on the server (run the one-time consent script if needed).
+                  <div className="mt-1.5 text-xs text-muted-fg">Check that <code>PO_SCRUB_SHEET_ID</code> and <code>po-scrub-oauth.json</code> are present on the server.</div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        ) : !sheet || !shaped ? (
+          <Card><CardContent className="py-16 text-center text-sm text-muted-fg">{sheet ? 'This tab has no table to show.' : 'No sheets found.'}</CardContent></Card>
+        ) : (
+          <>
+            {/* KPI cards — click a status to filter */}
+            <div className="grid shrink-0 grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
+              <button type="button" onClick={() => setStatusFilter(null)}
+                className={cn('rounded-xl border bg-card p-3 text-left transition hover:shadow-sm', !statusFilter ? 'border-primary ring-2 ring-primary/20' : 'border-border')}>
+                <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-muted-fg"><Package size={12} /> {sheet.name.trim()} POs</div>
+                <div className="mt-1 text-2xl font-extrabold tabular-nums">{fmtNumber(counts.all)}</div>
+              </button>
+              {['ok', 'pending', 'flag', 'none'].map((k) => {
+                const s = STATUS[k]; const Icon = s.icon;
+                return (
+                  <button key={k} type="button" onClick={() => setStatusFilter((f) => (f === k ? null : k))} disabled={!counts[k]}
+                    className={cn('rounded-xl border bg-gradient-to-br to-transparent p-3 text-left transition hover:shadow-sm disabled:opacity-40',
+                      s.card, statusFilter === k ? 'border-transparent ring-2' : 'border-border')}>
+                    <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider"><Icon size={12} /> {s.label}</div>
+                    <div className="mt-1 text-2xl font-extrabold tabular-nums text-fg">{fmtNumber(counts[k] || 0)}</div>
+                  </button>
+                );
+              })}
+              <div className="rounded-xl border border-border bg-card p-3">
+                <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-muted-fg"><History size={12} /> {shaped.remCol >= 0 ? 'Remaining Qty' : 'Last Scrub'}</div>
+                <div className="mt-1 text-2xl font-extrabold tabular-nums">{shaped.remCol >= 0 ? fmtNumber(counts.remaining) : (shaped.lastScrub || '—')}</div>
+                {shaped.remCol >= 0 && shaped.lastScrub && <div className="text-[10px] text-muted-fg">last scrub {shaped.lastScrub}</div>}
+              </div>
+            </div>
+
+            {/* Table */}
+            <Card className="flex min-h-0 flex-1 flex-col">
+              <CardContent className="flex min-h-0 flex-1 flex-col p-0">
+                <div className="flex shrink-0 flex-wrap items-center gap-3 border-b border-border px-4 py-2.5">
+                  <div className="relative w-full max-w-xs">
+                    <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-fg" />
+                    <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={`Search ${sheet.name.trim()} — PO, ACK, invoice, remarks…`}
+                      className="w-full rounded-lg border border-border bg-card py-1.5 pl-8 pr-3 text-sm outline-none focus:border-primary/50" />
+                  </div>
+                  <span className="text-[11px] text-muted-fg">{rows.length} of {counts.all} PO{counts.all === 1 ? '' : 's'}</span>
+                  <div className="ml-auto flex flex-wrap items-center gap-3 text-[11px] text-muted-fg">
+                    <span className="font-semibold">Sheet colours:</span>
+                    {['ok', 'pending', 'flag'].map((k) => (
+                      <span key={k} className="inline-flex items-center gap-1"><span className={cn('h-2.5 w-2.5 rounded-sm', STATUS[k].dot)} />{STATUS[k].label}</span>
+                    ))}
                   </div>
                 </div>
-              </div>
-            </CardContent>
-          </Card>
-        ) : !sheet ? (
-          <Card><CardContent className="py-16 text-center text-sm text-muted-fg">No sheets found.</CardContent></Card>
-        ) : (
-          <Card className="flex min-h-0 flex-1 flex-col">
-            <CardContent className="flex min-h-0 flex-1 flex-col p-0">
-              {shaped.titles.length > 0 && (
-                <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border bg-gradient-to-r from-emerald-500/20 via-emerald-500/5 to-transparent px-4 py-2.5">
-                  <span className="h-2 w-2 shrink-0 rounded-full bg-emerald-500 shadow-[0_0_8px] shadow-emerald-500/50" />
-                  {shaped.titles.map((t, i) => (
-                    <span key={i} className="text-sm font-extrabold tracking-tight text-emerald-800 dark:text-emerald-200">{t}</span>
-                  ))}
-                </div>
-              )}
-              {/* The scroll box FILLS the card, which fills the viewport — so the page
-                  itself never scrolls and the horizontal bar is always on screen.
-                  Header + first two columns (#, PO) freeze. */}
-              <div className="po-scroll min-h-0 flex-1 overflow-auto rounded-b-xl">
-                <table className="min-w-full border-separate border-spacing-0 text-sm">
-                  <thead>
-                    <tr>
-                      <th className="sticky left-0 top-0 z-30 w-11 min-w-[2.75rem] border-b border-r border-border bg-muted px-2 py-2.5 text-right text-[10px] font-bold text-muted-fg">#</th>
-                      {Array.from({ length: shaped.cols }).map((_, c) => {
-                        const isNum = colType[c] === 'num';
-                        const sorted = sort.col === c;
+
+                <div className="po-scroll min-h-0 flex-1 overflow-auto rounded-b-xl">
+                  <table className="min-w-full border-separate border-spacing-0 text-sm">
+                    <thead>
+                      <tr>
+                        <th className="sticky left-0 top-0 z-30 w-14 min-w-[3.5rem] border-b border-r border-border bg-muted px-2 py-2.5 text-right text-[10px] font-bold text-muted-fg">S.NO</th>
+                        <SortHead col={shaped.poCol} label={shaped.header[shaped.poCol] || 'PO#'} className="left-[3.5rem] z-30 border-r" />
+                        <SortHead col="status" label="Status" />
+                        <SortHead col="latest" label={shaped.scrubCols.length ? 'Latest Scrub' : ' '} />
+                        {shaped.coreCols.map((c) => (
+                          <SortHead key={c} col={c} label={shaped.header[c]} align={shaped.colType[c] === 'num' ? 'right' : 'left'} />
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {rows.length === 0 ? (
+                        <tr><td colSpan={colTotal} className="px-4 py-10 text-center text-sm text-muted-fg">No matching POs.</td></tr>
+                      ) : rows.map((g) => {
+                        const S = STATUS[g.status] || STATUS.none;
+                        const isOpen = open.has(g.key);
+                        const canOpen = g.history.length > 1;
                         return (
-                          <th
-                            key={c}
-                            className={cn(
-                              'group sticky top-0 z-20 whitespace-nowrap border-b border-border bg-muted p-0',
-                              c === 0 && 'left-[2.75rem] z-30 border-r',
+                          <Fragment key={g.key}>
+                            {/* Main PO row */}
+                            <tr className={cn('group/row', S.row)}>
+                              <td className={cn('sticky left-0 z-10 border-b border-l-4 border-r border-border/60 px-2 py-2 text-right align-top', S.row, S.stripe)}>
+                                <div className="flex items-center justify-end gap-1">
+                                  {canOpen && (
+                                    <button type="button" onClick={() => toggleOpen(g.key)} title="Scrub history"
+                                      className="grid h-5 w-5 place-items-center rounded text-muted-fg transition hover:bg-black/5 hover:text-fg dark:hover:bg-white/10">
+                                      <ChevronRight size={13} className={cn('transition-transform', isOpen && 'rotate-90')} />
+                                    </button>
+                                  )}
+                                  <span className="text-[11px] font-semibold tabular-nums text-muted-fg">{g.sno || ''}</span>
+                                </div>
+                              </td>
+                              <td className={cn('sticky left-[3.5rem] z-10 whitespace-nowrap border-b border-r border-border/60 px-3 py-2 align-top font-bold text-primary', S.row)}>
+                                {renderCell(g, 0, g.main, shaped.poCol)}
+                                {g.lines.length > 0 && <div className="mt-0.5 text-[10px] font-medium text-muted-fg">+{g.lines.length} line{g.lines.length === 1 ? '' : 's'}</div>}
+                              </td>
+                              <td className="whitespace-nowrap border-b border-border/40 px-3 py-2 align-top"><StatusPill status={g.status} /></td>
+                              <td className="border-b border-border/40 px-3 py-2 align-top">{shaped.scrubCols.length ? <ScrubValue entry={g.latest} /> : null}</td>
+                              {shaped.coreCols.map((c) => (
+                                <td key={c} className={cn('border-b border-border/40 px-3 py-2 align-top text-[13px]',
+                                  shaped.colType[c] === 'num' ? 'whitespace-nowrap text-right font-semibold tabular-nums' : 'max-w-[280px] whitespace-normal break-words')}>
+                                  {renderCell(g, 0, g.main, c)}
+                                </td>
+                              ))}
+                            </tr>
+
+                            {/* Continuation lines (extra invoices / shipments) */}
+                            {g.lines.map((ln, li) => (
+                              <tr key={`${g.key}-l${li}`} className={cn('text-[12px] text-fg/80', S.row)}>
+                                <td className={cn('sticky left-0 z-10 border-b border-l-4 border-r border-border/40 px-2 py-1.5 text-right align-top text-muted-fg', S.row, S.stripe)}>↳</td>
+                                <td className={cn('sticky left-[3.5rem] z-10 border-b border-r border-border/40 px-3 py-1.5 align-top text-[11px] italic text-muted-fg', S.row)}>line {li + 2}</td>
+                                <td className="border-b border-border/30" />
+                                <td className="border-b border-border/30" />
+                                {shaped.coreCols.map((c) => (
+                                  <td key={c} className={cn('border-b border-border/30 px-3 py-1.5 align-top',
+                                    shaped.colType[c] === 'num' ? 'whitespace-nowrap text-right tabular-nums' : 'max-w-[280px] whitespace-normal break-words')}>
+                                    {cell(ln[c]) ? renderCell(g, li + 1, ln, c) : null}
+                                  </td>
+                                ))}
+                              </tr>
+                            ))}
+
+                            {/* Expanded scrub timeline */}
+                            {isOpen && (
+                              <tr className="bg-muted/30">
+                                <td className="sticky left-0 z-10 border-b border-border/40 bg-muted/60" />
+                                <td colSpan={colTotal - 1} className="border-b border-border/40 px-3 py-3">
+                                  <div className="mb-2 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-muted-fg"><History size={12} /> Scrub history · PO {g.po}</div>
+                                  <ol className="flex flex-wrap gap-2">
+                                    {g.history.map((h, hi) => {
+                                      const ok = /^ok$/i.test(h.value);
+                                      return (
+                                        <li key={hi} className={cn('max-w-[320px] rounded-lg border px-2.5 py-1.5 text-[12px]',
+                                          ok ? 'border-emerald-300 bg-emerald-50 dark:border-emerald-800 dark:bg-emerald-950' : 'border-border bg-card',
+                                          hi === g.history.length - 1 && 'ring-2 ring-primary/30')}>
+                                          <div className="text-[10px] font-bold text-muted-fg">{h.label}{hi === g.history.length - 1 && ' · latest'}</div>
+                                          <div className={cn(ok && 'font-bold text-emerald-700 dark:text-emerald-300')}>{ok ? '✓ OK' : h.value}</div>
+                                        </li>
+                                      );
+                                    })}
+                                  </ol>
+                                </td>
+                              </tr>
                             )}
-                          >
-                            <button
-                              type="button"
-                              onClick={() => toggleSort(c)}
-                              title="Sort"
-                              className={cn(
-                                'flex w-full items-center gap-1 px-3 py-2.5 text-[11px] font-bold uppercase tracking-wider transition hover:text-primary',
-                                isNum ? 'justify-end' : 'justify-start',
-                                sorted ? 'text-primary' : 'text-muted-fg',
-                              )}
-                            >
-                              <span className="truncate">{String(shaped.header[c] ?? '').trim() || ' '}</span>
-                              {sorted
-                                ? (sort.dir === 'asc' ? <ArrowUp size={12} className="shrink-0" /> : <ArrowDown size={12} className="shrink-0" />)
-                                : <ArrowUpDown size={12} className="shrink-0 opacity-0 transition group-hover:opacity-60" />}
-                            </button>
-                          </th>
+                          </Fragment>
                         );
                       })}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {bodyRows.length === 0 ? (
-                      <tr><td colSpan={shaped.cols + 1} className="px-4 py-10 text-center text-sm text-muted-fg">No matching rows.</td></tr>
-                    ) : bodyRows.map((row, ri) => (
-                      <tr key={ri} className={cn('hover:bg-primary/[0.06]', ri % 2 === 1 && 'bg-muted/25')}>
-                        <td className="sticky left-0 z-10 border-b border-r border-border/60 bg-card px-2 py-2 text-right text-[10px] tabular-nums text-muted-fg/70 shadow-[2px_0_4px_-2px_rgba(0,0,0,0.15)]">{ri + 1}</td>
-                        {Array.from({ length: shaped.cols }).map((_, c) => {
-                          const raw = cell(row[c]);
-                          const isStatus = String(shaped.header[c] ?? '').toLowerCase().includes('status') && raw;
-                          return (
-                            <td
-                              key={c}
-                              className={cn(
-                                'border-b border-border/40 px-3 py-2 align-top text-[13px]',
-                                colType[c] === 'num' ? 'whitespace-nowrap text-right tabular-nums font-medium text-fg' : 'max-w-[300px] whitespace-normal break-words',
-                                c === 0 && 'sticky left-[2.75rem] z-10 border-r border-border/60 bg-card font-bold text-primary shadow-[2px_0_4px_-2px_rgba(0,0,0,0.15)]',
-                              )}
-                            >
-                              {isStatus ? (
-                                <StatusBadge value={raw} />
-                              ) : colType[c] === 'num' ? (
-                                raw
-                              ) : (
-                                // Long free-text (e.g. Remarks) is clamped to keep
-                                // rows compact; hovering expands it in place, and the
-                                // full text is also available as a native tooltip.
-                                <div className="line-clamp-3 cursor-help transition-all hover:line-clamp-none" title={raw}>{raw}</div>
-                              )}
-                            </td>
-                          );
-                        })}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </CardContent>
-          </Card>
+                    </tbody>
+                  </table>
+                </div>
+              </CardContent>
+            </Card>
+          </>
         )}
       </div>
     </>
