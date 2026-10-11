@@ -121,6 +121,60 @@ function shapeSheet(sheet) {
   return { header, cols, snoCol, poCol, coreCols: coreCols.filter((c) => c !== poCol), scrubCols, remCol, groups, colType, lastScrub: lastScrub?.label || null };
 }
 
+// ── All vendors → one table ──────────────────────────────────────────────────
+// Each vendor tab has slightly different columns, so the combined view uses the
+// union of column headers (matched by name, first-seen order) plus a Vendor
+// column at index 0. Every PO's cells and flags are re-indexed into that space.
+const VENDOR_COL = 0;
+function combineShaped(list, names) {
+  const valid = list.map((s, i) => (s ? { s, name: cell(names[i]) || `Tab ${i + 1}` } : null)).filter(Boolean);
+  if (!valid.length) return null;
+  // Vendors name the same field differently (lead-time weeks, "EXPEC SHIP DATE
+  // BY VEN" vs "EXPECTED DATE BY VENDOR", …) — fold those into one column.
+  const canon = (h) => {
+    const u = cell(h).toUpperCase().replace(/\s+/g, ' ');
+    if (/^EXPECTED DATE\s*-\s*\d+\s*WEEKS?$/.test(u)) return { key: 'EXP_LEAD', label: 'Expected Date (lead time)' };
+    if (/^EXPEC(TED)?\.?\s*(SHIP\s*)?DATE BY VEN/.test(u)) return { key: 'EXP_VENDOR', label: 'Expected Date by Vendor' };
+    if (/^QTY SHOWING ON VENDOR/.test(u)) return { key: 'QTY_VENDOR', label: 'Qty on Vendor Website' };
+    return { key: u, label: cell(h) };
+  };
+  const keyOf = (h) => canon(h).key;
+  const header = ['Vendor', 'PO#'];             // 0 = vendor, 1 = PO#
+  const colIndex = new Map();
+  for (const { s } of valid) {
+    for (const c of s.coreCols) {
+      const { key, label } = canon(s.header[c]);
+      if (key && !colIndex.has(key)) { colIndex.set(key, header.length); header.push(label); }
+    }
+  }
+  const groups = [];
+  for (const { s, name } of valid) {
+    const map = new Map([[s.poCol, 1]]);
+    for (const c of s.coreCols) { const u = colIndex.get(keyOf(s.header[c])); if (u != null) map.set(c, u); }
+    const remap = (row) => { const out = new Array(header.length).fill(''); out[VENDOR_COL] = name; for (const [c, u] of map) out[u] = row?.[c] ?? ''; return out; };
+    for (const g of s.groups) {
+      const flagCells = new Set();
+      for (const f of g.flagCells) { const [li, c] = f.split(':'); const u = map.get(Number(c)); if (u != null) flagCells.add(`${li}:${u}`); }
+      groups.push({ ...g, key: `${name}::${g.key}`, vendor: name, main: remap(g.main), lines: g.lines.map(remap), flagCells, search: `${g.search} ${name.toLowerCase()}` });
+    }
+  }
+  const coreCols = [VENDOR_COL, ...[...colIndex.values()]];
+  const colType = { [VENDOR_COL]: 'text' };
+  for (const c of colIndex.values()) {
+    let num = 0, date = 0, tot = 0;
+    for (const g of groups) { const v = cell(g.main[c]); if (!v) continue; tot++; if (isNumeric(v)) num++; else if (isDate(v)) date++; }
+    colType[c] = tot === 0 ? 'text' : num / tot >= 0.6 ? 'num' : date / tot >= 0.6 ? 'date' : 'text';
+  }
+  // Most recent scrub label across vendors (labels are MM/DD/YY dates).
+  const lastScrub = valid.map(({ s }) => s.lastScrub).filter(Boolean)
+    .sort((a, b) => (Date.parse(b) || 0) - (Date.parse(a) || 0))[0] || null;
+  return {
+    header, poCol: 1, coreCols, colType, groups, lastScrub, isAll: true,
+    scrubCols: valid.some(({ s }) => s.scrubCols.length) ? [{}] : [],
+    remCol: valid.some(({ s }) => s.remCol >= 0) ? 1 : -1,
+  };
+}
+
 function StatusPill({ status }) {
   const s = STATUS[status] || STATUS.none;
   const Icon = s.icon;
@@ -148,7 +202,7 @@ export default function POScrubReport() {
     refetchInterval: 5 * 60 * 60 * 1000,
     refetchOnWindowFocus: false,
   });
-  const [active, setActive] = useState(0);
+  const [active, setActive] = useState(-1);   // -1 = All vendors
   const [q, setQ] = useState('');
   const [statusFilter, setStatusFilter] = useState(null);
   const [sort, setSort] = useState({ col: null, dir: 'asc' });
@@ -169,12 +223,14 @@ export default function POScrubReport() {
   }, []);
 
   const sheets = Array.isArray(data?.sheets) ? data.sheets : [];
-  useEffect(() => { if (active > sheets.length - 1) setActive(0); }, [sheets.length, active]);
+  useEffect(() => { if (active > sheets.length - 1) setActive(-1); }, [sheets.length, active]);
 
   // Shape every tab once (cheap) so the tab bar can show per-vendor counts.
   const shapedAll = useMemo(() => sheets.map((s) => { try { return shapeSheet(s); } catch { return null; } }), [sheets]);
-  const sheet = sheets[active];
-  const shaped = shapedAll[active] || null;
+  const combined = useMemo(() => { try { return combineShaped(shapedAll, sheets.map((s) => s?.name)); } catch { return null; } }, [shapedAll, sheets]);
+  const isAll = active === -1;
+  const sheet = isAll ? (sheets.length ? { name: 'All vendors' } : null) : sheets[active];
+  const shaped = isAll ? combined : (shapedAll[active] || null);
 
   const counts = useMemo(() => {
     const c = { all: 0, ok: 0, pending: 0, flag: 0, none: 0, remaining: 0 };
@@ -282,6 +338,21 @@ export default function POScrubReport() {
 
             {sheets.length > 0 && (
               <div className="flex gap-1 overflow-x-auto px-2 py-2">
+                {/* All vendors — every PO in one table */}
+                {(() => {
+                  const n = combined?.groups?.length || 0;
+                  const flags = combined?.groups?.filter((g) => g.status === 'flag').length || 0;
+                  return (
+                    <button type="button" onClick={() => switchTab(-1)}
+                      className={cn('relative inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg px-3 py-1.5 text-xs font-bold transition',
+                        isAll ? 'bg-primary text-primary-fg shadow-sm' : 'border border-primary/30 text-primary hover:bg-primary/10')}>
+                      All
+                      <span className={cn('rounded-full px-1.5 text-[10px] tabular-nums', isAll ? 'bg-white/25' : 'bg-primary/10')}>{n}</span>
+                      {flags > 0 && <span className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-rose-500 ring-2 ring-card" title={`${flags} flagged`} />}
+                    </button>
+                  );
+                })()}
+                <span className="mx-1 my-1 w-px shrink-0 bg-border" />
                 {sheets.map((s, i) => {
                   const sh = shapedAll[i];
                   const n = sh?.groups?.length || 0;
@@ -409,7 +480,13 @@ export default function POScrubReport() {
                               {shaped.coreCols.map((c) => (
                                 <td key={c} className={cn('border-b border-border/40 px-3 py-2 align-top text-[13px]',
                                   shaped.colType[c] === 'num' ? 'whitespace-nowrap text-right font-semibold tabular-nums' : 'max-w-[280px] whitespace-normal break-words')}>
-                                  {renderCell(g, 0, g.main, c)}
+                                  {shaped.isAll && c === VENDOR_COL ? (
+                                    <button type="button" onClick={() => { const i = sheets.findIndex((s) => cell(s?.name) === g.vendor); if (i >= 0) switchTab(i); }}
+                                      title={`Open ${g.vendor} tab`}
+                                      className="whitespace-nowrap rounded-md bg-primary/10 px-2 py-0.5 text-[11px] font-bold uppercase tracking-wide text-primary transition hover:bg-primary/20">
+                                      {g.vendor}
+                                    </button>
+                                  ) : renderCell(g, 0, g.main, c)}
                                 </td>
                               ))}
                             </tr>
