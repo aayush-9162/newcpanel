@@ -590,17 +590,30 @@ export default function POScrubReport() {
       .sort(SORTS[sortKey]?.fn || SORTS.attention.fn);
   }, [records, q, view, sortKey]);
 
-  // Vendor overview (All view): open / overdue / open qty per vendor.
+  // Vendor overview (All view). Follows the active filter: with e.g. "Overdue"
+  // selected it lists only vendors that have overdue POs, with those counts.
+  const viewDef = VIEWS.find((x) => x.key === view) || VIEWS[0];
   const vendorSummary = useMemo(() => sheets.map((s, i) => {
     const recs = recordsByTab[i] || [];
+    const matched = viewDef.test ? recs.filter(viewDef.test) : recs;
     return {
       i, name: cell(s?.name), total: recs.length,
       open: recs.filter((r) => r.timing !== 'received').length,
       overdue: recs.filter((r) => r.timing === 'overdue').length,
       soon: recs.filter((r) => r.timing === 'soon').length,
       openQty: recs.reduce((t, r) => t + (r.rem > 0 ? r.rem : 0), 0),
+      matched: matched.length,
+      matchedQty: matched.reduce((t, r) => t + (r.rem > 0 ? r.rem : 0), 0),
     };
-  }).filter((v) => v.total > 0), [sheets, recordsByTab]);
+  }).filter((v) => (viewDef.test ? v.matched > 0 : v.total > 0)), [sheets, recordsByTab, viewDef]);
+
+  // Results section (filter banner + vendor overview + list). KPI clicks scroll
+  // here so the change is always visible, not hidden below the fold.
+  const resultsRef = useRef(null);
+  const applyView = (k) => {
+    setView((cur) => (cur === k ? 'all' : k));
+    requestAnimationFrame(() => resultsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+  };
 
   const switchTab = (i) => { setActive(i); setQ(''); setView('all'); setSelectedKey(null); };
   const hardRefresh = async () => {
@@ -613,7 +626,7 @@ export default function POScrubReport() {
   const totalAll = recordsByTab.reduce((t, r) => t + r.length, 0);
 
   const kpi = (k, label, value, Icon, tone, sub) => (
-    <button type="button" onClick={() => setView((cur) => (cur === k ? 'all' : k))}
+    <button type="button" onClick={() => applyView(k)}
       className={cn('rounded-xl border bg-card p-3 text-left transition hover:shadow-sm',
         view === k ? 'border-primary ring-2 ring-primary/20' : 'border-border')}>
       <div className={cn('flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider', tone)}><Icon size={12} /> {label}</div>
@@ -708,28 +721,56 @@ export default function POScrubReport() {
               </div>
             </div>
 
-            {/* Vendor overview — All view only */}
+            {/* Results: everything below reacts to the KPI / filter selection */}
+            <div ref={resultsRef} className="flex scroll-mt-20 flex-col gap-3">
+            {view !== 'all' && (
+              <div className="flex flex-wrap items-center gap-2 rounded-xl border border-primary/30 bg-primary/5 px-4 py-2.5 text-sm">
+                {viewDef.dot && <span className={cn('h-2.5 w-2.5 rounded-full', viewDef.dot)} />}
+                <span className="font-bold">Showing {list.length} {viewDef.label} PO{list.length === 1 ? '' : 's'}</span>
+                <span className="text-muted-fg">
+                  {isAll ? `across ${vendorSummary.length} vendor${vendorSummary.length === 1 ? '' : 's'}` : `in ${scopeName}`}
+                  {q.trim() && ` · matching “${q.trim()}”`}
+                </span>
+                <button type="button" onClick={() => setView('all')}
+                  className="ml-auto inline-flex items-center gap-1 rounded-lg border border-border bg-card px-2.5 py-1 text-xs font-semibold text-fg/80 transition hover:bg-muted">
+                  <X size={12} /> Clear filter
+                </button>
+              </div>
+            )}
+
+            {/* Vendor overview — All view only; follows the active filter */}
             {isAll && vendorSummary.length > 0 && (
               <Card className="shrink-0">
                 <CardContent className="p-3">
-                  <div className="mb-2 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-muted-fg"><Store size={12} /> By vendor <span className="font-medium normal-case tracking-normal">· click to open</span></div>
+                  <div className="mb-2 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-muted-fg">
+                    <Store size={12} /> By vendor{view !== 'all' && <span className="text-primary"> · {viewDef.label}</span>}
+                    <span className="font-medium normal-case tracking-normal">· click to open</span>
+                  </div>
                   <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-6">
-                    {[...vendorSummary].sort((a, b) => b.overdue - a.overdue || b.openQty - a.openQty).map((v) => (
-                      <button key={v.i} type="button" onClick={() => switchTab(v.i)}
-                        className={cn('flex items-center justify-between gap-2 rounded-lg border px-2.5 py-2 text-left transition hover:border-primary/40 hover:shadow-sm',
-                          v.overdue ? 'border-rose-200 bg-rose-50/60 dark:border-rose-900 dark:bg-rose-950/40' : 'border-border bg-card')}>
-                        <div className="min-w-0">
-                          <div className="truncate text-[12px] font-bold">{v.name}</div>
-                          <div className="text-[10px] text-muted-fg">
-                            {v.open} open{v.overdue > 0 && <span className="font-bold text-rose-600 dark:text-rose-300"> · {v.overdue} overdue</span>}{v.soon > 0 && <span className="font-semibold text-amber-600 dark:text-amber-300"> · {v.soon} soon</span>}
+                    {[...vendorSummary]
+                      .sort((a, b) => (view === 'all' ? (b.overdue - a.overdue || b.openQty - a.openQty) : (b.matched - a.matched || b.matchedQty - a.matchedQty)))
+                      .map((v) => (
+                        // Keeps the active filter when drilling into a vendor.
+                        <button key={v.i} type="button" onClick={() => { setActive(v.i); setQ(''); setSelectedKey(null); }}
+                          className={cn('flex items-center justify-between gap-2 rounded-lg border px-2.5 py-2 text-left transition hover:border-primary/40 hover:shadow-sm',
+                            view !== 'all' ? 'border-primary/30 bg-primary/5'
+                              : v.overdue ? 'border-rose-200 bg-rose-50/60 dark:border-rose-900 dark:bg-rose-950/40' : 'border-border bg-card')}>
+                          <div className="min-w-0">
+                            <div className="truncate text-[12px] font-bold">{v.name}</div>
+                            <div className="text-[10px] text-muted-fg">
+                              {view === 'all' ? (
+                                <>{v.open} open{v.overdue > 0 && <span className="font-bold text-rose-600 dark:text-rose-300"> · {v.overdue} overdue</span>}{v.soon > 0 && <span className="font-semibold text-amber-600 dark:text-amber-300"> · {v.soon} soon</span>}</>
+                              ) : (
+                                <span className="font-bold text-primary">{v.matched} {viewDef.label.toLowerCase()}</span>
+                              )}
+                            </div>
                           </div>
-                        </div>
-                        <div className="text-right">
-                          <div className="text-sm font-extrabold tabular-nums">{fmtNumber(v.openQty)}</div>
-                          <div className="text-[9px] uppercase text-muted-fg">open qty</div>
-                        </div>
-                      </button>
-                    ))}
+                          <div className="text-right">
+                            <div className="text-sm font-extrabold tabular-nums">{fmtNumber(view === 'all' ? v.openQty : v.matchedQty)}</div>
+                            <div className="text-[9px] uppercase text-muted-fg">open qty</div>
+                          </div>
+                        </button>
+                      ))}
                   </div>
                 </CardContent>
               </Card>
@@ -785,6 +826,7 @@ export default function POScrubReport() {
                 {list.map((r) => <POCard key={r.key} rec={r} showVendor={isAll} onOpen={setSelectedKey} />)}
               </div>
             )}
+            </div>
           </>
         )}
 
