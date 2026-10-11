@@ -12,7 +12,7 @@
 import { useMemo, useState, useEffect, useRef } from 'react';
 import { Topbar } from '@/components/Topbar';
 import { Card, CardContent } from '@/components/ui/Card';
-import { usePoScrubQuery, poScrubGet } from '@/lib/api';
+import { usePoScrubQuery, poScrubGet, useSqlQuery } from '@/lib/api';
 import { fmtNumber } from '@/lib/format';
 import { cn } from '@/lib/cn';
 import {
@@ -358,7 +358,171 @@ function Section({ icon: Icon, title, children, count }) {
   );
 }
 
+// ── PO line items from the system (MS SQL) ───────────────────────────────────
+// PORecvDtls = one row per PO line (Seq) per received unit: QtyOrd on every
+// row, QtyRecd / RecvDate / put-away location on received rows, a single row
+// with no receipt for lines not yet in. Customer comes from the PO line itself
+// (open lines) or, failing that, the linked sales order.
+const PO_ITEMS_SQL = `
+SELECT r.Seq, r.RowNum, RTRIM(r.ItemId) AS ItemId, RTRIM(r.ItemDesc1) AS Desc1, RTRIM(r.ItemDesc2) AS Desc2,
+       r.QtyOrd, r.QtyRecd, r.RecvDate, r.QtyRemain, r.SONo, r.DueDate,
+       r.loc, RTRIM(r.aisle) AS aisle, RTRIM(r.lvl) AS lvl, RTRIM(r.bay) AS bay,
+       COALESCE(NULLIF(RTRIM(d.po_dtl_cust_nam), ''), c.CustomerName) AS Customer
+FROM PORecvDtls r
+LEFT JOIN PO_dtlRV d ON d.po_dtl_no = r.PONo AND d.po_dtl_seq = r.Seq
+OUTER APPLY (SELECT TOP 1 LTRIM(RTRIM(sd.CustomerName)) AS CustomerName
+             FROM SalespersonDaily sd WHERE r.SONo > 0 AND sd.SalesNo = r.SONo) c
+WHERE r.PONo = ?
+ORDER BY r.Seq, r.RowNum`;
+
+const locLabel = (r) => {
+  const loc = Number(r.loc);
+  if (!loc) return '';
+  const where = loc === 999 ? 'Warehouse' : `Store ${loc}`;
+  const alb = [cell(r.aisle), cell(r.lvl), cell(r.bay)].filter(Boolean).join('-');
+  return alb ? `${where} · ${alb}` : where;
+};
+const fmtYmd = (s) => { const m = cell(s).match(/^(\d{4})-(\d{2})-(\d{2})/); return m ? fmtD(new Date(+m[1], +m[2] - 1, +m[3])) : cell(s); };
+
+// Collapse receipt rows into one record per PO line.
+function aggregatePoLines(rows) {
+  const by = new Map();
+  for (const r of Array.isArray(rows) ? rows : []) {
+    const k = String(r?.Seq ?? '');
+    let L = by.get(k);
+    if (!L) {
+      L = { seq: k, itemId: cell(r.ItemId).replace(/^0+(?=\d)/, ''), desc1: cell(r.Desc1), desc2: cell(r.Desc2), ordered: 0, received: 0,
+        so: Number(r.SONo) || 0, customer: cell(r.Customer), due: cell(r.DueDate), receipts: [] };
+      by.set(k, L);
+    }
+    L.ordered = Math.max(L.ordered, Number(r.QtyOrd) || 0);
+    if (!L.customer && r.Customer) L.customer = cell(r.Customer);
+    const q = Number(r.QtyRecd) || 0;
+    if (q > 0) {
+      L.received += q;
+      const date = cell(r.RecvDate), where = locLabel(r);
+      const ex = L.receipts.find((x) => x.date === date && x.where === where);
+      if (ex) ex.qty += q; else L.receipts.push({ date, where, qty: q });
+    }
+  }
+  return [...by.values()].map((L) => ({ ...L, open: Math.max(0, L.ordered - L.received) }));
+}
+
+const ITEM_VIEWS = {
+  ordered:  { label: 'Ordered',    test: () => true },
+  received: { label: 'Received',   test: (l) => l.received > 0 },
+  open:     { label: 'Still open', test: (l) => l.open > 0 },
+};
+
+function POItems({ rec, q, view, setView, sectionRef }) {
+  const lines = useMemo(() => aggregatePoLines(q.data?.rows), [q.data]);
+  const tot = useMemo(() => lines.reduce((t, l) => ({ ordered: t.ordered + l.ordered, received: t.received + l.received, open: t.open + l.open }), { ordered: 0, received: 0, open: 0 }), [lines]);
+  const shown = lines.filter(ITEM_VIEWS[view]?.test || (() => true));
+  const differs = lines.length > 0 && (
+    (rec.orig != null && rec.orig !== tot.ordered) || (rec.rem != null && rec.rem !== tot.open));
+
+  return (
+    <section ref={sectionRef} className="scroll-mt-4">
+      <h3 className="mb-2 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-muted-fg">
+        <Package size={12} /> Items on this PO
+        <span className="ml-1 rounded bg-sky-100 px-1.5 py-px text-[9px] font-bold text-sky-700 dark:bg-sky-900/50 dark:text-sky-200">LIVE · SYSTEM</span>
+      </h3>
+
+      {q.isLoading ? (
+        <div className="flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-4 text-[12px] text-muted-fg">
+          <div className="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent" /> Loading items from the system…
+        </div>
+      ) : q.error ? (
+        <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-[12px] text-amber-700 dark:text-amber-300">
+          Couldn't load PO items: {q.error.message}
+        </div>
+      ) : lines.length === 0 ? (
+        <div className="rounded-lg border border-border bg-card px-3 py-3 text-[12px] text-muted-fg">
+          PO {rec.po} isn't in the system's open-PO data — it's usually fully received or closed in the system, so its items aren't listed here.
+        </div>
+      ) : (
+        <>
+          <div className="mb-2 grid grid-cols-3 gap-1 rounded-lg bg-muted p-1">
+            {Object.entries(ITEM_VIEWS).map(([k, v]) => {
+              const units = tot[k];
+              const n = lines.filter(v.test).length;
+              return (
+                <button key={k} type="button" onClick={() => setView(k)}
+                  className={cn('rounded-md px-2 py-1.5 text-left transition',
+                    view === k ? 'bg-card shadow-sm ring-1 ring-primary/30' : 'hover:bg-card/60')}>
+                  <div className="text-[10px] font-bold uppercase tracking-wider text-muted-fg">{v.label}</div>
+                  <div className={cn('text-base font-extrabold tabular-nums',
+                    k === 'received' ? 'text-emerald-600 dark:text-emerald-300' : k === 'open' && units ? 'text-amber-600 dark:text-amber-300' : '')}>
+                    {fmtNumber(units)} <span className="text-[10px] font-semibold text-muted-fg">units · {n} line{n === 1 ? '' : 's'}</span>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+
+          {differs && (
+            <div className="mb-2 rounded-lg bg-amber-50 px-3 py-1.5 text-[11px] text-amber-800 dark:bg-amber-950 dark:text-amber-200">
+              System shows {fmtNumber(tot.ordered)} ordered · {fmtNumber(tot.received)} received · {fmtNumber(tot.open)} open
+              {' '}(sheet: {rec.orig != null ? fmtNumber(rec.orig) : '—'} · {rec.receivedQty != null ? fmtNumber(rec.receivedQty) : '—'} · {rec.rem != null ? fmtNumber(rec.rem) : '—'}). The sheet may be behind.
+            </div>
+          )}
+
+          {shown.length === 0 ? (
+            <div className="rounded-lg border border-border bg-card px-3 py-3 text-[12px] text-muted-fg">No {ITEM_VIEWS[view].label.toLowerCase()} items on this PO.</div>
+          ) : (
+            <div className="space-y-1.5">
+              {shown.map((l) => (
+                <div key={l.seq} className="rounded-lg border border-border bg-card px-3 py-2">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="text-[13px] font-bold leading-snug">{l.desc2 || l.desc1 || l.itemId}</div>
+                      <div className="text-[11px] text-muted-fg">{l.desc2 ? l.desc1 : ''}{l.itemId && <> · <span className="font-mono">#{l.itemId}</span></>}</div>
+                    </div>
+                    <div className="shrink-0 text-right">
+                      {view === 'received' ? (
+                        <div className="text-sm font-extrabold tabular-nums text-emerald-600 dark:text-emerald-300">{fmtNumber(l.received)}<span className="text-[10px] font-semibold text-muted-fg"> / {fmtNumber(l.ordered)}</span></div>
+                      ) : view === 'open' ? (
+                        <div className="text-sm font-extrabold tabular-nums text-amber-600 dark:text-amber-300">{fmtNumber(l.open)}<span className="text-[10px] font-semibold text-muted-fg"> open</span></div>
+                      ) : (
+                        <>
+                          <div className="text-sm font-extrabold tabular-nums">{fmtNumber(l.ordered)}</div>
+                          <span className={cn('rounded-full px-1.5 py-px text-[10px] font-bold',
+                            l.open === 0 ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-200'
+                              : l.received > 0 ? 'bg-sky-100 text-sky-700 dark:bg-sky-900/50 dark:text-sky-200'
+                              : 'bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-200')}>
+                            {l.open === 0 ? 'Received' : l.received > 0 ? `${l.received}/${l.ordered} in` : 'Open'}
+                          </span>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                  <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-muted-fg">
+                    {l.so > 0 ? <span>SO <b className="text-fg/80">{l.so}</b>{l.customer && <> · {l.customer}</>}</span> : <span>Stock</span>}
+                    {view === 'received'
+                      ? l.receipts.map((r, i) => <span key={i}>Received {fmtNumber(r.qty)} on <b className="text-fg/80">{fmtYmd(r.date)}</b>{r.where && ` → ${r.where}`}</span>)
+                      : l.open > 0 && l.due && <span>Due {fmtYmd(l.due)}</span>}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+    </section>
+  );
+}
+
 function PODrawer({ rec, sheetUrl, onClose }) {
+  // Live PO lines from the system — fetched as soon as the panel opens so the
+  // Ordered / Received / Still open lists are ready on click.
+  const poNum = /^\d+$/.test(cell(rec?.po)) ? Number(cell(rec.po)) : null;
+  const itemsQ = useSqlQuery(PO_ITEMS_SQL, [poNum], { enabled: poNum != null, staleTime: 5 * 60 * 1000 });
+  const [itemsView, setItemsView] = useState('ordered');
+  const itemsRef = useRef(null);
+  const openItems = (k) => {
+    setItemsView(k);
+    requestAnimationFrame(() => itemsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+  };
   useEffect(() => {
     const onKey = (e) => { if (e.key === 'Escape') onClose(); };
     document.addEventListener('keydown', onKey);
@@ -374,12 +538,23 @@ function PODrawer({ rec, sheetUrl, onClose }) {
     { label: 'Est. delivery', date: rec.estDel, superseded: rec.etaUpdated },
     ...(rec.etaUpdated ? [{ label: `Current expected — ${rec.etaSrc.toLowerCase()}`, date: rec.eta, note: rec.etaNote, current: true }] : []),
   ].filter((m) => m.date).sort((a, b) => a.date - b.date);
-  const stat = (label, value, tone) => (
-    <div className="rounded-lg border border-border bg-card px-3 py-2">
-      <div className="text-[10px] font-bold uppercase tracking-wider text-muted-fg">{label}</div>
-      <div className={cn('mt-0.5 text-lg font-extrabold tabular-nums', tone)}>{value}</div>
-    </div>
-  );
+  // Ordered / Received / Still open are clickable → item list from the system.
+  const stat = (label, value, tone, itemsKey) => {
+    const body = (
+      <>
+        <div className="text-[10px] font-bold uppercase tracking-wider text-muted-fg">{label}</div>
+        <div className={cn('mt-0.5 text-lg font-extrabold tabular-nums', tone)}>{value}</div>
+        {itemsKey && poNum != null && <div className="mt-0.5 flex items-center gap-0.5 text-[10px] font-semibold text-primary">View items <ChevronRight size={10} /></div>}
+      </>
+    );
+    return itemsKey && poNum != null ? (
+      <button type="button" onClick={() => openItems(itemsKey)}
+        className={cn('rounded-lg border bg-card px-3 py-2 text-left transition hover:border-primary/50 hover:shadow-sm',
+          itemsView === itemsKey ? 'border-primary/40' : 'border-border')}>
+        {body}
+      </button>
+    ) : <div className="rounded-lg border border-border bg-card px-3 py-2">{body}</div>;
+  };
   const s = STATUS[rec.status] || STATUS.none;
 
   return (
@@ -404,12 +579,14 @@ function PODrawer({ rec, sheetUrl, onClose }) {
 
         <div className="flex-1 space-y-5 overflow-y-auto px-5 py-4">
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-            {stat('Ordered', rec.orig != null ? fmtNumber(rec.orig) : '—')}
-            {stat('Received', rec.receivedQty != null ? fmtNumber(rec.receivedQty) : '—', 'text-emerald-600 dark:text-emerald-300')}
-            {stat('Still open', rec.rem != null ? fmtNumber(rec.rem) : '—', rec.qtyFlagged ? 'text-rose-600 dark:text-rose-300' : rec.rem ? 'text-amber-600 dark:text-amber-300' : '')}
+            {stat('Ordered', rec.orig != null ? fmtNumber(rec.orig) : '—', '', 'ordered')}
+            {stat('Received', rec.receivedQty != null ? fmtNumber(rec.receivedQty) : '—', 'text-emerald-600 dark:text-emerald-300', 'received')}
+            {stat('Still open', rec.rem != null ? fmtNumber(rec.rem) : '—', rec.qtyFlagged ? 'text-rose-600 dark:text-rose-300' : rec.rem ? 'text-amber-600 dark:text-amber-300' : '', 'open')}
             {stat('On vendor site', rec.vendorQty != null ? fmtNumber(rec.vendorQty) : '—')}
           </div>
           <QtyBar rec={rec} compact />
+
+          {poNum != null && <POItems rec={rec} q={itemsQ} view={itemsView} setView={setItemsView} sectionRef={itemsRef} />}
 
           <div className="grid grid-cols-2 gap-2 text-[12px]">
             <div className="rounded-lg border border-border bg-card px-3 py-2">
