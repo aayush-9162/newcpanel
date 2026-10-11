@@ -943,6 +943,16 @@ const SORTS = {
   po: { label: 'PO number', fn: (a, b) => String(a.po).localeCompare(String(b.po), undefined, { numeric: true }) },
 };
 
+// Stock vs Special Order — the sheet's STOCK/SO column holds STOCK, SO or
+// STOCK+SO. A mixed STOCK+SO PO carries both kinds of lines, so it shows under both.
+const ORDER_TYPES = { both: 'Both', stock: 'Stock', so: 'Special Order' };
+const typeTokens = (t) => cell(t).toUpperCase().split(/[^A-Z]+/).filter(Boolean);
+function matchOrderType(r, k) {
+  if (k === 'both') return true;
+  const toks = typeTokens(r?.type);
+  return k === 'stock' ? toks.includes('STOCK') : toks.includes('SO');
+}
+
 export default function POScrubReport() {
   const { data, isLoading, error, refetch, isFetching } = usePoScrubQuery({
     refetchInterval: 5 * 60 * 60 * 1000,
@@ -951,6 +961,7 @@ export default function POScrubReport() {
   const [active, setActive] = useState(-1);          // -1 = All vendors
   const [q, setQ] = useState('');
   const [view, setView] = useState('all');
+  const [orderType, setOrderType] = useState('both');   // both | stock | so
   const [sortKey, setSortKey] = useState('attention');
   const [selectedKey, setSelectedKey] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -972,10 +983,18 @@ export default function POScrubReport() {
   useEffect(() => { if (active > sheets.length - 1) setActive(-1); }, [sheets.length, active]);
 
   // Records per vendor tab (each parsed defensively — one bad tab never blanks the page).
-  const recordsByTab = useMemo(() => sheets.map((s) => {
+  const allRecordsByTab = useMemo(() => sheets.map((s) => {
     try { return buildRecords(shapeSheet(s), cell(s?.name) || 'Vendor', s?.gid ?? null); } catch { return []; }
   }), [sheets]);
+  // Everything below reads this filtered view, so the Stock / Special Order
+  // toggle drives the tabs, KPIs, vendor overview and PO list together.
+  const recordsByTab = useMemo(() => allRecordsByTab.map((rs) => rs.filter((r) => matchOrderType(r, orderType))), [allRecordsByTab, orderType]);
   const isAll = active === -1;
+  // Toggle counts for the current scope (All or one vendor), before filtering.
+  const typeCounts = useMemo(() => {
+    const scope = active === -1 ? allRecordsByTab.flat() : (allRecordsByTab[active] || []);
+    return Object.fromEntries(Object.keys(ORDER_TYPES).map((k) => [k, scope.filter((r) => matchOrderType(r, k)).length]));
+  }, [allRecordsByTab, active]);
   const records = useMemo(() => (isAll ? recordsByTab.flat() : (recordsByTab[active] || [])), [isAll, recordsByTab, active]);
   const selected = useMemo(() => records.find((r) => r.key === selectedKey) || null, [records, selectedKey]);
 
@@ -1058,6 +1077,19 @@ export default function POScrubReport() {
               <FileSpreadsheet size={16} className="text-emerald-600 dark:text-emerald-400" />
               <span className="text-sm font-semibold">{data?.title || 'PO Scrub Report'}</span>
               {sheets.length > 0 && <span className="text-[11px] text-muted-fg">· {sheets.length} vendors</span>}
+              {sheets.length > 0 && (
+                <div className="ml-2 inline-flex rounded-lg border border-border bg-card p-0.5" role="group" aria-label="Order type">
+                  {Object.entries(ORDER_TYPES).map(([k, label]) => (
+                    <button key={k} type="button" onClick={() => { setOrderType(k); setSelectedKey(null); }}
+                      title={k === 'stock' ? 'Stock POs (incl. STOCK+SO)' : k === 'so' ? 'Special Order POs (incl. STOCK+SO)' : 'All POs'}
+                      className={cn('inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-semibold transition',
+                        orderType === k ? 'bg-primary text-primary-fg shadow-sm' : 'text-muted-fg hover:bg-muted hover:text-fg')}>
+                      {label}
+                      <span className={cn('rounded-full px-1 text-[10px] tabular-nums', orderType === k ? 'bg-white/25' : 'bg-muted')}>{typeCounts[k] ?? 0}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
               <div className="ml-auto flex items-center gap-2">
                 {fetchedAt && <span className="hidden text-[11px] text-muted-fg sm:inline">Updated {fetchedAt.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</span>}
                 <button type="button" onClick={hardRefresh} disabled={refreshing || isFetching}
