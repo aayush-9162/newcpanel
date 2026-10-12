@@ -154,7 +154,6 @@ export default function SalesPerformance() {
                   <Trophy size={18} className="text-amber-500" />
                   Top performers · {monthName} {year}
                 </CardTitle>
-                <CardDescription>From <code>sp_performance</code> joined to <code>employees</code> by rv_code.</CardDescription>
               </CardHeader>
               <CardContent>
                 {isLoading ? (
