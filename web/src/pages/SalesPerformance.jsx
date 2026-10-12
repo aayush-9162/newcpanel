@@ -1,5 +1,6 @@
 // Faithful clone of /auth/sales/performance — SALES-PERSON PERFORMANCE.
-// Real data from MySQL `sp_performance` joined to `employees` by rv_code.
+// Real data from MySQL `sp_performance` joined to `employees` by rv_code
+// (one employee per rv_code — a rehire can leave a duplicate inactive row).
 // Layout: header with year/month + Summary link + tabs (Achievements / Data).
 // Achievements tab: top-3 podium (crown / silver / bronze) on the left,
 // top-10 bar chart on the right. Data tab: full ranking table.
@@ -47,6 +48,7 @@ function buildPerfSql({ year, month }) {
       COUNT(DISTINCT sp.SalesNo) AS sales
     FROM sp_performance sp
     LEFT JOIN employees e ON e.rv_code = sp.PrimarySalesperson
+      AND e.id = (SELECT e2.id FROM employees e2 WHERE e2.rv_code = sp.PrimarySalesperson ORDER BY e2.is_active DESC, e2.id DESC LIMIT 1)
     ${where}
       AND sp.PrimarySalesperson IS NOT NULL
       AND TRIM(sp.PrimarySalesperson) <> ''

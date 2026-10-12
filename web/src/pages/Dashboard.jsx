@@ -1313,6 +1313,7 @@ export default function Dashboard() {
                        h.description
                 FROM hotbutton_issues h
                 LEFT JOIN employees e ON e.rv_code = h.sales_person
+                  AND e.id = (SELECT e2.id FROM employees e2 WHERE e2.rv_code = h.sales_person ORDER BY e2.is_active DESC, e2.id DESC LIMIT 1)
                 WHERE h.is_resolved = false
                 ORDER BY h.id DESC
               `,
