@@ -300,9 +300,9 @@ function POCard({ rec, showVendor, onOpen }) {
           {rec.amount && <span className="rounded-md bg-emerald-50 px-1.5 py-0.5 text-[11px] font-bold tabular-nums text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300" title={`PO value at vendor cost${rec.amount.partial ? ' — some lines have no cost' : ''}`}>PO value {money(rec.amount.ord)}{rec.amount.partial && '+'}</span>}
           {showVendor && <span className="rounded-md bg-primary/10 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-primary">{rec.vendor}</span>}
           {needsVendorCall(rec) && (
-            <span className="inline-flex items-center gap-1 rounded-md bg-rose-100 px-1.5 py-0.5 text-[10px] font-bold text-rose-700 dark:bg-rose-900/50 dark:text-rose-200"
+            <span className="inline-flex items-center gap-1 rounded-md bg-orange-100 px-1.5 py-0.5 text-[10px] font-bold text-orange-700 dark:bg-orange-900/40 dark:text-orange-200"
               title={`Open ${rec.ageDays} days since the PO date — follow up with the vendor`}>
-              <PhoneCall size={10} /> Call vendor · {rec.ageDays} days
+              <PhoneCall size={10} /> Follow up · {rec.ageDays} days
             </span>
           )}
         </div>
@@ -1002,7 +1002,7 @@ function PODrawer({ rec, sheetUrl, onClose }) {
 }
 
 // ── Page ─────────────────────────────────────────────────────────────────────
-// Call vendor alert: more than 60 days since the PO date and still not fully received.
+// Vendor follow-up: more than 60 days since the PO date and still not fully received.
 const CALL_VENDOR_DAYS = 60;
 const needsVendorCall = (r) => r.ageDays != null && r.ageDays > CALL_VENDOR_DAYS && r.timing !== 'received';
 
@@ -1010,7 +1010,7 @@ const VIEWS = [
   { key: 'all', label: 'All POs' },
   { key: 'soon', label: 'Arriving ≤ 14 days', test: (r) => r.timing === 'soon' },
   { key: 'noack', label: 'Awaiting ACK', test: (r) => !r.acks.length && r.timing !== 'received' },
-  { key: 'callvendor', label: 'Call vendor (60+ days)', test: needsVendorCall },
+  { key: 'callvendor', label: 'Vendor follow-up', test: needsVendorCall },
   { key: 'noeta', label: 'No ETA', test: (r) => r.timing === 'noeta' },
   { key: 'received', label: 'Received', test: (r) => r.timing === 'received' },
   { key: 'c:ok', label: 'Confirmed', test: (r) => r.status === 'ok', dot: STATUS.ok.dot },
@@ -1193,19 +1193,6 @@ export default function POScrubReport() {
               {sheets.length > 0 && <span className="text-[11px] text-muted-fg">· {sheets.length} vendors</span>}
               <div className="ml-auto flex items-center gap-2">
                 {fetchedAt && <span className="hidden text-[11px] text-muted-fg sm:inline">Updated {fetchedAt.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</span>}
-                {(() => {
-                  const n = viewCount('callvendor');
-                  const on = view === 'callvendor';
-                  return (
-                    <button type="button" onClick={() => applyView('callvendor')} disabled={!n && !on}
-                      title={`POs open more than ${CALL_VENDOR_DAYS} days since the PO date`}
-                      className={cn('inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-bold transition disabled:opacity-40',
-                        on ? 'bg-rose-600 text-white shadow-sm' : 'border border-rose-300 bg-rose-50 text-rose-700 hover:bg-rose-100 dark:border-rose-800 dark:bg-rose-950 dark:text-rose-200')}>
-                      <PhoneCall size={13} /> Call vendor alert
-                      <span className={cn('rounded-full px-1.5 text-[10px] tabular-nums', on ? 'bg-white/25' : 'bg-rose-600 text-white')}>{n}</span>
-                    </button>
-                  );
-                })()}
                 <button type="button" onClick={hardRefresh} disabled={refreshing || isFetching}
                   className="inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1 text-xs font-semibold text-primary transition hover:bg-muted disabled:opacity-50">
                   <RefreshCw size={13} className={cn((refreshing || isFetching) && 'animate-spin')} /> Refresh
