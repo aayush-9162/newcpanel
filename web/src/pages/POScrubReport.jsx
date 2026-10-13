@@ -994,10 +994,12 @@ const SORTS = {
 
 // Stock vs Special Order — the sheet's STOCK/SO column holds STOCK, SO or
 // STOCK+SO. A mixed STOCK+SO PO carries both kinds of lines, so it shows under both.
-const ORDER_TYPES = { both: 'Both', stock: 'Stock', so: 'Special Order' };
+// Container comes from the ORDER TYPE column (CONTAINER / MOTION CONTAINER).
+const ORDER_TYPES = { both: 'Both', stock: 'Stock', so: 'Special Order', container: 'Container' };
 const typeTokens = (t) => cell(t).toUpperCase().split(/[^A-Z]+/).filter(Boolean);
 function matchOrderType(r, k) {
   if (k === 'both') return true;
+  if (k === 'container') return /CONTAINER/i.test(cell(r?.orderType));
   const toks = typeTokens(r?.type);
   return k === 'stock' ? toks.includes('STOCK') : toks.includes('SO');
 }
@@ -1140,19 +1142,6 @@ export default function POScrubReport() {
               <FileSpreadsheet size={16} className="text-emerald-600 dark:text-emerald-400" />
               <span className="text-sm font-semibold">{data?.title || 'PO Scrub Report'}</span>
               {sheets.length > 0 && <span className="text-[11px] text-muted-fg">· {sheets.length} vendors</span>}
-              {sheets.length > 0 && (
-                <div className="ml-2 inline-flex rounded-lg border border-border bg-card p-0.5" role="group" aria-label="Order type">
-                  {Object.entries(ORDER_TYPES).map(([k, label]) => (
-                    <button key={k} type="button" onClick={() => { setOrderType(k); setSelectedKey(null); }}
-                      title={k === 'stock' ? 'Stock POs (incl. STOCK+SO)' : k === 'so' ? 'Special Order POs (incl. STOCK+SO)' : 'All POs'}
-                      className={cn('inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-semibold transition',
-                        orderType === k ? 'bg-primary text-primary-fg shadow-sm' : 'text-muted-fg hover:bg-muted hover:text-fg')}>
-                      {label}
-                      <span className={cn('rounded-full px-1 text-[10px] tabular-nums', orderType === k ? 'bg-white/25' : 'bg-muted')}>{typeCounts[k] ?? 0}</span>
-                    </button>
-                  ))}
-                </div>
-              )}
               <div className="ml-auto flex items-center gap-2">
                 {fetchedAt && <span className="hidden text-[11px] text-muted-fg sm:inline">Updated {fetchedAt.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</span>}
                 <button type="button" onClick={hardRefresh} disabled={refreshing || isFetching}
@@ -1166,6 +1155,24 @@ export default function POScrubReport() {
                 </button>
               </div>
             </div>
+            {/* Order type — its own row so it reads as a separate control */}
+            {sheets.length > 0 && (
+              <div className="flex flex-wrap items-center gap-3 border-b border-border bg-muted/30 px-4 py-2.5">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-muted-fg">Order type</span>
+                <div className="inline-flex rounded-xl border border-border bg-card p-1 shadow-sm" role="group" aria-label="Order type">
+                  {Object.entries(ORDER_TYPES).map(([k, label]) => (
+                    <button key={k} type="button" onClick={() => { setOrderType(k); setSelectedKey(null); }}
+                      title={k === 'stock' ? 'Stock POs (incl. STOCK+SO)' : k === 'so' ? 'Special Order POs (incl. STOCK+SO)' : k === 'container' ? 'Container POs (ORDER TYPE: CONTAINER)' : 'All POs'}
+                      className={cn('inline-flex items-center gap-1.5 rounded-lg px-4 py-1.5 text-sm font-semibold transition',
+                        orderType === k ? 'bg-primary text-primary-fg shadow-sm' : 'text-muted-fg hover:bg-muted hover:text-fg')}>
+                      {label}
+                      <span className={cn('rounded-full px-1.5 text-[11px] tabular-nums', orderType === k ? 'bg-white/25' : 'bg-muted')}>{typeCounts[k] ?? 0}</span>
+                    </button>
+                  ))}
+                </div>
+                <span className="text-[11px] text-muted-fg">STOCK+SO POs appear under both Stock and Special Order</span>
+              </div>
+            )}
             {sheets.length > 0 && (
               <div className="flex gap-1 overflow-x-auto px-2 py-2">
                 <button type="button" onClick={() => switchTab(-1)}
