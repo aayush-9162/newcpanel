@@ -442,7 +442,6 @@ function POItems({ rec, q, view, setView, sectionRef }) {
   const lines = useMemo(() => aggregatePoLines(q.data?.rows), [q.data]);
   const tot = useMemo(() => lines.reduce((t, l) => ({ ordered: t.ordered + l.ordered, received: t.received + l.received, open: t.open + l.open }), { ordered: 0, received: 0, open: 0 }), [lines]);
   const totAmt = useMemo(() => lines.reduce((t, l) => ({ ordered: t.ordered + l.ordered * l.cost, received: t.received + l.received * l.cost, open: t.open + l.open * l.cost }), { ordered: 0, received: 0, open: 0 }), [lines]);
-  const qtyFor = (l) => (view === 'received' ? l.received : view === 'open' ? l.open : l.ordered);
   const shown = lines.filter(ITEM_VIEWS[view]?.test || (() => true));
   const differs = lines.length > 0 && (
     (rec.orig != null && rec.orig !== tot.ordered) || (rec.rem != null && rec.rem !== tot.open));
@@ -522,7 +521,6 @@ function POItems({ rec, q, view, setView, sectionRef }) {
                       <th className={cn(th, 'text-right')}>Open</th>
                       <th className={cn(th, 'text-left')}>Due</th>
                     </>}
-                    <th className={cn(th, 'text-right')}>Amount</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -557,11 +555,6 @@ function POItems({ rec, q, view, setView, sectionRef }) {
                         <td className="px-3 py-2 text-right font-bold tabular-nums text-amber-600 dark:text-amber-300">{fmtNumber(l.open)}<span className="text-[10px] font-medium text-muted-fg"> / {fmtNumber(l.ordered)}</span></td>
                         <td className="whitespace-nowrap px-3 py-2">{l.due ? fmtYmd(l.due) : '—'}</td>
                       </>}
-                      <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">
-                        {l.cost > 0
-                          ? <><div className="font-bold">{money(qtyFor(l) * l.cost)}</div><div className="text-[10px] text-muted-fg">@ ${Number(l.cost).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div></>
-                          : <span className="text-muted-fg" title="No cost in the system">—</span>}
-                      </td>
                     </tr>
                   ))}
                 </tbody>
