@@ -297,7 +297,7 @@ function POCard({ rec, showVendor, onOpen }) {
       <div className="min-w-0 xl:col-span-3">
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-base font-extrabold tracking-tight text-primary">PO {rec.po}</span>
-          {rec.amount && <span className="rounded-md bg-emerald-50 px-1.5 py-0.5 text-[11px] font-bold tabular-nums text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300" title={`PO amount (cost)${rec.amount.partial ? ' — some lines have no cost' : ''}`}>{money(rec.amount.ord)}{rec.amount.partial && '+'}</span>}
+          {rec.amount && <span className="rounded-md bg-emerald-50 px-1.5 py-0.5 text-[11px] font-bold tabular-nums text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300" title={`PO value at vendor cost${rec.amount.partial ? ' — some lines have no cost' : ''}`}>PO value {money(rec.amount.ord)}{rec.amount.partial && '+'}</span>}
           {showVendor && <span className="rounded-md bg-primary/10 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-primary">{rec.vendor}</span>}
         </div>
         <div className="mt-1.5 flex flex-wrap items-center gap-1">
@@ -316,7 +316,7 @@ function POCard({ rec, showVendor, onOpen }) {
       {/* Quantity */}
       <div className="xl:col-span-3">
         <QtyBar rec={rec} />
-        {rec.amount && rec.amount.open > 0 && <div className="mt-0.5 text-[11px] text-muted-fg"><b className="text-fg/80">{money(rec.amount.open)}</b> still to receive</div>}
+        {rec.amount && rec.amount.open > 0 && <div className="mt-0.5 text-[11px] text-muted-fg"><b className="text-fg/80">{money(rec.amount.open)}</b> worth still to receive</div>}
       </div>
 
       {/* Arrival */}
@@ -428,7 +428,9 @@ WITH l AS (SELECT PONo, Seq, MAX(QtyOrd) AS qo, SUM(ISNULL(QtyRecd, 0)) AS qr, M
 SELECT PONo, SUM(qo * cost) AS OrdAmt, SUM((CASE WHEN qr > qo THEN qo ELSE qr END) * cost) AS RecvAmt,
        SUM(CASE WHEN cost = 0 THEN 1 ELSE 0 END) AS NoCostLines, COUNT(*) AS Lines
 FROM l GROUP BY PONo`;
-const money = (n) => `${Math.round(Number(n) || 0).toLocaleString('en-US')}`;
+// US dollars, whole amounts: 8229.4 → "$8,229".
+const USD = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
+const money = (n) => USD.format(Number(n) || 0);
 
 const ITEM_VIEWS = {
   ordered:  { label: 'Ordered',    test: () => true },
