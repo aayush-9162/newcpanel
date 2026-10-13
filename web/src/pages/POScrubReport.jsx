@@ -748,11 +748,11 @@ function PODrawer({ rec, sheetUrl, onClose }) {
   const s = STATUS[rec.status] || STATUS.none;
 
   return (
-    <div className="fixed inset-0 z-50 flex justify-end">
-      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
-      <aside className={cn('relative flex h-full w-full max-w-xl flex-col border-l-4 bg-bg shadow-2xl', s.stripe)} role="dialog" aria-modal="true">
-        <div className="border-b border-border bg-card px-5 py-4">
-          <div className="flex items-start justify-between gap-3">
+    // Full-screen PO page (covers the app; Esc / ✕ returns to the list).
+    <div className="fixed inset-0 z-50 flex">
+      <aside className="relative flex h-full w-full flex-col bg-bg" role="dialog" aria-modal="true">
+        <div className={cn('border-b border-l-4 border-border bg-card px-6 py-4', s.stripe)}>
+          <div className="mx-auto flex w-full max-w-[1600px] items-start justify-between gap-3">
             <div className="min-w-0">
               <div className="text-[10px] font-bold uppercase tracking-wider text-muted-fg">{rec.vendor}{rec.sno ? ` · S.NO ${rec.sno}` : ''}</div>
               <div className="text-2xl font-extrabold tracking-tight text-primary">PO {rec.po}</div>
@@ -763,11 +763,25 @@ function PODrawer({ rec, sheetUrl, onClose }) {
                 {rec.orderType && <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-semibold uppercase text-muted-fg">{rec.orderType}</span>}
               </div>
             </div>
-            <button type="button" onClick={onClose} className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-border text-muted-fg transition hover:bg-muted" aria-label="Close"><X size={16} /></button>
+            <div className="flex shrink-0 items-center gap-2">
+              {sheetUrl && (
+                <a href={`${sheetUrl}${rec.gid != null ? `#gid=${rec.gid}` : ''}`} target="_blank" rel="noopener noreferrer"
+                  className="hidden items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-semibold text-primary transition hover:bg-muted sm:inline-flex">
+                  <ExternalLink size={13} /> Open {rec.vendor} tab in Google Sheets
+                </a>
+              )}
+              <button type="button" onClick={onClose} title="Close (Esc)"
+                className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-semibold text-muted-fg transition hover:bg-muted hover:text-fg" aria-label="Close">
+                <X size={15} /> Close
+              </button>
+            </div>
           </div>
         </div>
 
-        <div className="flex-1 space-y-5 overflow-y-auto px-5 py-4">
+        <div className="flex-1 overflow-y-auto">
+          <div className="mx-auto grid w-full max-w-[1600px] gap-6 px-6 py-5 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
+          {/* Left column — PO facts, dates and sheet notes */}
+          <div className="min-w-0 space-y-5">
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
             {stat('Ordered', rec.orig != null ? fmtNumber(rec.orig) : '—', '', 'ordered')}
             {stat('Received', rec.receivedQty != null ? fmtNumber(rec.receivedQty) : '—', 'text-emerald-600 dark:text-emerald-300', 'received')}
@@ -775,9 +789,6 @@ function PODrawer({ rec, sheetUrl, onClose }) {
             {stat('On vendor site', rec.vendorQty != null ? fmtNumber(rec.vendorQty) : '—')}
           </div>
           <QtyBar rec={rec} compact />
-
-          {poNum != null && <POItems rec={rec} q={itemsQ} view={itemsView} setView={setItemsView} sectionRef={itemsRef} />}
-          {poNum != null && <POSales poNum={poNum} poLines={poLinesAgg} itemsLoading={itemsQ.isLoading} />}
 
           <div className="grid grid-cols-2 gap-2 text-[12px]">
             <div className="rounded-lg border border-border bg-card px-3 py-2">
@@ -907,16 +918,19 @@ function PODrawer({ rec, sheetUrl, onClose }) {
               </ol>
             </Section>
           )}
-        </div>
-
-        {sheetUrl && (
-          <div className="border-t border-border bg-card px-5 py-3">
-            <a href={`${sheetUrl}${rec.gid != null ? `#gid=${rec.gid}` : ''}`} target="_blank" rel="noopener noreferrer"
-              className="inline-flex items-center gap-1.5 text-xs font-semibold text-primary hover:underline">
-              <ExternalLink size={13} /> Open {rec.vendor} tab in Google Sheets
-            </a>
           </div>
-        )}
+
+          {/* Right column — live items and customer sales from the system */}
+          <div className="min-w-0 space-y-5">
+            {poNum != null
+              ? <>
+                  <POItems rec={rec} q={itemsQ} view={itemsView} setView={setItemsView} sectionRef={itemsRef} />
+                  <POSales poNum={poNum} poLines={poLinesAgg} itemsLoading={itemsQ.isLoading} />
+                </>
+              : <div className="rounded-lg border border-border bg-card px-3 py-3 text-[12px] text-muted-fg">This PO number isn't numeric, so its items can't be looked up in the system.</div>}
+          </div>
+          </div>
+        </div>
       </aside>
     </div>
   );
