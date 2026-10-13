@@ -297,6 +297,7 @@ function POCard({ rec, showVendor, onOpen }) {
       <div className="min-w-0 xl:col-span-3">
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-base font-extrabold tracking-tight text-primary">PO {rec.po}</span>
+          {rec.amount && <span className="rounded-md bg-emerald-50 px-1.5 py-0.5 text-[11px] font-bold tabular-nums text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300" title={`PO amount (cost)${rec.amount.partial ? ' — some lines have no cost' : ''}`}>{money(rec.amount.ord)}{rec.amount.partial && '+'}</span>}
           {showVendor && <span className="rounded-md bg-primary/10 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-primary">{rec.vendor}</span>}
         </div>
         <div className="mt-1.5 flex flex-wrap items-center gap-1">
@@ -313,7 +314,10 @@ function POCard({ rec, showVendor, onOpen }) {
       </div>
 
       {/* Quantity */}
-      <div className="xl:col-span-3"><QtyBar rec={rec} /></div>
+      <div className="xl:col-span-3">
+        <QtyBar rec={rec} />
+        {rec.amount && rec.amount.open > 0 && <div className="mt-0.5 text-[11px] text-muted-fg"><b className="text-fg/80">{money(rec.amount.open)}</b> still to receive</div>}
+      </div>
 
       {/* Arrival */}
       <div className="xl:col-span-3">
@@ -371,7 +375,7 @@ const LiveBadge = () => (
 // (open lines) or, failing that, the linked sales order.
 const PO_ITEMS_SQL = `
 SELECT r.Seq, r.RowNum, RTRIM(r.ItemId) AS ItemId, RTRIM(r.ItemDesc1) AS Desc1, RTRIM(r.ItemDesc2) AS Desc2,
-       r.QtyOrd, r.QtyRecd, r.RecvDate, r.QtyRemain, r.SONo, r.DueDate,
+       r.QtyOrd, r.QtyRecd, r.RecvDate, r.QtyRemain, r.SONo, r.DueDate, r.ItemCost,
        r.loc, RTRIM(r.aisle) AS aisle, RTRIM(r.lvl) AS lvl, RTRIM(r.bay) AS bay,
        COALESCE(NULLIF(RTRIM(d.po_dtl_cust_nam), ''), c.CustomerName) AS Customer
 FROM PORecvDtls r
@@ -398,10 +402,11 @@ function aggregatePoLines(rows) {
     let L = by.get(k);
     if (!L) {
       L = { seq: k, itemId: cell(r.ItemId).replace(/^0+(?=\d)/, ''), desc1: cell(r.Desc1), desc2: cell(r.Desc2), ordered: 0, received: 0,
-        so: Number(r.SONo) || 0, customer: cell(r.Customer), due: cell(r.DueDate), receipts: [] };
+        so: Number(r.SONo) || 0, customer: cell(r.Customer), due: cell(r.DueDate), cost: 0, receipts: [] };
       by.set(k, L);
     }
     L.ordered = Math.max(L.ordered, Number(r.QtyOrd) || 0);
+    L.cost = Math.max(L.cost, Number(r.ItemCost) || 0);   // unit cost (vendor)
     if (!L.customer && r.Customer) L.customer = cell(r.Customer);
     const q = Number(r.QtyRecd) || 0;
     if (q > 0) {
@@ -414,6 +419,17 @@ function aggregatePoLines(rows) {
   return [...by.values()].map((L) => ({ ...L, open: Math.max(0, L.ordered - L.received) }));
 }
 
+// PO amount = Σ qty × unit cost per line (vendor cost, not retail). Received
+// value caps at the ordered qty. Lines with no cost are counted so the UI can
+// say an amount is incomplete instead of showing a misleading total.
+const PO_AMOUNTS_SQL = `
+WITH l AS (SELECT PONo, Seq, MAX(QtyOrd) AS qo, SUM(ISNULL(QtyRecd, 0)) AS qr, MAX(ISNULL(ItemCost, 0)) AS cost
+           FROM PORecvDtls GROUP BY PONo, Seq)
+SELECT PONo, SUM(qo * cost) AS OrdAmt, SUM((CASE WHEN qr > qo THEN qo ELSE qr END) * cost) AS RecvAmt,
+       SUM(CASE WHEN cost = 0 THEN 1 ELSE 0 END) AS NoCostLines, COUNT(*) AS Lines
+FROM l GROUP BY PONo`;
+const money = (n) => `${Math.round(Number(n) || 0).toLocaleString('en-US')}`;
+
 const ITEM_VIEWS = {
   ordered:  { label: 'Ordered',    test: () => true },
   received: { label: 'Received',   test: (l) => l.received > 0 },
@@ -423,6 +439,8 @@ const ITEM_VIEWS = {
 function POItems({ rec, q, view, setView, sectionRef }) {
   const lines = useMemo(() => aggregatePoLines(q.data?.rows), [q.data]);
   const tot = useMemo(() => lines.reduce((t, l) => ({ ordered: t.ordered + l.ordered, received: t.received + l.received, open: t.open + l.open }), { ordered: 0, received: 0, open: 0 }), [lines]);
+  const totAmt = useMemo(() => lines.reduce((t, l) => ({ ordered: t.ordered + l.ordered * l.cost, received: t.received + l.received * l.cost, open: t.open + l.open * l.cost }), { ordered: 0, received: 0, open: 0 }), [lines]);
+  const qtyFor = (l) => (view === 'received' ? l.received : view === 'open' ? l.open : l.ordered);
   const shown = lines.filter(ITEM_VIEWS[view]?.test || (() => true));
   const differs = lines.length > 0 && (
     (rec.orig != null && rec.orig !== tot.ordered) || (rec.rem != null && rec.rem !== tot.open));
@@ -466,6 +484,7 @@ function POItems({ rec, q, view, setView, sectionRef }) {
                     k === 'received' ? 'text-emerald-600 dark:text-emerald-300' : k === 'open' && units ? 'text-amber-600 dark:text-amber-300' : '')}>
                     {fmtNumber(units)} <span className="text-[10px] font-semibold text-muted-fg">units · {n} line{n === 1 ? '' : 's'}</span>
                   </div>
+                  {totAmt[k] > 0 && <div className="text-[11px] font-bold tabular-nums text-fg/70">{money(totAmt[k])}</div>}
                 </button>
               );
             })}
@@ -501,6 +520,7 @@ function POItems({ rec, q, view, setView, sectionRef }) {
                       <th className={cn(th, 'text-right')}>Open</th>
                       <th className={cn(th, 'text-left')}>Due</th>
                     </>}
+                    <th className={cn(th, 'text-right')}>Amount</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -535,6 +555,11 @@ function POItems({ rec, q, view, setView, sectionRef }) {
                         <td className="px-3 py-2 text-right font-bold tabular-nums text-amber-600 dark:text-amber-300">{fmtNumber(l.open)}<span className="text-[10px] font-medium text-muted-fg"> / {fmtNumber(l.ordered)}</span></td>
                         <td className="whitespace-nowrap px-3 py-2">{l.due ? fmtYmd(l.due) : '—'}</td>
                       </>}
+                      <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">
+                        {l.cost > 0
+                          ? <><div className="font-bold">{money(qtyFor(l) * l.cost)}</div><div className="text-[10px] text-muted-fg">@ ${Number(l.cost).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div></>
+                          : <span className="text-muted-fg" title="No cost in the system">—</span>}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -762,12 +787,13 @@ function PODrawer({ rec, sheetUrl, onClose }) {
   const s = STATUS[rec.status] || STATUS.none;
 
   // Big number cards — Ordered / Received / Still open open the item list.
-  const stat = (label, value, tone, itemsKey, hint) => {
+  const stat = (label, value, tone, itemsKey, hint, amt) => {
     const clickable = itemsKey && poNum != null;
     const body = (
       <>
         <div className="text-[11px] font-bold uppercase tracking-wider text-muted-fg">{label}</div>
         <div className={cn('mt-1 text-3xl font-extrabold tabular-nums leading-none', tone)}>{value}</div>
+        {amt && <div className="mt-1 text-sm font-bold tabular-nums text-fg/70">{amt}</div>}
         <div className="mt-2 flex items-center gap-0.5 text-[11px] font-semibold text-muted-fg">
           {clickable ? <span className="inline-flex items-center gap-0.5 text-primary">View items <ChevronRight size={12} /></span> : hint}
         </div>
@@ -820,7 +846,10 @@ function PODrawer({ rec, sheetUrl, onClose }) {
               {rec.orderType && <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-semibold uppercase text-muted-fg">{rec.orderType}</span>}
             </div>
           </div>
-          <dl className="grid flex-1 grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-4 lg:max-w-3xl">
+          <dl className="grid flex-1 grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-3 xl:grid-cols-5 lg:max-w-4xl">
+            {fact('Amount', rec.amount ? money(rec.amount.ord) : '—',
+              rec.amount ? (rec.amount.partial ? 'some lines have no cost' : 'PO cost value') : 'no cost in system',
+              rec.amount ? 'text-emerald-700 dark:text-emerald-300' : '')}
             {fact('Acknowledgement', rec.acks.length ? rec.acks[0] : 'Awaiting ACK', rec.acks.length > 1 ? `+${rec.acks.length - 1} more` : null, rec.acks.length ? '' : 'text-violet-600 dark:text-violet-300')}
             {fact('Ordered on', rec.poDate ? fmtD(rec.poDate) : '—', rec.ageDays != null ? `${fmtNumber(rec.ageDays)} days ago` : null)}
             {fact('Expected', rec.eta ? fmtD(rec.eta) : 'No ETA', rec.etaSrc || null, rec.etaFlagged && !rec.etaUpdated ? 'text-rose-600 dark:text-rose-300' : '')}
@@ -835,9 +864,9 @@ function PODrawer({ rec, sheetUrl, onClose }) {
 
       {/* Quantity cards */}
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        {stat('Ordered', rec.orig != null ? fmtNumber(rec.orig) : '—', '', 'ordered')}
-        {stat('Received', rec.receivedQty != null ? fmtNumber(rec.receivedQty) : '—', 'text-emerald-600 dark:text-emerald-300', 'received')}
-        {stat('Still open', rec.rem != null ? fmtNumber(rec.rem) : '—', rec.qtyFlagged ? 'text-rose-600 dark:text-rose-300' : rec.rem ? 'text-amber-600 dark:text-amber-300' : '', 'open')}
+        {stat('Ordered', rec.orig != null ? fmtNumber(rec.orig) : '—', '', 'ordered', null, rec.amount ? money(rec.amount.ord) : null)}
+        {stat('Received', rec.receivedQty != null ? fmtNumber(rec.receivedQty) : '—', 'text-emerald-600 dark:text-emerald-300', 'received', null, rec.amount ? money(rec.amount.recv) : null)}
+        {stat('Still open', rec.rem != null ? fmtNumber(rec.rem) : '—', rec.qtyFlagged ? 'text-rose-600 dark:text-rose-300' : rec.rem ? 'text-amber-600 dark:text-amber-300' : '', 'open', null, rec.amount ? money(rec.amount.open) : null)}
         {stat('On vendor site', rec.vendorQty != null ? fmtNumber(rec.vendorQty) : '—', '', null, 'as shown on the vendor portal')}
       </div>
 
@@ -995,7 +1024,7 @@ const SORTS = {
 // Stock vs Special Order — the sheet's STOCK/SO column holds STOCK, SO or
 // STOCK+SO. A mixed STOCK+SO PO carries both kinds of lines, so it shows under both.
 // Container comes from the ORDER TYPE column (CONTAINER / MOTION CONTAINER).
-const ORDER_TYPES = { both: 'Both', stock: 'Stock', so: 'Special Order', container: 'Container' };
+const ORDER_TYPES = { both: 'All', stock: 'Stock', so: 'Special Order', container: 'Container' };
 const typeTokens = (t) => cell(t).toUpperCase().split(/[^A-Z]+/).filter(Boolean);
 function matchOrderType(r, k) {
   if (k === 'both') return true;
@@ -1045,9 +1074,22 @@ export default function POScrubReport() {
   useEffect(() => { if (active > sheets.length - 1) setActive(-1); }, [sheets.length, active]);
 
   // Records per vendor tab (each parsed defensively — one bad tab never blanks the page).
+  // PO amounts from the system (cost), joined onto the sheet records by PO#.
+  const amountsQ = useSqlQuery(PO_AMOUNTS_SQL, [], { staleTime: 5 * 60 * 1000 });
+  const amountMap = useMemo(() => {
+    const m = new Map();
+    for (const r of amountsQ.data?.rows || []) {
+      const ord = Number(r.OrdAmt) || 0, recv = Number(r.RecvAmt) || 0;
+      m.set(String(r.PONo), { ord, recv, open: Math.max(0, ord - recv), partial: Number(r.NoCostLines) > 0, lines: Number(r.Lines) || 0 });
+    }
+    return m;
+  }, [amountsQ.data]);
   const allRecordsByTab = useMemo(() => sheets.map((s) => {
-    try { return buildRecords(shapeSheet(s), cell(s?.name) || 'Vendor', s?.gid ?? null); } catch { return []; }
-  }), [sheets]);
+    try {
+      return buildRecords(shapeSheet(s), cell(s?.name) || 'Vendor', s?.gid ?? null)
+        .map((r) => { const a = amountMap.get(cell(r.po)); return a && a.ord > 0 ? { ...r, amount: a } : r; });
+    } catch { return []; }
+  }), [sheets, amountMap]);
   // Everything below reads this filtered view, so the Stock / Special Order
   // toggle drives the tabs, KPIs, vendor overview and PO list together.
   const recordsByTab = useMemo(() => allRecordsByTab.map((rs) => rs.filter((r) => matchOrderType(r, orderType))), [allRecordsByTab, orderType]);
@@ -1061,7 +1103,7 @@ export default function POScrubReport() {
   const selected = useMemo(() => records.find((r) => r.key === selectedKey) || null, [records, selectedKey]);
 
   const stats = useMemo(() => {
-    const st = { total: records.length, open: 0, flagged: 0, soon: 0, noack: 0, received: 0, openQty: 0 };
+    const st = { total: records.length, open: 0, flagged: 0, soon: 0, noack: 0, received: 0, openQty: 0, openValue: 0, totalValue: 0 };
     for (const r of records) {
       if (r.timing !== 'received') st.open++;
       if (r.status === 'flag') st.flagged++;
@@ -1069,6 +1111,7 @@ export default function POScrubReport() {
       if (r.timing === 'received') st.received++;
       if (!r.acks.length && r.timing !== 'received') st.noack++;
       if (r.rem > 0) st.openQty += r.rem;
+      if (r.amount) { st.openValue += r.amount.open; st.totalValue += r.amount.ord; }
     }
     return st;
   }, [records]);
@@ -1170,7 +1213,6 @@ export default function POScrubReport() {
                     </button>
                   ))}
                 </div>
-                <span className="text-[11px] text-muted-fg">STOCK+SO POs appear under both Stock and Special Order</span>
               </div>
             )}
             {sheets.length > 0 && (
@@ -1231,6 +1273,7 @@ export default function POScrubReport() {
                 <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-muted-fg"><Layers size={12} /> Open qty</div>
                 <div className="mt-1 text-2xl font-extrabold tabular-nums">{fmtNumber(stats.openQty)}</div>
                 <div className="text-[10px] text-muted-fg">units still to receive</div>
+                {stats.openValue > 0 && <div className="mt-0.5 text-[11px] font-bold text-emerald-700 dark:text-emerald-300" title="Cost value of open quantity (POs with costs in the system)">{money(stats.openValue)} open value</div>}
               </div>
             </div>
 
