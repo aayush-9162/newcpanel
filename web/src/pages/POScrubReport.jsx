@@ -18,7 +18,7 @@ import { cn } from '@/lib/cn';
 import {
   FileSpreadsheet, Search, RefreshCw, AlertTriangle, Maximize2, Minimize2, CheckCircle2, Clock, Flag, Circle,
   Package, History, X, Truck, FileText, MessageSquare, ExternalLink, Layers, Hourglass, PackageCheck,
-  AlertCircle, CalendarClock, ChevronRight, Store,
+  AlertCircle, CalendarClock, ChevronRight, Store, ArrowLeft,
 } from 'lucide-react';
 
 const cell = (c) => String(c ?? '').trim();
@@ -347,16 +347,22 @@ function POCard({ rec, showVendor, onOpen }) {
 }
 
 // ── Detail panel (slide-over) ────────────────────────────────────────────────
-function Section({ icon: Icon, title, children, count }) {
+// A titled card used for every block on the PO detail page.
+function Section({ icon: Icon, title, children, count, badge, sectionRef }) {
   return (
-    <section>
-      <h3 className="mb-2 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-muted-fg">
-        <Icon size={12} /> {title}{count != null && <span className="rounded-full bg-muted px-1.5 tabular-nums">{count}</span>}
+    <section ref={sectionRef} className="scroll-mt-20 rounded-xl border border-border bg-card p-4 shadow-sm">
+      <h3 className="mb-3 flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-muted-fg">
+        <Icon size={13} /> {title}
+        {count != null && <span className="rounded-full bg-muted px-1.5 tabular-nums">{count}</span>}
+        {badge}
       </h3>
       {children}
     </section>
   );
 }
+const LiveBadge = () => (
+  <span className="ml-1 rounded bg-sky-100 px-1.5 py-px text-[9px] font-bold text-sky-700 dark:bg-sky-900/50 dark:text-sky-200">LIVE · SYSTEM</span>
+);
 
 // ── PO line items from the system (MS SQL) ───────────────────────────────────
 // PORecvDtls = one row per PO line (Seq) per received unit: QtyOrd on every
@@ -420,16 +426,20 @@ function POItems({ rec, q, view, setView, sectionRef }) {
   const shown = lines.filter(ITEM_VIEWS[view]?.test || (() => true));
   const differs = lines.length > 0 && (
     (rec.orig != null && rec.orig !== tot.ordered) || (rec.rem != null && rec.rem !== tot.open));
+  const th = 'px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-muted-fg';
+  const statusChip = (l) => (
+    <span className={cn('inline-flex whitespace-nowrap rounded-full px-1.5 py-px text-[10px] font-bold',
+      l.open === 0 ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-200'
+        : l.received > 0 ? 'bg-sky-100 text-sky-700 dark:bg-sky-900/50 dark:text-sky-200'
+        : 'bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-200')}>
+      {l.open === 0 ? 'Received' : l.received > 0 ? 'Partial' : 'Open'}
+    </span>
+  );
 
   return (
-    <section ref={sectionRef} className="scroll-mt-4">
-      <h3 className="mb-2 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-muted-fg">
-        <Package size={12} /> Items on this PO
-        <span className="ml-1 rounded bg-sky-100 px-1.5 py-px text-[9px] font-bold text-sky-700 dark:bg-sky-900/50 dark:text-sky-200">LIVE · SYSTEM</span>
-      </h3>
-
+    <Section icon={Package} title="Items on this PO" badge={<LiveBadge />} sectionRef={sectionRef}>
       {q.isLoading ? (
-        <div className="flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-4 text-[12px] text-muted-fg">
+        <div className="flex items-center gap-2 py-4 text-[12px] text-muted-fg">
           <div className="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent" /> Loading items from the system…
         </div>
       ) : q.error ? (
@@ -437,21 +447,22 @@ function POItems({ rec, q, view, setView, sectionRef }) {
           Couldn't load PO items: {q.error.message}
         </div>
       ) : lines.length === 0 ? (
-        <div className="rounded-lg border border-border bg-card px-3 py-3 text-[12px] text-muted-fg">
+        <div className="rounded-lg bg-muted/40 px-3 py-3 text-[12px] text-muted-fg">
           PO {rec.po} isn't in the system's open-PO data — it's usually fully received or closed in the system, so its items aren't listed here.
         </div>
       ) : (
         <>
-          <div className="mb-2 grid grid-cols-3 gap-1 rounded-lg bg-muted p-1">
+          {/* View tabs with totals */}
+          <div className="mb-3 grid grid-cols-3 gap-1 rounded-lg bg-muted p-1">
             {Object.entries(ITEM_VIEWS).map(([k, v]) => {
               const units = tot[k];
               const n = lines.filter(v.test).length;
               return (
                 <button key={k} type="button" onClick={() => setView(k)}
-                  className={cn('rounded-md px-2 py-1.5 text-left transition',
+                  className={cn('rounded-md px-3 py-1.5 text-left transition',
                     view === k ? 'bg-card shadow-sm ring-1 ring-primary/30' : 'hover:bg-card/60')}>
                   <div className="text-[10px] font-bold uppercase tracking-wider text-muted-fg">{v.label}</div>
-                  <div className={cn('text-base font-extrabold tabular-nums',
+                  <div className={cn('text-lg font-extrabold tabular-nums leading-tight',
                     k === 'received' ? 'text-emerald-600 dark:text-emerald-300' : k === 'open' && units ? 'text-amber-600 dark:text-amber-300' : '')}>
                     {fmtNumber(units)} <span className="text-[10px] font-semibold text-muted-fg">units · {n} line{n === 1 ? '' : 's'}</span>
                   </div>
@@ -461,54 +472,78 @@ function POItems({ rec, q, view, setView, sectionRef }) {
           </div>
 
           {differs && (
-            <div className="mb-2 rounded-lg bg-amber-50 px-3 py-1.5 text-[11px] text-amber-800 dark:bg-amber-950 dark:text-amber-200">
+            <div className="mb-3 rounded-lg bg-amber-50 px-3 py-1.5 text-[11px] text-amber-800 dark:bg-amber-950 dark:text-amber-200">
               System shows {fmtNumber(tot.ordered)} ordered · {fmtNumber(tot.received)} received · {fmtNumber(tot.open)} open
               {' '}(sheet: {rec.orig != null ? fmtNumber(rec.orig) : '—'} · {rec.receivedQty != null ? fmtNumber(rec.receivedQty) : '—'} · {rec.rem != null ? fmtNumber(rec.rem) : '—'}). The sheet may be behind.
             </div>
           )}
 
           {shown.length === 0 ? (
-            <div className="rounded-lg border border-border bg-card px-3 py-3 text-[12px] text-muted-fg">No {ITEM_VIEWS[view].label.toLowerCase()} items on this PO.</div>
+            <div className="rounded-lg bg-muted/40 px-3 py-3 text-[12px] text-muted-fg">No {ITEM_VIEWS[view].label.toLowerCase()} items on this PO.</div>
           ) : (
-            <div className="space-y-1.5">
-              {shown.map((l) => (
-                <div key={l.seq} className="rounded-lg border border-border bg-card px-3 py-2">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="text-[13px] font-bold leading-snug">{l.desc2 || l.desc1 || l.itemId}</div>
-                      <div className="text-[11px] text-muted-fg">{l.desc2 ? l.desc1 : ''}{l.itemId && <> · <span className="font-mono">#{l.itemId}</span></>}</div>
-                    </div>
-                    <div className="shrink-0 text-right">
-                      {view === 'received' ? (
-                        <div className="text-sm font-extrabold tabular-nums text-emerald-600 dark:text-emerald-300">{fmtNumber(l.received)}<span className="text-[10px] font-semibold text-muted-fg"> / {fmtNumber(l.ordered)}</span></div>
-                      ) : view === 'open' ? (
-                        <div className="text-sm font-extrabold tabular-nums text-amber-600 dark:text-amber-300">{fmtNumber(l.open)}<span className="text-[10px] font-semibold text-muted-fg"> open</span></div>
-                      ) : (
-                        <>
-                          <div className="text-sm font-extrabold tabular-nums">{fmtNumber(l.ordered)}</div>
-                          <span className={cn('rounded-full px-1.5 py-px text-[10px] font-bold',
-                            l.open === 0 ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-200'
-                              : l.received > 0 ? 'bg-sky-100 text-sky-700 dark:bg-sky-900/50 dark:text-sky-200'
-                              : 'bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-200')}>
-                            {l.open === 0 ? 'Received' : l.received > 0 ? `${l.received}/${l.ordered} in` : 'Open'}
-                          </span>
-                        </>
-                      )}
-                    </div>
-                  </div>
-                  <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-muted-fg">
-                    {l.so > 0 ? <span>SO <b className="text-fg/80">{l.so}</b>{l.customer && <> · {l.customer}</>}</span> : <span>Stock</span>}
-                    {view === 'received'
-                      ? l.receipts.map((r, i) => <span key={i}>Received {fmtNumber(r.qty)} on <b className="text-fg/80">{fmtYmd(r.date)}</b>{r.where && ` → ${r.where}`}</span>)
-                      : l.open > 0 && l.due && <span>Due {fmtYmd(l.due)}</span>}
-                  </div>
-                </div>
-              ))}
+            <div className="overflow-x-auto rounded-lg border border-border">
+              <table className="w-full text-[12px]">
+                <thead className="bg-muted/60">
+                  <tr>
+                    <th className={cn(th, 'text-left')}>Item</th>
+                    <th className={cn(th, 'text-left')}>Sale · customer</th>
+                    {view === 'ordered' && <>
+                      <th className={cn(th, 'text-right')}>Ord</th>
+                      <th className={cn(th, 'text-right')}>Recv</th>
+                      <th className={cn(th, 'text-right')}>Open</th>
+                      <th className={cn(th, 'text-left')}>Status</th>
+                    </>}
+                    {view === 'received' && <>
+                      <th className={cn(th, 'text-right')}>Recv</th>
+                      <th className={cn(th, 'text-left')}>Received on · put away</th>
+                    </>}
+                    {view === 'open' && <>
+                      <th className={cn(th, 'text-right')}>Open</th>
+                      <th className={cn(th, 'text-left')}>Due</th>
+                    </>}
+                  </tr>
+                </thead>
+                <tbody>
+                  {shown.map((l) => (
+                    <tr key={l.seq} className="border-t border-border/60 align-top hover:bg-muted/30">
+                      <td className="px-3 py-2">
+                        <div className="font-semibold leading-snug">{l.desc2 || l.desc1 || l.itemId}</div>
+                        <div className="text-[11px] text-muted-fg">{l.desc2 ? l.desc1 : ''}{l.itemId && <> · <span className="font-mono">#{l.itemId}</span></>}</div>
+                      </td>
+                      <td className="px-3 py-2">
+                        {l.so > 0
+                          ? <><div className="font-semibold">{l.customer || '—'}</div><div className="text-[11px] text-muted-fg">SO {l.so}</div></>
+                          : <span className="text-muted-fg">Stock</span>}
+                      </td>
+                      {view === 'ordered' && <>
+                        <td className="px-3 py-2 text-right font-bold tabular-nums">{fmtNumber(l.ordered)}</td>
+                        <td className="px-3 py-2 text-right tabular-nums text-emerald-600 dark:text-emerald-300">{l.received ? fmtNumber(l.received) : '—'}</td>
+                        <td className="px-3 py-2 text-right tabular-nums text-amber-600 dark:text-amber-300">{l.open ? fmtNumber(l.open) : '—'}</td>
+                        <td className="px-3 py-2">{statusChip(l)}</td>
+                      </>}
+                      {view === 'received' && <>
+                        <td className="px-3 py-2 text-right font-bold tabular-nums text-emerald-600 dark:text-emerald-300">{fmtNumber(l.received)}<span className="text-[10px] font-medium text-muted-fg"> / {fmtNumber(l.ordered)}</span></td>
+                        <td className="px-3 py-2">
+                          {l.receipts.map((r, i) => (
+                            <div key={i} className="whitespace-nowrap">
+                              <b>{fmtYmd(r.date)}</b>{r.qty > 1 && <span className="text-muted-fg"> · {r.qty} units</span>}{r.where && <span className="text-muted-fg"> · {r.where}</span>}
+                            </div>
+                          ))}
+                        </td>
+                      </>}
+                      {view === 'open' && <>
+                        <td className="px-3 py-2 text-right font-bold tabular-nums text-amber-600 dark:text-amber-300">{fmtNumber(l.open)}<span className="text-[10px] font-medium text-muted-fg"> / {fmtNumber(l.ordered)}</span></td>
+                        <td className="whitespace-nowrap px-3 py-2">{l.due ? fmtYmd(l.due) : '—'}</td>
+                      </>}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           )}
         </>
       )}
-    </section>
+    </Section>
   );
 }
 
@@ -621,12 +656,7 @@ function POSales({ poNum, poLines, itemsLoading }) {
   const counts = sales.reduce((m, s) => { m[s.state] = (m[s.state] || 0) + 1; return m; }, {});
 
   return (
-    <section>
-      <h3 className="mb-2 flex flex-wrap items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-muted-fg">
-        <Store size={12} /> Customer sales on this PO
-        {sales.length > 0 && <span className="rounded-full bg-muted px-1.5 tabular-nums">{sales.length}</span>}
-        <span className="ml-1 rounded bg-sky-100 px-1.5 py-px text-[9px] font-bold text-sky-700 dark:bg-sky-900/50 dark:text-sky-200">LIVE · SYSTEM</span>
-      </h3>
+    <Section icon={Store} title="Customer sales on this PO" count={sales.length || null} badge={<LiveBadge />}>
       {loading ? (
         <div className="flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-4 text-[12px] text-muted-fg">
           <div className="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent" /> Checking customer sales…
@@ -697,12 +727,12 @@ function POSales({ poNum, poLines, itemsLoading }) {
           </div>
         </>
       )}
-    </section>
+    </Section>
   );
 }
 
 function PODrawer({ rec, sheetUrl, onClose }) {
-  // Live PO lines from the system — fetched as soon as the panel opens so the
+  // Live PO lines from the system — fetched as soon as the page opens so the
   // Ordered / Received / Still open lists are ready on click.
   const poNum = /^\d+$/.test(cell(rec?.po)) ? Number(cell(rec.po)) : null;
   const itemsQ = useSqlQuery(PO_ITEMS_SQL, [poNum], { enabled: poNum != null, staleTime: 5 * 60 * 1000 });
@@ -719,6 +749,7 @@ function PODrawer({ rec, sheetUrl, onClose }) {
     return () => document.removeEventListener('keydown', onKey);
   }, [onClose]);
   if (!rec) return null;
+
   const t0 = today0();
   const milestones = [
     { label: 'PO placed', date: rec.poDate, placed: true },
@@ -728,90 +759,99 @@ function PODrawer({ rec, sheetUrl, onClose }) {
     { label: 'Est. delivery', date: rec.estDel, superseded: rec.etaUpdated },
     ...(rec.etaUpdated ? [{ label: `Current expected — ${rec.etaSrc.toLowerCase()}`, date: rec.eta, note: rec.etaNote, current: true }] : []),
   ].filter((m) => m.date).sort((a, b) => a.date - b.date);
-  // Ordered / Received / Still open are clickable → item list from the system.
-  const stat = (label, value, tone, itemsKey) => {
-    const body = (
-      <>
-        <div className="text-[10px] font-bold uppercase tracking-wider text-muted-fg">{label}</div>
-        <div className={cn('mt-0.5 text-lg font-extrabold tabular-nums', tone)}>{value}</div>
-        {itemsKey && poNum != null && <div className="mt-0.5 flex items-center gap-0.5 text-[10px] font-semibold text-primary">View items <ChevronRight size={10} /></div>}
-      </>
-    );
-    return itemsKey && poNum != null ? (
-      <button type="button" onClick={() => openItems(itemsKey)}
-        className={cn('rounded-lg border bg-card px-3 py-2 text-left transition hover:border-primary/50 hover:shadow-sm',
-          itemsView === itemsKey ? 'border-primary/40' : 'border-border')}>
-        {body}
-      </button>
-    ) : <div className="rounded-lg border border-border bg-card px-3 py-2">{body}</div>;
-  };
   const s = STATUS[rec.status] || STATUS.none;
 
-  return (
-    // PO detail page — fills the content area (sidebar and top bar stay);
-    // Esc / Close returns to the list at the same scroll position.
-    <div className="flex flex-col">
-      <section className="flex w-full flex-col rounded-xl border border-border bg-bg" aria-label={`PO ${rec.po} details`}>
-        <div className={cn('sticky top-16 z-[5] rounded-t-xl border-b border-l-4 border-border bg-card px-6 py-4 shadow-sm', s.stripe)}>
-          <div className="mx-auto flex w-full max-w-[1600px] items-start justify-between gap-3">
-            <div className="min-w-0">
-              <div className="text-[10px] font-bold uppercase tracking-wider text-muted-fg">{rec.vendor}{rec.sno ? ` · S.NO ${rec.sno}` : ''}</div>
-              <div className="text-2xl font-extrabold tracking-tight text-primary">PO {rec.po}</div>
-              <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-                <TimingChip rec={rec} big />
-                <StatusPill status={rec.status} />
-                {rec.type && <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-bold uppercase">{rec.type}</span>}
-                {rec.orderType && <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-semibold uppercase text-muted-fg">{rec.orderType}</span>}
-              </div>
-            </div>
-            <div className="flex shrink-0 items-center gap-2">
-              {sheetUrl && (
-                <a href={`${sheetUrl}${rec.gid != null ? `#gid=${rec.gid}` : ''}`} target="_blank" rel="noopener noreferrer"
-                  className="hidden items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-semibold text-primary transition hover:bg-muted sm:inline-flex">
-                  <ExternalLink size={13} /> Open {rec.vendor} tab in Google Sheets
-                </a>
-              )}
-              <button type="button" onClick={onClose} title="Close (Esc)"
-                className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-semibold text-muted-fg transition hover:bg-muted hover:text-fg" aria-label="Close">
-                <X size={15} /> Close
-              </button>
-            </div>
-          </div>
+  // Big number cards — Ordered / Received / Still open open the item list.
+  const stat = (label, value, tone, itemsKey, hint) => {
+    const clickable = itemsKey && poNum != null;
+    const body = (
+      <>
+        <div className="text-[11px] font-bold uppercase tracking-wider text-muted-fg">{label}</div>
+        <div className={cn('mt-1 text-3xl font-extrabold tabular-nums leading-none', tone)}>{value}</div>
+        <div className="mt-2 flex items-center gap-0.5 text-[11px] font-semibold text-muted-fg">
+          {clickable ? <span className="inline-flex items-center gap-0.5 text-primary">View items <ChevronRight size={12} /></span> : hint}
         </div>
+      </>
+    );
+    return clickable ? (
+      <button type="button" onClick={() => openItems(itemsKey)}
+        className={cn('rounded-xl border bg-card p-4 text-left shadow-sm transition hover:border-primary/50 hover:shadow-md',
+          itemsView === itemsKey ? 'border-primary/50 ring-2 ring-primary/15' : 'border-border')}>
+        {body}
+      </button>
+    ) : <div className="rounded-xl border border-border bg-card p-4 shadow-sm">{body}</div>;
+  };
+  const fact = (label, value, sub, tone) => (
+    <div className="min-w-0">
+      <dt className="text-[10px] font-bold uppercase tracking-wider text-muted-fg">{label}</dt>
+      <dd className={cn('mt-0.5 truncate text-sm font-bold', tone)} title={typeof value === 'string' ? value : undefined}>{value}</dd>
+      {sub && <dd className="truncate text-[11px] text-muted-fg">{sub}</dd>}
+    </div>
+  );
 
-        <div>
-          <div className="mx-auto grid w-full max-w-[1600px] gap-6 px-6 py-5 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
-          {/* Left column — PO facts, dates and sheet notes */}
-          <div className="min-w-0 space-y-5">
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-            {stat('Ordered', rec.orig != null ? fmtNumber(rec.orig) : '—', '', 'ordered')}
-            {stat('Received', rec.receivedQty != null ? fmtNumber(rec.receivedQty) : '—', 'text-emerald-600 dark:text-emerald-300', 'received')}
-            {stat('Still open', rec.rem != null ? fmtNumber(rec.rem) : '—', rec.qtyFlagged ? 'text-rose-600 dark:text-rose-300' : rec.rem ? 'text-amber-600 dark:text-amber-300' : '', 'open')}
-            {stat('On vendor site', rec.vendorQty != null ? fmtNumber(rec.vendorQty) : '—')}
-          </div>
-          <QtyBar rec={rec} compact />
+  return (
+    // PO detail page — fills the content area (sidebar and top bar stay).
+    // Back / Esc returns to the list at the same scroll position.
+    <div className="flex flex-col gap-4">
+      {/* Back + sheet link */}
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <button type="button" onClick={onClose} title="Back to the PO list (Esc)"
+          className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-1.5 text-sm font-semibold text-fg/80 shadow-sm transition hover:bg-muted hover:text-fg">
+          <ArrowLeft size={16} /> Back to POs
+        </button>
+        {sheetUrl && (
+          <a href={`${sheetUrl}${rec.gid != null ? `#gid=${rec.gid}` : ''}`} target="_blank" rel="noopener noreferrer"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-1.5 text-xs font-semibold text-primary shadow-sm transition hover:bg-muted">
+            <ExternalLink size={13} /> Open {rec.vendor} tab in Google Sheets
+          </a>
+        )}
+      </div>
 
-          <div className="grid grid-cols-2 gap-2 text-[12px]">
-            <div className="rounded-lg border border-border bg-card px-3 py-2">
-              <div className="text-[10px] font-bold uppercase tracking-wider text-muted-fg">Acknowledgement</div>
-              {rec.acks.length ? rec.acks.map((a) => <div key={a} className="font-semibold">{a}</div>) : <div className="font-semibold text-violet-600 dark:text-violet-300">Awaiting ACK</div>}
+      {/* Hero: identity, status and key facts */}
+      <div className={cn('rounded-xl border border-l-4 border-border bg-card px-5 py-4 shadow-sm', s.stripe)}>
+        <div className="flex flex-wrap items-start justify-between gap-x-10 gap-y-4">
+          <div className="min-w-0">
+            <div className="text-[11px] font-bold uppercase tracking-wider text-muted-fg">{rec.vendor}{rec.sno ? ` · S.NO ${rec.sno}` : ''}</div>
+            <h2 className="text-3xl font-extrabold tracking-tight text-primary">PO {rec.po}</h2>
+            <div className="mt-2 flex flex-wrap items-center gap-1.5">
+              <TimingChip rec={rec} big />
+              <StatusPill status={rec.status} />
+              {rec.type && <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-bold uppercase">{rec.type}</span>}
+              {rec.orderType && <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-semibold uppercase text-muted-fg">{rec.orderType}</span>}
             </div>
-            <div className="rounded-lg border border-border bg-card px-3 py-2">
-              <div className="text-[10px] font-bold uppercase tracking-wider text-muted-fg">PO age</div>
-              <div className="font-semibold">{rec.ageDays != null ? `${fmtNumber(rec.ageDays)} days` : '—'}</div>
-              {rec.poDate && <div className="text-muted-fg">placed {fmtD(rec.poDate)}</div>}
-            </div>
           </div>
+          <dl className="grid flex-1 grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-4 lg:max-w-3xl">
+            {fact('Acknowledgement', rec.acks.length ? rec.acks[0] : 'Awaiting ACK', rec.acks.length > 1 ? `+${rec.acks.length - 1} more` : null, rec.acks.length ? '' : 'text-violet-600 dark:text-violet-300')}
+            {fact('Ordered on', rec.poDate ? fmtD(rec.poDate) : '—', rec.ageDays != null ? `${fmtNumber(rec.ageDays)} days ago` : null)}
+            {fact('Expected', rec.eta ? fmtD(rec.eta) : 'No ETA', rec.etaSrc || null, rec.etaFlagged && !rec.etaUpdated ? 'text-rose-600 dark:text-rose-300' : '')}
+            {fact('Target', rec.target ? fmtD(rec.target) : '—',
+              rec.lateVsTarget == null ? (rec.targetWeeks ? `PO + ${rec.targetWeeks} weeks` : null)
+                : rec.lateVsTarget > 0 ? `${spanText(rec.lateVsTarget)} later than target` : 'within target',
+              rec.lateVsTarget > 0 ? 'text-rose-600 dark:text-rose-300' : '')}
+          </dl>
+        </div>
+        <div className="mt-4"><QtyBar rec={rec} compact /></div>
+      </div>
 
+      {/* Quantity cards */}
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        {stat('Ordered', rec.orig != null ? fmtNumber(rec.orig) : '—', '', 'ordered')}
+        {stat('Received', rec.receivedQty != null ? fmtNumber(rec.receivedQty) : '—', 'text-emerald-600 dark:text-emerald-300', 'received')}
+        {stat('Still open', rec.rem != null ? fmtNumber(rec.rem) : '—', rec.qtyFlagged ? 'text-rose-600 dark:text-rose-300' : rec.rem ? 'text-amber-600 dark:text-amber-300' : '', 'open')}
+        {stat('On vendor site', rec.vendorQty != null ? fmtNumber(rec.vendorQty) : '—', '', null, 'as shown on the vendor portal')}
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
+        {/* Left — what the sheet says */}
+        <div className="min-w-0 space-y-4">
           {milestones.length > 0 && (
-            <Section icon={CalendarClock} title="Dates">
-              <ol className="relative ml-2 border-l-2 border-border pl-4">
+            <Section icon={CalendarClock} title="Timeline">
+              <ol className="relative ml-2 border-l-2 border-border pl-5">
                 {milestones.map((m, i) => {
                   const d = daysBetween(m.date, t0);
-                  // A superseded original date is history, not lateness.
                   return (
-                    <li key={i} className="relative pb-3 last:pb-0">
-                      <span className={cn('absolute -left-[23px] top-1 h-3 w-3 rounded-full ring-2 ring-bg',
+                    <li key={i} className="relative pb-3.5 last:pb-0">
+                      <span className={cn('absolute -left-[27px] top-1 h-3 w-3 rounded-full ring-2 ring-card',
                         m.target ? 'bg-violet-500' : m.current ? 'bg-emerald-500' : m.flagged ? 'bg-rose-500' : d < 0 || m.superseded ? 'bg-slate-400' : 'bg-sky-500')} />
                       <div className={cn('text-[11px] font-semibold', m.current ? 'text-emerald-700 dark:text-emerald-300' : 'text-muted-fg')}>{m.label}</div>
                       <div className={cn('text-sm font-bold', m.flagged && 'text-rose-600 dark:text-rose-300', m.superseded && 'font-medium text-muted-fg line-through decoration-1')}>
@@ -822,12 +862,6 @@ function PODrawer({ rec, sheetUrl, onClose }) {
                   );
                 })}
               </ol>
-              {rec.lateVsTarget != null && (
-                <div className={cn('mt-2 rounded-lg px-3 py-2 text-[12px] font-semibold',
-                  rec.lateVsTarget > 0 ? 'bg-rose-50 text-rose-700 dark:bg-rose-950 dark:text-rose-200' : 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-200')}>
-                  {rec.lateVsTarget > 0 ? `Expected ${spanText(rec.lateVsTarget)} later than target` : `On or ahead of target by ${spanText(rec.lateVsTarget)}`}
-                </div>
-              )}
             </Section>
           )}
 
@@ -844,16 +878,24 @@ function PODrawer({ rec, sheetUrl, onClose }) {
             </Section>
           )}
 
+          {rec.remarks.length > 0 && (
+            <Section icon={MessageSquare} title="Remarks" count={rec.remarks.length}>
+              <div className="space-y-1.5">
+                {rec.remarks.map((r, i) => <div key={i} className="rounded-lg bg-muted/50 px-3 py-2 text-[12px]">{r}</div>)}
+              </div>
+            </Section>
+          )}
+
           {rec.invoices.length > 0 && (
             <Section icon={FileText} title="Invoices & shipments" count={rec.invoices.length}>
-              <div className="overflow-hidden rounded-lg border border-border">
+              <div className="overflow-x-auto rounded-lg border border-border">
                 <table className="w-full text-[12px]">
                   <thead className="bg-muted/60 text-[10px] uppercase tracking-wider text-muted-fg">
                     <tr><th className="px-3 py-1.5 text-left">Invoice #</th><th className="px-3 py-1.5 text-left">Date</th><th className="px-3 py-1.5 text-right">Qty</th></tr>
                   </thead>
                   <tbody>
                     {rec.invoices.map((iv, i) => (
-                      <tr key={i} className="border-t border-border/60 bg-card align-top">
+                      <tr key={i} className="border-t border-border/60 align-top">
                         <td className="px-3 py-1.5 font-semibold">{iv.no || '—'}</td>
                         <td className="px-3 py-1.5">{iv.date || '—'}</td>
                         <td className="px-3 py-1.5 text-right font-semibold tabular-nums">{iv.qty || '—'}</td>
@@ -865,19 +907,11 @@ function PODrawer({ rec, sheetUrl, onClose }) {
             </Section>
           )}
 
-          {rec.remarks.length > 0 && (
-            <Section icon={MessageSquare} title="Remarks" count={rec.remarks.length}>
-              <div className="space-y-1.5">
-                {rec.remarks.map((r, i) => <div key={i} className="rounded-lg border border-border bg-card px-3 py-2 text-[12px]">{r}</div>)}
-              </div>
-            </Section>
-          )}
-
           {rec.subLines.length > 0 && (
             <Section icon={Layers} title="Additional lines" count={rec.subLines.length}>
               <div className="space-y-2">
                 {rec.subLines.map((fields, i) => (
-                  <div key={i} className="rounded-lg border border-border bg-card px-3 py-2">
+                  <div key={i} className="rounded-lg bg-muted/50 px-3 py-2">
                     <div className="mb-1 text-[10px] font-bold uppercase tracking-wider text-muted-fg">Line {i + 1}</div>
                     <dl className="grid grid-cols-[auto,1fr] gap-x-3 gap-y-0.5 text-[12px]">
                       {fields.map((f, j) => (
@@ -895,7 +929,7 @@ function PODrawer({ rec, sheetUrl, onClose }) {
 
           {rec.extras.length > 0 && (
             <Section icon={Package} title="Other details">
-              <dl className="grid grid-cols-[auto,1fr] gap-x-3 gap-y-1 rounded-lg border border-border bg-card px-3 py-2 text-[12px]">
+              <dl className="grid grid-cols-[auto,1fr] gap-x-3 gap-y-1 text-[12px]">
                 {rec.extras.map((f, j) => (
                   <div key={j} className="contents"><dt className="text-muted-fg">{f.label}</dt><dd className="font-medium">{f.value}</dd></div>
                 ))}
@@ -909,8 +943,8 @@ function PODrawer({ rec, sheetUrl, onClose }) {
                 {[...rec.history].reverse().map((h, i) => {
                   const ok = /^ok$/i.test(h.value);
                   return (
-                    <li key={i} className={cn('flex gap-3 rounded-lg border px-3 py-1.5 text-[12px]',
-                      ok ? 'border-emerald-200 bg-emerald-50 dark:border-emerald-900 dark:bg-emerald-950' : 'border-border bg-card', i === 0 && 'ring-2 ring-primary/30')}>
+                    <li key={i} className={cn('flex gap-3 rounded-lg px-3 py-1.5 text-[12px]',
+                      ok ? 'bg-emerald-50 dark:bg-emerald-950' : 'bg-muted/50', i === 0 && 'ring-2 ring-primary/30')}>
                       <span className="w-20 shrink-0 font-bold text-muted-fg">{h.label}{i === 0 && <span className="block text-[9px] uppercase text-primary">latest</span>}</span>
                       <span className={cn(ok && 'font-bold text-emerald-700 dark:text-emerald-300')}>{ok ? '✓ OK' : h.value}</span>
                     </li>
@@ -919,20 +953,20 @@ function PODrawer({ rec, sheetUrl, onClose }) {
               </ol>
             </Section>
           )}
-          </div>
-
-          {/* Right column — live items and customer sales from the system */}
-          <div className="min-w-0 space-y-5">
-            {poNum != null
-              ? <>
-                  <POItems rec={rec} q={itemsQ} view={itemsView} setView={setItemsView} sectionRef={itemsRef} />
-                  <POSales poNum={poNum} poLines={poLinesAgg} itemsLoading={itemsQ.isLoading} />
-                </>
-              : <div className="rounded-lg border border-border bg-card px-3 py-3 text-[12px] text-muted-fg">This PO number isn't numeric, so its items can't be looked up in the system.</div>}
-          </div>
-          </div>
         </div>
-      </section>
+
+        {/* Right — live from the system */}
+        <div className="min-w-0 space-y-4">
+          {poNum != null ? (
+            <>
+              <POItems rec={rec} q={itemsQ} view={itemsView} setView={setItemsView} sectionRef={itemsRef} />
+              <POSales poNum={poNum} poLines={poLinesAgg} itemsLoading={itemsQ.isLoading} />
+            </>
+          ) : (
+            <div className="rounded-xl border border-border bg-card p-4 text-[12px] text-muted-fg">This PO number isn't numeric, so its items can't be looked up in the system.</div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
