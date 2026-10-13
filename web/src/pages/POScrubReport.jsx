@@ -748,10 +748,11 @@ function PODrawer({ rec, sheetUrl, onClose }) {
   const s = STATUS[rec.status] || STATUS.none;
 
   return (
-    // Full-screen PO page (covers the app; Esc / ✕ returns to the list).
-    <div className="fixed inset-0 z-50 flex">
-      <aside className="relative flex h-full w-full flex-col bg-bg" role="dialog" aria-modal="true">
-        <div className={cn('border-b border-l-4 border-border bg-card px-6 py-4', s.stripe)}>
+    // PO detail page — fills the content area (sidebar and top bar stay);
+    // Esc / Close returns to the list at the same scroll position.
+    <div className="flex flex-col">
+      <section className="flex w-full flex-col rounded-xl border border-border bg-bg" aria-label={`PO ${rec.po} details`}>
+        <div className={cn('sticky top-16 z-[5] rounded-t-xl border-b border-l-4 border-border bg-card px-6 py-4 shadow-sm', s.stripe)}>
           <div className="mx-auto flex w-full max-w-[1600px] items-start justify-between gap-3">
             <div className="min-w-0">
               <div className="text-[10px] font-bold uppercase tracking-wider text-muted-fg">{rec.vendor}{rec.sno ? ` · S.NO ${rec.sno}` : ''}</div>
@@ -778,7 +779,7 @@ function PODrawer({ rec, sheetUrl, onClose }) {
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto">
+        <div>
           <div className="mx-auto grid w-full max-w-[1600px] gap-6 px-6 py-5 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
           {/* Left column — PO facts, dates and sheet notes */}
           <div className="min-w-0 space-y-5">
@@ -931,7 +932,7 @@ function PODrawer({ rec, sheetUrl, onClose }) {
           </div>
           </div>
         </div>
-      </aside>
+      </section>
     </div>
   );
 }
@@ -978,6 +979,17 @@ export default function POScrubReport() {
   const [orderType, setOrderType] = useState('both');   // both | stock | so
   const [sortKey, setSortKey] = useState('attention');
   const [selectedKey, setSelectedKey] = useState(null);
+  const listScroll = useRef(0);
+  const scroller = () => rootRef.current?.closest('main') || null;
+  const openPO = (key) => {
+    listScroll.current = scroller()?.scrollTop || 0;
+    setSelectedKey(key);
+    requestAnimationFrame(() => scroller()?.scrollTo({ top: 0 }));
+  };
+  const closePO = () => {
+    setSelectedKey(null);
+    requestAnimationFrame(() => scroller()?.scrollTo({ top: listScroll.current }));
+  };
   const [refreshing, setRefreshing] = useState(false);
   const [isFull, setIsFull] = useState(false);
   const rootRef = useRef(null);
@@ -1084,6 +1096,9 @@ export default function POScrubReport() {
       <Topbar title="PO Scrub Report" subtitle={data?.title || 'Purchase-order tracker'} />
 
       <div ref={rootRef} className={cn('flex flex-1 flex-col gap-3 bg-bg p-4', isFull && 'overflow-auto')}>
+        {selected ? (
+          <PODrawer rec={selected} sheetUrl={data?.url} onClose={closePO} />
+        ) : (<>
         {/* Toolbar + vendor tabs */}
         <Card className="shrink-0">
           <CardContent className="p-0">
@@ -1280,15 +1295,14 @@ export default function POScrubReport() {
               <Card><CardContent className="py-12 text-center text-sm text-muted-fg">No POs match this filter.</CardContent></Card>
             ) : (
               <div className="flex flex-col gap-2">
-                {list.map((r) => <POCard key={r.key} rec={r} showVendor={isAll} onOpen={setSelectedKey} />)}
+                {list.map((r) => <POCard key={r.key} rec={r} showVendor={isAll} onOpen={openPO} />)}
               </div>
             )}
             </div>
           </>
         )}
 
-        {/* Detail panel lives inside rootRef so it still shows in full-screen mode */}
-        {selected && <PODrawer rec={selected} sheetUrl={data?.url} onClose={() => setSelectedKey(null)} />}
+        </>)}
       </div>
     </>
   );
