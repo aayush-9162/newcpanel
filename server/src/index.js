@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { queries } from './queries/index.js';
 import { runSql, runMysql, clearSqlCache } from './upstream.js';
 import { checkSelectOnly } from './sqlGuard.js';
+import { registerScrLegacy } from './scrLegacy.js';
 import { requireAuth, requireRouteAccess, verifyGoogleCredential, issueAppToken } from './auth.js';
 import { ensureUser, readUsers, upsertUser, removeUser } from './users.js';
 import { readRoles, upsertRole, deleteRole, allowedRoutesFor } from './roles.js';
@@ -421,6 +422,9 @@ app.post('/api/mysql', async (req, res) => {
     res.status(502).json({ error: 'upstream error', message: err.message });
   }
 });
+
+// Sales Comparison Report "Old design" — whitelisted proxy to the old page's queries.
+registerScrLegacy(app);
 
 // ─── Serve the built React app (production) ─────────────────────────────────
 // Static assets first, then an SPA fallback so client-side routes (e.g.

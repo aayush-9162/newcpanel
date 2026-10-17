@@ -14,7 +14,7 @@ const TONES = {
   success: 'bg-success/10 text-success hover:bg-success/20',
 };
 
-export function Topbar({ title, subtitle, actions }) {
+export function Topbar({ title, subtitle, actions, rightActions }) {
   const [dark, setDark] = useState(() => document.documentElement.classList.contains('dark'));
   const [refreshing, setRefreshing] = useState(false);
   const qc = useQueryClient();
@@ -48,6 +48,7 @@ export function Topbar({ title, subtitle, actions }) {
       {actions && <div className="ml-3 flex shrink-0 items-center">{actions}</div>}
 
       <div className="ml-auto flex items-center gap-1.5 min-w-0">
+        {rightActions && <div className="mr-1 flex shrink-0 items-center">{rightActions}</div>}
         <div className="hidden md:flex items-center gap-1 overflow-x-auto min-w-0">
           {externalLinks.map((l) => (
             <a

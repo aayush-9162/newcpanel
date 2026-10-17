@@ -67,6 +67,19 @@ async function postQuery(path, qry, values) {
 export const runSql   = (qry, values = []) => postQuery('/api/sql',   qry, values);
 export const runMysql = (qry, values = []) => postQuery('/api/mysql', qry, values);
 
+// Sales Comparison "Old design" — named, server-whitelisted queries copied from
+// the original cpanel page. Returns the row array.
+export async function scrLegacyQuery(q, params = {}) {
+  const res = await authFetch('/api/scr-legacy/query', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ q, params }),
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(json.message || json.error || `Query ${q} failed (${res.status})`);
+  return Array.isArray(json.rows) ? json.rows : [];
+}
+
 export function useReportQuery(name, params = {}, options = {}) {
   return useQuery({
     queryKey: [name, params],

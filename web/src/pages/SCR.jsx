@@ -16,6 +16,7 @@ import {
   Flame, CheckCircle2, XCircle,
 } from 'lucide-react';
 import { cn } from '@/lib/cn';
+import SCRLegacy from './SCRLegacy';
 import {
   ResponsiveContainer,
   LineChart,
@@ -239,7 +240,7 @@ const dayCellClass = (d) => cn(
   d.weekend ? 'bg-amber-500/15 text-amber-700 dark:text-amber-300' : 'text-muted-fg',
 );
 
-export default function SCR() {
+function SCRNewDesign({ toggle }) {
   const today = new Date();
   const [store, setStore] = useState('ARDEN');
   const [category, setCategory] = useState('Written');
@@ -500,7 +501,7 @@ export default function SCR() {
 
   return (
     <>
-      <Topbar title="Sales Comparison Report" subtitle={`${store} · ${category} · ${monthName}`} />
+      <Topbar title="Sales Comparison Report" subtitle={`${store} · ${category} · ${monthName}`} rightActions={toggle} />
       <div className="flex flex-1 flex-col gap-5 p-5 animate-fade-in">
         <FilterBar
           store={store}
@@ -1529,4 +1530,39 @@ function InsightTile({ icon: Icon, accent, label, value, fullValue, subtitle }) 
       </div>
     </div>
   );
+}
+
+// Old design (copy of the original cpanel page) / New design switch, shown at
+// the top right of the header. Defaults to the old design; the choice is
+// remembered per browser.
+const DESIGN_KEY = 'scr.design';
+function readDesign() {
+  try { return localStorage.getItem(DESIGN_KEY) === 'new' ? 'new' : 'old'; } catch { return 'old'; }
+}
+
+export default function SCR() {
+  const [design, setDesign] = useState(readDesign);
+  const choose = (d) => {
+    setDesign(d);
+    try { localStorage.setItem(DESIGN_KEY, d); } catch { /* storage unavailable */ }
+  };
+  const toggle = (
+    <div className="inline-flex rounded-lg border border-border bg-muted/40 p-0.5" role="group" aria-label="Report design">
+      {[['old', 'Old design'], ['new', 'New design']].map(([id, label]) => (
+        <button
+          key={id}
+          type="button"
+          onClick={() => choose(id)}
+          aria-pressed={design === id}
+          className={cn(
+            'rounded-md px-3 py-1 text-xs font-semibold whitespace-nowrap transition',
+            design === id ? 'bg-primary text-primary-fg shadow-sm' : 'text-muted-fg hover:text-fg',
+          )}
+        >
+          {label}
+        </button>
+      ))}
+    </div>
+  );
+  return design === 'new' ? <SCRNewDesign toggle={toggle} /> : <SCRLegacy toggle={toggle} />;
 }
