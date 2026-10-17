@@ -39,7 +39,7 @@ export function Topbar({ title, subtitle, actions, rightActions }) {
   };
 
   return (
-    <header className="sticky top-0 z-10 flex h-16 items-center gap-3 border-b border-border bg-bg/80 px-5 backdrop-blur">
+    <header className="sticky top-0 z-10 flex h-16 items-center gap-3 border-b border-border bg-bg px-5">
       <div className="flex flex-col leading-tight min-w-0">
         <h1 className="text-lg font-semibold tracking-tight truncate">{title}</h1>
         {subtitle && <p className="text-xs text-muted-fg truncate">{subtitle}</p>}
