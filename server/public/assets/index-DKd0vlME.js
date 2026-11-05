@@ -1514,7 +1514,7 @@ In order to be iterable, non-array objects must have a [Symbol.iterator]() metho
   font-size:13.6px;line-height:1.5;color:var(--fg);background:var(--head)}
 .dark .scr-old{--b:#495057;--fg:#dee2e6;--muted:#adb5bd;--hover:rgba(255,255,255,.075);--sec:#031633;--warn:#332701;--head:#1a1d20;--primary-bg:#031633}
 .scr-old .wrap{max-width:1320px;margin:0 auto;padding:0 12px 32px;display:flex;flex-direction:column;gap:20.4px}
-.scr-old .sticky-head{position:sticky;top:4rem;z-index:5;background:var(--head);padding:6.8px 6.8px 20.4px}
+.scr-old .sticky-head{background:var(--head);padding:6.8px 6.8px 20.4px}
 .scr-old .hdr{display:flex;flex-wrap:wrap;gap:6.8px;border-bottom:1px solid var(--b);padding-bottom:6.8px}
 .scr-old .hdr-left{display:flex;align-items:center;gap:6.8px;flex:1 1 480px}
 .scr-old .hdr-left h3{margin-right:auto}
