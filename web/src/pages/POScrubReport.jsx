@@ -283,6 +283,16 @@ function TimingChip({ rec, big }) {
     : t.label;
   return <span className={cn('inline-flex items-center gap-1 whitespace-nowrap rounded-full font-bold ring-1', big ? 'px-2.5 py-1 text-xs' : 'px-2 py-0.5 text-[11px]', t.chip)}><Icon size={big ? 13 : 11} />{text}</span>;
 }
+// Quantities come from the system; say so when the hand-kept sheet disagrees.
+function SheetNote({ rec }) {
+  const s = rec.sheetQty || {};
+  const f = (n) => (n != null ? fmtNumber(n) : '—');
+  return (
+    <div className="mt-1 text-[10px] text-muted-fg" title="Quantities shown are from the system's receiving data. The PO SCRUB sheet is updated by hand and may be behind.">
+      Sheet says {f(s.recv)} / {f(s.orig)} received · {f(s.rem)} open
+    </div>
+  );
+}
 function QtyBar({ rec, compact, openShown, onToggleOpen }) {
   if (rec.orig == null && rec.rem == null) return <span className="text-xs text-muted-fg">No quantities recorded</span>;
   const pct = rec.orig ? Math.min(100, Math.round(((rec.receivedQty ?? 0) / rec.orig) * 100)) : null;
@@ -317,6 +327,7 @@ function QtyBar({ rec, compact, openShown, onToggleOpen }) {
           {rec.vendorQty != null && rec.vendorQty !== rec.rem ? ` · vendor shows ${fmtNumber(rec.vendorQty)}` : ''}
         </div>
       )}
+      {!compact && rec.sheetDiffers && <SheetNote rec={rec} />}
     </div>
   );
 }
@@ -541,8 +552,28 @@ const PO_AMOUNTS_SQL = `
 WITH l AS (SELECT PONo, Seq, MAX(QtyOrd) AS qo, SUM(ISNULL(QtyRecd, 0)) AS qr, MAX(ISNULL(ItemCost, 0)) AS cost
            FROM PORecvDtls GROUP BY PONo, Seq)
 SELECT PONo, SUM(qo * cost) AS OrdAmt, SUM((CASE WHEN qr > qo THEN qo ELSE qr END) * cost) AS RecvAmt,
-       SUM(CASE WHEN cost = 0 THEN 1 ELSE 0 END) AS NoCostLines, COUNT(*) AS Lines
+       SUM(CASE WHEN cost = 0 THEN 1 ELSE 0 END) AS NoCostLines, COUNT(*) AS Lines,
+       SUM(qo) AS QtyOrd, SUM(CASE WHEN qr > qo THEN qo ELSE qr END) AS QtyRecv
 FROM l GROUP BY PONo`;
+
+// The system's receiving data is the truth for quantities — the sheet is
+// updated by hand and often lags. When the system has the PO, its ordered /
+// received / open units replace the sheet's (kept in `sheetQty` for a note),
+// and the received status and lateness are re-derived from them.
+function applySystemQty(rec, sys) {
+  const sheetQty = { orig: rec.orig, recv: rec.receivedQty, rem: rec.rem };
+  if (!sys || !(sys.ord > 0)) return { ...rec, sheetQty, qtySrc: 'sheet' };
+  const orig = sys.ord, receivedQty = Math.min(sys.recv, sys.ord), rem = Math.max(0, sys.ord - sys.recv);
+  const t0 = today0();
+  const timing = rem === 0 ? 'received'
+    : rec.eta == null ? 'noeta' : rec.etaDays < 0 ? 'passed' : rec.etaDays <= 14 ? 'soon' : 'ontrack';
+  return {
+    ...rec, orig, receivedQty, rem, timing, sheetQty, qtySrc: 'system',
+    sheetDiffers: sheetQty.orig !== orig || sheetQty.rem !== rem,
+    lateVsTarget: rec.eta && rec.target && rem > 0 ? daysBetween(rec.eta, rec.target) : null,
+    etaDays: rec.eta ? daysBetween(rec.eta, t0) : null,
+  };
+}
 // US dollars, whole amounts: 8229.4 → "$8,229".
 const USD = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
 const money = (n) => USD.format(Number(n) || 0);
@@ -558,8 +589,9 @@ function POItems({ rec, q, view, setView, sectionRef }) {
   const tot = useMemo(() => lines.reduce((t, l) => ({ ordered: t.ordered + l.ordered, received: t.received + l.received, open: t.open + l.open }), { ordered: 0, received: 0, open: 0 }), [lines]);
   const totAmt = useMemo(() => lines.reduce((t, l) => ({ ordered: t.ordered + l.ordered * l.cost, received: t.received + l.received * l.cost, open: t.open + l.open * l.cost }), { ordered: 0, received: 0, open: 0 }), [lines]);
   const shown = lines.filter(ITEM_VIEWS[view]?.test || (() => true));
+  const sheet = rec.sheetQty || { orig: rec.orig, recv: rec.receivedQty, rem: rec.rem };
   const differs = lines.length > 0 && (
-    (rec.orig != null && rec.orig !== tot.ordered) || (rec.rem != null && rec.rem !== tot.open));
+    (sheet.orig != null && sheet.orig !== tot.ordered) || (sheet.rem != null && sheet.rem !== tot.open));
   const th = 'px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-muted-fg';
   const statusChip = (l) => (
     <span className={cn('inline-flex whitespace-nowrap rounded-full px-1.5 py-px text-[10px] font-bold',
@@ -608,8 +640,8 @@ function POItems({ rec, q, view, setView, sectionRef }) {
 
           {differs && (
             <div className="mb-3 rounded-lg bg-amber-50 px-3 py-1.5 text-[11px] text-amber-800 dark:bg-amber-950 dark:text-amber-200">
-              System shows {fmtNumber(tot.ordered)} ordered · {fmtNumber(tot.received)} received · {fmtNumber(tot.open)} open
-              {' '}(sheet: {rec.orig != null ? fmtNumber(rec.orig) : '—'} · {rec.receivedQty != null ? fmtNumber(rec.receivedQty) : '—'} · {rec.rem != null ? fmtNumber(rec.rem) : '—'}). The sheet may be behind.
+              The PO SCRUB sheet still says {sheet.recv != null ? fmtNumber(sheet.recv) : '—'} received · {sheet.rem != null ? fmtNumber(sheet.rem) : '—'} open
+              {' '}(of {sheet.orig != null ? fmtNumber(sheet.orig) : '—'}). The system shows {fmtNumber(tot.received)} received · {fmtNumber(tot.open)} open — the sheet needs updating.
             </div>
           )}
 
@@ -897,6 +929,11 @@ function PODrawer({ rec, sheetUrl, onClose }) {
   const s = STATUS[rec.status] || STATUS.none;
 
   // Big number cards — Ordered / Received / Still open open the item list.
+  // "Sheet says 5" under a number when the hand-kept sheet disagrees with the system.
+  const sheetHint = (k, shown) => {
+    const v = rec.sheetQty?.[k];
+    return rec.qtySrc === 'system' && v != null && v !== shown ? `Sheet says ${fmtNumber(v)}` : null;
+  };
   const stat = (label, value, tone, itemsKey, hint, amt) => {
     const clickable = itemsKey && poNum != null;
     const body = (
@@ -907,6 +944,7 @@ function PODrawer({ rec, sheetUrl, onClose }) {
         <div className="mt-2 flex items-center gap-0.5 text-[11px] font-semibold text-muted-fg">
           {clickable ? <span className="inline-flex items-center gap-0.5 text-primary">View items <ChevronRight size={12} /></span> : hint}
         </div>
+        {clickable && hint && <div className="mt-1 text-[10px] text-muted-fg">{hint}</div>}
       </>
     );
     return clickable ? (
@@ -976,9 +1014,9 @@ function PODrawer({ rec, sheetUrl, onClose }) {
 
       {/* Quantity cards */}
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        {stat('Ordered', rec.orig != null ? fmtNumber(rec.orig) : '—', '', 'ordered', null, rec.amount ? money(rec.amount.ord) : null)}
-        {stat('Received', rec.receivedQty != null ? fmtNumber(rec.receivedQty) : '—', 'text-emerald-600 dark:text-emerald-300', 'received', null, rec.amount ? money(rec.amount.recv) : null)}
-        {stat('Still open', rec.rem != null ? fmtNumber(rec.rem) : '—', rec.qtyFlagged ? 'text-rose-600 dark:text-rose-300' : rec.rem ? 'text-amber-600 dark:text-amber-300' : '', 'open', null, rec.amount ? money(rec.amount.open) : null)}
+        {stat('Ordered', rec.orig != null ? fmtNumber(rec.orig) : '—', '', 'ordered', sheetHint('orig', rec.orig), rec.amount ? money(rec.amount.ord) : null)}
+        {stat('Received', rec.receivedQty != null ? fmtNumber(rec.receivedQty) : '—', 'text-emerald-600 dark:text-emerald-300', 'received', sheetHint('recv', rec.receivedQty), rec.amount ? money(rec.amount.recv) : null)}
+        {stat('Still open', rec.rem != null ? fmtNumber(rec.rem) : '—', rec.qtyFlagged ? 'text-rose-600 dark:text-rose-300' : rec.rem ? 'text-amber-600 dark:text-amber-300' : '', 'open', sheetHint('rem', rec.rem), rec.amount ? money(rec.amount.open) : null)}
         {stat('On vendor site', rec.vendorQty != null ? fmtNumber(rec.vendorQty) : '—', '', null, 'as shown on the vendor portal')}
       </div>
 
@@ -1198,14 +1236,21 @@ export default function POScrubReport() {
     const m = new Map();
     for (const r of amountsQ.data?.rows || []) {
       const ord = Number(r.OrdAmt) || 0, recv = Number(r.RecvAmt) || 0;
-      m.set(String(r.PONo), { ord, recv, open: Math.max(0, ord - recv), partial: Number(r.NoCostLines) > 0, lines: Number(r.Lines) || 0 });
+      m.set(String(r.PONo), {
+        ord, recv, open: Math.max(0, ord - recv), partial: Number(r.NoCostLines) > 0, lines: Number(r.Lines) || 0,
+        qty: { ord: Number(r.QtyOrd) || 0, recv: Number(r.QtyRecv) || 0 },
+      });
     }
     return m;
   }, [amountsQ.data]);
   const allRecordsByTab = useMemo(() => sheets.map((s) => {
     try {
       return buildRecords(shapeSheet(s), cell(s?.name) || 'Vendor', s?.gid ?? null)
-        .map((r) => { const a = amountMap.get(cell(r.po)); return a && a.ord > 0 ? { ...r, amount: a } : r; });
+        .map((r) => {
+          const a = amountMap.get(cell(r.po));
+          const withQty = applySystemQty(r, a?.qty);
+          return a && a.ord > 0 ? { ...withQty, amount: a } : withQty;
+        });
     } catch { return []; }
   }), [sheets, amountMap]);
   // Everything below reads this filtered view, so the Stock / Special Order
