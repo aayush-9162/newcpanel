@@ -18,7 +18,7 @@ import { cn } from '@/lib/cn';
 import {
   FileSpreadsheet, Search, RefreshCw, AlertTriangle, Maximize2, Minimize2, CheckCircle2, Clock, Flag, Circle,
   Package, History, X, Truck, FileText, MessageSquare, ExternalLink, Layers, Hourglass, PackageCheck,
-  AlertCircle, CalendarClock, ChevronRight, Store, ArrowLeft, PhoneCall,
+  AlertCircle, CalendarClock, ChevronRight, ChevronDown, Store, ArrowLeft, PhoneCall,
 } from 'lucide-react';
 
 const cell = (c) => String(c ?? '').trim();
@@ -98,10 +98,33 @@ function parseNoteDates(s) {
 function today0() { const t = new Date(); t.setHours(0, 0, 0, 0); return t; }
 const daysBetween = (a, b) => Math.round((a - b) / 86400000);
 const fmtD = (d) => (d ? d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—');
+// The team thinks in weeks: 27 → "3 wks 6 days", 59 → "8 wks 3 days".
 function spanText(days) {
-  const a = Math.abs(days);
-  return a >= 60 ? `${Math.round(a / 30)} months` : `${a} day${a === 1 ? '' : 's'}`;
+  const a = Math.abs(Math.round(Number(days) || 0));
+  if (a < 7) return `${a} day${a === 1 ? '' : 's'}`;
+  const w = Math.floor(a / 7), d = a % 7;
+  return `${w} wk${w === 1 ? '' : 's'}${d ? ` ${d} day${d === 1 ? '' : 's'}` : ''}`;
 }
+// Whole weeks from the PO date to `d` (null when either date is missing).
+function weeksFromOrder(rec, d) {
+  if (!rec?.poDate || !d) return null;
+  const days = daysBetween(d, rec.poDate);
+  return Number.isFinite(days) ? { weeks: Math.round(days / 7), days } : null;
+}
+const weeksText = (rec, d) => { const w = weeksFromOrder(rec, d); return w && w.days >= 0 ? `${w.weeks} wk${w.weeks === 1 ? '' : 's'} from order` : null; };
+// "16 wks from order" tag shown after a date.
+function WeekTag({ rec, d }) {
+  const w = weeksFromOrder(rec, d);
+  const text = weeksText(rec, d);
+  if (!text) return null;
+  return (
+    <span className="ml-1 inline-flex items-center whitespace-nowrap rounded bg-indigo-50 px-1 py-px align-middle text-[10px] font-bold text-indigo-700 no-underline dark:bg-indigo-950 dark:text-indigo-200"
+      title={`${w.days} days after the PO date (${fmtD(rec.poDate)})`}>
+      {text}
+    </span>
+  );
+}
+const ymdDate = (s) => { const m = cell(s).match(/^(\d{4})-(\d{2})-(\d{2})/); return m ? new Date(+m[1], +m[2] - 1, +m[3]) : null; };
 function rel(days) {
   if (days == null) return '';
   if (days === 0) return 'today';
@@ -260,7 +283,7 @@ function TimingChip({ rec, big }) {
     : t.label;
   return <span className={cn('inline-flex items-center gap-1 whitespace-nowrap rounded-full font-bold ring-1', big ? 'px-2.5 py-1 text-xs' : 'px-2 py-0.5 text-[11px]', t.chip)}><Icon size={big ? 13 : 11} />{text}</span>;
 }
-function QtyBar({ rec, compact }) {
+function QtyBar({ rec, compact, openShown, onToggleOpen }) {
   if (rec.orig == null && rec.rem == null) return <span className="text-xs text-muted-fg">No quantities recorded</span>;
   const pct = rec.orig ? Math.min(100, Math.round(((rec.receivedQty ?? 0) / rec.orig) * 100)) : null;
   return (
@@ -278,7 +301,20 @@ function QtyBar({ rec, compact }) {
       )}
       {!compact && rec.rem != null && rec.rem > 0 && (
         <div className={cn('mt-1 text-[11px] font-semibold', rec.qtyFlagged ? 'text-rose-600 dark:text-rose-300' : 'text-fg/80')}>
-          {fmtNumber(rec.rem)} still open{rec.vendorQty != null && rec.vendorQty !== rec.rem ? ` · vendor shows ${fmtNumber(rec.vendorQty)}` : ''}
+          {onToggleOpen ? (
+            <button type="button" aria-expanded={!!openShown}
+              onClick={(e) => { e.stopPropagation(); onToggleOpen(); }}
+              onKeyDown={(e) => e.stopPropagation()}
+              title={openShown ? 'Hide the open items' : 'Show which items are still open'}
+              className={cn('inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 transition',
+                openShown
+                  ? 'border-amber-400 bg-amber-100 text-amber-900 dark:border-amber-500/60 dark:bg-amber-900/50 dark:text-amber-100'
+                  : 'border-amber-300/70 bg-amber-50 text-amber-800 hover:border-amber-400 hover:bg-amber-100 dark:border-amber-500/40 dark:bg-amber-950/40 dark:text-amber-200')}>
+              {fmtNumber(rec.rem)} still open
+              <ChevronDown size={12} className={cn('transition-transform', openShown && 'rotate-180')} />
+            </button>
+          ) : <>{fmtNumber(rec.rem)} still open</>}
+          {rec.vendorQty != null && rec.vendorQty !== rec.rem ? ` · vendor shows ${fmtNumber(rec.vendorQty)}` : ''}
         </div>
       )}
     </div>
@@ -290,6 +326,8 @@ function POCard({ rec, showVendor, onOpen }) {
   const s = STATUS[rec.status] || STATUS.none;
   const open = () => onOpen(rec.key);
   const note = rec.remarks[0] || (rec.latest && !/^ok$/i.test(rec.latest.value) ? rec.latest.value : '');
+  const [openShown, setOpenShown] = useState(false);
+  const origDate = rec.portEta || rec.vendorEta || rec.estDel;
   return (
     <div role="button" tabIndex={0} onClick={open} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } }}
       className={cn('grid cursor-pointer grid-cols-1 gap-3 rounded-xl border border-l-4 border-border bg-card p-3.5 transition hover:border-primary/40 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-primary/30 md:grid-cols-2 xl:grid-cols-12', s.stripe)}>
@@ -301,8 +339,8 @@ function POCard({ rec, showVendor, onOpen }) {
           {showVendor && <span className="rounded-md bg-primary/10 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-primary">{rec.vendor}</span>}
           {needsVendorCall(rec) && (
             <span className="inline-flex items-center gap-1 rounded-md bg-orange-100 px-1.5 py-0.5 text-[10px] font-bold text-orange-700 dark:bg-orange-900/40 dark:text-orange-200"
-              title={`Open ${rec.ageDays} days since the PO date — follow up with the vendor`}>
-              <PhoneCall size={10} /> Follow up · {rec.ageDays} days
+              title={`Open ${spanText(rec.ageDays)} since the PO date — follow up with the vendor`}>
+              <PhoneCall size={10} /> Follow up · {spanText(rec.ageDays)}
             </span>
           )}
         </div>
@@ -315,13 +353,13 @@ function POCard({ rec, showVendor, onOpen }) {
           {rec.acks.length
             ? <>ACK <b className="text-fg/80">{rec.acks[0]}</b>{rec.acks.length > 1 && ` +${rec.acks.length - 1}`}</>
             : <span className="font-semibold text-violet-600 dark:text-violet-300">Awaiting ACK</span>}
-          {rec.poDate && <> · ordered {fmtD(rec.poDate)}</>}
+          {rec.poDate && <> · ordered {fmtD(rec.poDate)}{rec.ageDays > 0 && <span className="whitespace-nowrap"> ({spanText(rec.ageDays)} ago)</span>}</>}
         </div>
       </div>
 
       {/* Quantity */}
       <div className="xl:col-span-3">
-        <QtyBar rec={rec} />
+        <QtyBar rec={rec} openShown={openShown} onToggleOpen={() => setOpenShown((v) => !v)} />
         {rec.amount && rec.amount.open > 0 && <div className="mt-0.5 text-[11px] text-muted-fg"><b className="text-fg/80">{money(rec.amount.open)}</b> worth still to receive</div>}
       </div>
 
@@ -331,14 +369,18 @@ function POCard({ rec, showVendor, onOpen }) {
         {rec.eta && (
           <div className={cn('mt-1.5 text-[12px]', rec.etaFlagged && !rec.etaUpdated && 'font-semibold text-rose-600 dark:text-rose-300')} title={rec.etaNote || undefined}>
             <span className="text-muted-fg">{rec.etaSrc}:</span> <b>{fmtD(rec.eta)}</b>
+            <WeekTag rec={rec} d={rec.eta} />
           </div>
         )}
-        {rec.etaUpdated && (rec.vendorEta || rec.portEta || rec.estDel) && (
-          <div className="text-[10px] text-muted-fg">original date {fmtD(rec.portEta || rec.vendorEta || rec.estDel)}</div>
+        {rec.etaUpdated && origDate && (
+          <div className="text-[10px] text-muted-fg">original date {fmtD(origDate)}{weeksText(rec, origDate) ? ` · ${weeksText(rec, origDate)}` : ''}</div>
         )}
         {rec.lateVsTarget != null && (rec.lateVsTarget > 0
           ? <div className="mt-0.5 text-[11px] font-semibold text-rose-600 dark:text-rose-300">{spanText(rec.lateVsTarget)} later than target</div>
           : <div className="mt-0.5 text-[11px] text-emerald-700 dark:text-emerald-300">Within target{rec.targetWeeks ? ` (${rec.targetWeeks} wk)` : ''}</div>)}
+        {rec.target && rec.timing !== 'received' && (
+          <div className="mt-0.5 text-[10px] text-muted-fg">Target {fmtD(rec.target)}{weeksText(rec, rec.target) ? ` · ${weeksText(rec, rec.target)}` : ''}</div>
+        )}
       </div>
 
       {/* Activity */}
@@ -352,6 +394,73 @@ function POCard({ rec, showVendor, onOpen }) {
         </div>
         {note && <p className="mt-1.5 line-clamp-2 text-[12px] text-fg/80" title={rec.remarks.join('\n') || note}>{note}</p>}
       </div>
+
+      {openShown && <OpenItemsPanel rec={rec} onOpen={open} />}
+    </div>
+  );
+}
+
+// The items still open on a PO (live from the system), shown inside the card
+// when "N still open" is clicked. Shares its cache with the PO detail page.
+function OpenItemsPanel({ rec, onOpen }) {
+  const poNum = /^\d+$/.test(cell(rec?.po)) ? Number(cell(rec.po)) : null;
+  const q = useSqlQuery(PO_ITEMS_SQL, [poNum], { enabled: poNum != null, staleTime: 5 * 60 * 1000 });
+  const lines = useMemo(() => aggregatePoLines(q.data?.rows).filter((l) => l.open > 0), [q.data]);
+  const totalOpen = lines.reduce((t, l) => t + l.open, 0);
+  const stop = (e) => e.stopPropagation();
+  return (
+    <div onClick={stop} onKeyDown={stop} role="presentation"
+      className="col-span-full cursor-default rounded-lg border border-amber-300/60 bg-amber-50/50 p-3 dark:border-amber-500/30 dark:bg-amber-950/20">
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-amber-800 dark:text-amber-200">
+          <Package size={13} /> Still open on PO {rec.po}
+          {lines.length > 0 && (
+            <span className="rounded-full bg-amber-200/70 px-1.5 normal-case tracking-normal tabular-nums text-amber-900 dark:bg-amber-800/60 dark:text-amber-100">
+              {fmtNumber(totalOpen)} unit{totalOpen === 1 ? '' : 's'} · {lines.length} line{lines.length === 1 ? '' : 's'}
+            </span>
+          )}
+          <LiveBadge />
+        </div>
+        <button type="button" onClick={onOpen} className="inline-flex items-center gap-0.5 text-[11px] font-semibold text-primary hover:underline">
+          Full PO details <ChevronRight size={12} />
+        </button>
+      </div>
+      {poNum == null ? (
+        <div className="text-[12px] text-muted-fg">This PO number can't be looked up in the system.</div>
+      ) : q.isLoading ? (
+        <div className="flex items-center gap-2 py-2 text-[12px] text-muted-fg">
+          <div className="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent" /> Loading open items…
+        </div>
+      ) : q.error ? (
+        <div className="text-[12px] text-amber-700 dark:text-amber-300">Couldn't load items: {q.error.message}</div>
+      ) : lines.length === 0 ? (
+        <div className="text-[12px] text-muted-fg">The system shows nothing still open on this PO — it may already be received there (the sheet may be behind).</div>
+      ) : (
+        <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+          {lines.map((l) => {
+            const due = ymdDate(l.due);
+            return (
+              <div key={l.seq} className="flex gap-3 rounded-lg border border-border bg-card px-3 py-2 shadow-sm">
+                <div className="flex w-12 shrink-0 flex-col items-center justify-center rounded-md bg-amber-100 py-1 text-amber-800 dark:bg-amber-900/50 dark:text-amber-200"
+                  title={`${l.open} still open of ${l.ordered} ordered`}>
+                  <span className="text-lg font-extrabold leading-none tabular-nums">{fmtNumber(l.open)}</span>
+                  <span className="text-[9px] font-semibold">of {fmtNumber(l.ordered)}</span>
+                </div>
+                <div className="min-w-0 flex-1 text-[12px]">
+                  <div className="truncate font-semibold leading-snug" title={l.desc2 || l.desc1}>{l.desc2 || l.desc1 || l.itemId}</div>
+                  <div className="truncate text-[11px] text-muted-fg">{l.desc2 ? l.desc1 : ''}{l.itemId && <> · <span className="font-mono">#{l.itemId}</span></>}</div>
+                  <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[11px]">
+                    {l.so > 0
+                      ? <span><b className="text-fg/80">{l.customer || 'Customer'}</b> <span className="text-muted-fg">· SO {l.so}</span></span>
+                      : <span className="text-muted-fg">Stock</span>}
+                    {due && <span className="text-muted-fg">Due <b className="text-fg/80">{fmtD(due)}</b><WeekTag rec={rec} d={due} /></span>}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
@@ -559,7 +668,7 @@ function POItems({ rec, q, view, setView, sectionRef }) {
                       </>}
                       {view === 'open' && <>
                         <td className="px-3 py-2 text-right font-bold tabular-nums text-amber-600 dark:text-amber-300">{fmtNumber(l.open)}<span className="text-[10px] font-medium text-muted-fg"> / {fmtNumber(l.ordered)}</span></td>
-                        <td className="whitespace-nowrap px-3 py-2">{l.due ? fmtYmd(l.due) : '—'}</td>
+                        <td className="whitespace-nowrap px-3 py-2">{l.due ? fmtYmd(l.due) : '—'}{ymdDate(l.due) && <WeekTag rec={rec} d={ymdDate(l.due)} />}</td>
                       </>}
                     </tr>
                   ))}
@@ -852,10 +961,12 @@ function PODrawer({ rec, sheetUrl, onClose }) {
               rec.amount ? (rec.amount.partial ? 'some lines have no cost' : 'PO cost value') : 'no cost in system',
               rec.amount ? 'text-emerald-700 dark:text-emerald-300' : '')}
             {fact('Acknowledgement', rec.acks.length ? rec.acks[0] : 'Awaiting ACK', rec.acks.length > 1 ? `+${rec.acks.length - 1} more` : null, rec.acks.length ? '' : 'text-violet-600 dark:text-violet-300')}
-            {fact('Ordered on', rec.poDate ? fmtD(rec.poDate) : '—', rec.ageDays != null ? `${fmtNumber(rec.ageDays)} days ago` : null)}
-            {fact('Expected', rec.eta ? fmtD(rec.eta) : 'No ETA', rec.etaSrc || null, rec.etaFlagged && !rec.etaUpdated ? 'text-rose-600 dark:text-rose-300' : '')}
+            {fact('Ordered on', rec.poDate ? fmtD(rec.poDate) : '—', rec.ageDays != null ? `${spanText(rec.ageDays)} ago` : null)}
+            {fact('Expected', rec.eta ? fmtD(rec.eta) : 'No ETA',
+              [weeksText(rec, rec.eta), rec.etaSrc].filter(Boolean).join(' · ') || null,
+              rec.etaFlagged && !rec.etaUpdated ? 'text-rose-600 dark:text-rose-300' : '')}
             {fact('Target', rec.target ? fmtD(rec.target) : '—',
-              rec.lateVsTarget == null ? (rec.targetWeeks ? `PO + ${rec.targetWeeks} weeks` : null)
+              rec.lateVsTarget == null ? (rec.targetWeeks ? `${rec.targetWeeks} wks from order` : null)
                 : rec.lateVsTarget > 0 ? `${spanText(rec.lateVsTarget)} later than target` : 'within target',
               rec.lateVsTarget > 0 ? 'text-rose-600 dark:text-rose-300' : '')}
           </dl>
@@ -886,6 +997,7 @@ function PODrawer({ rec, sheetUrl, onClose }) {
                       <div className={cn('text-[11px] font-semibold', m.current ? 'text-emerald-700 dark:text-emerald-300' : 'text-muted-fg')}>{m.label}</div>
                       <div className={cn('text-sm font-bold', m.flagged && 'text-rose-600 dark:text-rose-300', m.superseded && 'font-medium text-muted-fg line-through decoration-1')}>
                         {fmtD(m.date)} <span className="text-[11px] font-medium text-muted-fg no-underline">· {rel(d)}</span>
+                        {!m.placed && <WeekTag rec={rec} d={m.date} />}
                       </div>
                       {m.note && <div className="mt-0.5 text-[11px] italic text-muted-fg">“{m.note}”</div>}
                     </li>
@@ -1008,7 +1120,7 @@ const needsVendorCall = (r) => r.ageDays != null && r.ageDays > CALL_VENDOR_DAYS
 
 const VIEWS = [
   { key: 'all', label: 'All POs' },
-  { key: 'soon', label: 'Arriving ≤ 14 days', test: (r) => r.timing === 'soon' },
+  { key: 'soon', label: 'Arriving ≤ 2 wks', test: (r) => r.timing === 'soon' },
   { key: 'noack', label: 'Awaiting ACK', test: (r) => !r.acks.length && r.timing !== 'received' },
   { key: 'callvendor', label: 'Vendor follow-up', test: needsVendorCall },
   { key: 'noeta', label: 'No ETA', test: (r) => r.timing === 'noeta' },
@@ -1272,7 +1384,7 @@ export default function POScrubReport() {
             <div className="grid shrink-0 grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-6">
               {kpi('all', `${scopeName} · Open POs`, fmtNumber(stats.open), Package, 'text-muted-fg', `of ${fmtNumber(stats.total)} total`)}
               {kpi('c:flag', 'Flagged', fmtNumber(stats.flagged), Flag, 'text-rose-600 dark:text-rose-300', 'marked red in sheet')}
-              {kpi('soon', 'Arriving ≤ 14 days', fmtNumber(stats.soon), Truck, 'text-amber-600 dark:text-amber-300', 'plan receiving')}
+              {kpi('soon', 'Arriving ≤ 2 wks', fmtNumber(stats.soon), Truck, 'text-amber-600 dark:text-amber-300', 'plan receiving')}
               {kpi('noack', 'Awaiting ACK', fmtNumber(stats.noack), Hourglass, 'text-violet-600 dark:text-violet-300', 'no vendor ack yet')}
               {kpi('received', 'Fully received', fmtNumber(stats.received), PackageCheck, 'text-emerald-600 dark:text-emerald-300', 'remaining qty = 0')}
               <div className="rounded-xl border border-border bg-card p-3">
