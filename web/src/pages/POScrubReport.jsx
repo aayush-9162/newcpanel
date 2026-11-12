@@ -1290,7 +1290,7 @@ function FocusTimeline({ rec }) {
 }
 
 // One PO = one card: who, how much, what is wrong, and where it is in time.
-function FocusCard({ item, onOpen }) {
+function FocusCard({ item, onOpen, onItems }) {
   const { rec, reasons } = item;
   const top = reasons[0];
   const p = STAT_PALETTE[top.tone] || STAT_PALETTE.rose;
@@ -1321,7 +1321,16 @@ function FocusCard({ item, onOpen }) {
           </div>
           <div className="shrink-0 text-right">
             {rec.amount?.open > 0 && <div className="text-base font-extrabold leading-none tabular-nums">{money(rec.amount.open)}</div>}
-            {rec.rem != null && (
+            {rec.rem > 0 && onItems ? (
+              // Looks and works like a button: opens the list of open items.
+              <button type="button" title="See which items are still open"
+                onClick={(e) => { e.stopPropagation(); onItems(rec.key); }} onKeyDown={(e) => e.stopPropagation()}
+                className="mt-1.5 inline-flex items-center gap-1 whitespace-nowrap rounded-full border border-amber-400/80 bg-amber-50 py-0.5 pl-2 pr-1 text-[11px] font-semibold tabular-nums text-amber-800 shadow-sm transition hover:border-amber-500 hover:bg-amber-100 hover:shadow focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60 dark:border-amber-500/50 dark:bg-amber-950/60 dark:text-amber-200 dark:hover:bg-amber-900/60">
+                <Package size={11} />
+                <span><b>{fmtNumber(rec.rem)}</b>{rec.orig != null ? ` of ${fmtNumber(rec.orig)}` : ''} still open</span>
+                <span className="grid h-4 w-4 place-items-center rounded-full bg-amber-500 text-white"><ChevronRight size={11} strokeWidth={3} /></span>
+              </button>
+            ) : rec.rem != null && (
               <div className="mt-1 text-[11px] tabular-nums text-muted-fg">
                 <b className="text-fg/85">{fmtNumber(rec.rem)}</b>{rec.orig != null ? ` of ${fmtNumber(rec.orig)}` : ''} still open
               </div>
@@ -1349,10 +1358,115 @@ const FOCUS_SORTS = {
   oldest: { label: 'Oldest order', fn: (a, b) => (b.rec.ageDays ?? -1) - (a.rec.ageDays ?? -1) },
   eta:    { label: 'Expected soonest', fn: (a, b) => (a.rec.eta?.getTime() ?? 9e15) - (b.rec.eta?.getTime() ?? 9e15) },
 };
-const FOCUS_DEFAULT = { reason: 'all', vendor: 'all', type: 'both', q: '', sort: 'worst' };
+// Popup listing the items still open on a PO (live from the system), opened
+// from the "still open" button on a card. Shares its cache with the PO page.
+function OpenItemsModal({ rec, onClose, onOpen }) {
+  const poNum = /^\d+$/.test(cell(rec?.po)) ? Number(cell(rec.po)) : null;
+  const q = useSqlQuery(PO_ITEMS_SQL, [poNum], { enabled: poNum != null, staleTime: 5 * 60 * 1000 });
+  const lines = useMemo(() => aggregatePoLines(q.data?.rows).filter((l) => l.open > 0), [q.data]);
+  const totalOpen = lines.reduce((t, l) => t + l.open, 0);
+  const totalValue = lines.reduce((t, l) => t + l.open * (l.cost || 0), 0);
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onClose]);
+  const pill = 'rounded-full px-2 py-0.5 text-[11px] font-bold tabular-nums';
+  return (
+    <div role="dialog" aria-modal="true" aria-label={`Items still open on PO ${rec.po}`}
+      className="fixed inset-0 z-[60] flex animate-fade-in items-start justify-center overflow-y-auto bg-black/50 p-4 backdrop-blur-[2px] sm:items-center"
+      onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="flex max-h-[calc(100vh-2rem)] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-2xl">
+        {/* Which PO */}
+        <div className="relative shrink-0 border-b border-border px-5 py-4">
+          <div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-amber-500/20 via-amber-500/5 to-transparent" />
+          <div className="relative flex items-start gap-3">
+            <VendorLogo vendor={rec.vendor} className="h-11 w-16 rounded-lg p-1 shadow-sm" initialsClass="text-[13px]" />
+            <div className="min-w-0 flex-1">
+              <div className="text-[10px] font-bold uppercase tracking-widest text-amber-700 dark:text-amber-300">Still open</div>
+              <h3 className="text-lg font-extrabold leading-tight tracking-tight">PO {rec.po}</h3>
+              <div className="truncate text-[11px] font-semibold uppercase tracking-wide text-muted-fg">{rec.vendor}{rec.type ? ` · ${rec.type}` : ''}</div>
+            </div>
+            <button type="button" onClick={onClose} aria-label="Close" title="Close (Esc)"
+              className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-muted-fg transition hover:bg-muted hover:text-fg">
+              <X size={16} />
+            </button>
+          </div>
+          {lines.length > 0 && (
+            <div className="relative mt-3 flex flex-wrap items-center gap-2">
+              <span className={cn(pill, 'bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-200')}>{fmtNumber(totalOpen)} unit{totalOpen === 1 ? '' : 's'} still open</span>
+              <span className={cn(pill, 'bg-muted text-fg/80')}>{lines.length} item{lines.length === 1 ? '' : 's'}</span>
+              {totalValue > 0 && <span className={cn(pill, 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/50 dark:text-emerald-200')}>{money(totalValue)} to receive</span>}
+              <LiveBadge />
+            </div>
+          )}
+        </div>
+
+        {/* The open items */}
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5">
+          {poNum == null ? (
+            <div className="py-8 text-center text-[13px] text-muted-fg">This PO number can't be looked up in the system.</div>
+          ) : q.isLoading ? (
+            <div className="flex items-center justify-center gap-2 py-10 text-[13px] text-muted-fg">
+              <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent" /> Loading open items…
+            </div>
+          ) : q.error ? (
+            <div className="py-8 text-center text-[13px] text-amber-700 dark:text-amber-300">Couldn't load the items: {q.error.message}</div>
+          ) : lines.length === 0 ? (
+            <div className="py-8 text-center text-[13px] text-muted-fg">
+              The system shows nothing still open on this PO — it may already be received or closed there (the sheet may be behind).
+            </div>
+          ) : (
+            <ul className="divide-y divide-border/60">
+              {lines.map((l) => {
+                const due = ymdDate(l.due);
+                const lineValue = l.open * (l.cost || 0);
+                return (
+                  <li key={l.seq} className="flex items-start gap-3 py-3">
+                    <div className="flex w-14 shrink-0 flex-col items-center justify-center rounded-xl bg-amber-100 py-1.5 text-amber-800 dark:bg-amber-900/50 dark:text-amber-200"
+                      title={`${l.open} still open of ${l.ordered} ordered`}>
+                      <span className="text-xl font-extrabold leading-none tabular-nums">{fmtNumber(l.open)}</span>
+                      <span className="mt-0.5 text-[10px] font-semibold">of {fmtNumber(l.ordered)}</span>
+                    </div>
+                    <div className="min-w-0 flex-1 text-[12px]">
+                      <div className="font-semibold leading-snug">{l.desc2 || l.desc1 || l.itemId}</div>
+                      <div className="text-[11px] text-muted-fg">{l.desc2 ? l.desc1 : ''}{l.itemId && <>{l.desc2 && l.desc1 ? ' · ' : ''}<span className="font-mono">#{l.itemId}</span></>}</div>
+                      <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px]">
+                        {l.so > 0
+                          ? <span><b className="text-fg/85">{l.customer || 'Customer'}</b> <span className="text-muted-fg">· SO {l.so}</span></span>
+                          : <span className="rounded bg-muted px-1.5 py-px font-semibold text-muted-fg">Stock</span>}
+                        {due && <span className="text-muted-fg">Due <b className="text-fg/85">{fmtD(due)}</b><WeekTag rec={rec} d={due} /></span>}
+                      </div>
+                    </div>
+                    {lineValue > 0 && <div className="shrink-0 text-right text-sm font-extrabold tabular-nums">{money(lineValue)}</div>}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </div>
+
+        <div className="flex shrink-0 items-center justify-end gap-2 border-t border-border bg-muted/30 px-5 py-3">
+          <button type="button" onClick={onClose}
+            className="rounded-lg border border-border bg-card px-3 py-1.5 text-xs font-semibold text-fg/80 transition hover:bg-muted">Close</button>
+          <button type="button" onClick={() => onOpen(rec.key)}
+            className="inline-flex items-center gap-1 rounded-lg bg-primary px-3 py-1.5 text-xs font-bold text-primary-fg shadow-sm transition hover:opacity-90">
+            Full PO details <ChevronRight size={13} />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Special Order is the default order type for this view.
+const FOCUS_DEFAULT = { reason: 'all', vendor: 'all', type: 'so', q: '', sort: 'worst' };
 
 function FocusView({ allRecords, focus, setFocus, loading, error, onOpen, onRefresh, refreshing, fetchedAt }) {
   const set = (patch) => setFocus((f) => ({ ...f, ...patch }));
+  // PO whose still-open items are shown in the popup (null = closed).
+  const [itemsKey, setItemsKey] = useState(null);
+  const itemsRec = useMemo(() => (itemsKey ? allRecords.find((r) => r.key === itemsKey) || null : null), [allRecords, itemsKey]);
 
   const typed = useMemo(() => allRecords.filter((r) => matchOrderType(r, focus.type)), [allRecords, focus.type]);
   // Every PO with a problem, once, worst first (then biggest value, then oldest).
@@ -1500,15 +1614,20 @@ function FocusView({ allRecords, focus, setFocus, loading, error, onOpen, onRefr
         <div className="flex flex-col items-center gap-2 rounded-2xl border border-border bg-card py-14 text-center">
           <PackageCheck size={28} className="text-emerald-500" />
           <div className="text-sm font-semibold">Nothing needs action here</div>
-          {(filtered || focus.type !== 'both' || focus.q) && (
-            <button type="button" onClick={() => setFocus((f) => ({ ...FOCUS_DEFAULT, sort: f.sort }))} className="text-xs font-semibold text-primary hover:underline">Clear filters</button>
+          {(filtered || focus.q) && (
+            <button type="button" onClick={() => setFocus((f) => ({ ...FOCUS_DEFAULT, type: f.type, sort: f.sort }))} className="text-xs font-semibold text-primary hover:underline">Clear filters</button>
+          )}
+          {focus.type !== 'both' && !filtered && !focus.q && (
+            <button type="button" onClick={() => set({ type: 'both' })} className="text-xs font-semibold text-primary hover:underline">Show all order types</button>
           )}
         </div>
       ) : (
         <div className="grid gap-3 grid-cols-[repeat(auto-fill,minmax(min(400px,100%),1fr))]">
-          {list.map((s) => <FocusCard key={s.rec.key} item={s} onOpen={onOpen} />)}
+          {list.map((s) => <FocusCard key={s.rec.key} item={s} onOpen={onOpen} onItems={setItemsKey} />)}
         </div>
       )}
+
+      {itemsRec && <OpenItemsModal rec={itemsRec} onClose={() => setItemsKey(null)} onOpen={onOpen} />}
     </div>
   );
 }
