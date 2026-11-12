@@ -15,6 +15,10 @@ import { Card, CardContent } from '@/components/ui/Card';
 import { usePoScrubQuery, poScrubGet, useSqlQuery } from '@/lib/api';
 import { fmtNumber } from '@/lib/format';
 import { cn } from '@/lib/cn';
+import { HeroBanner, STAT_PALETTE } from '@/components/HeroStat';
+import { BrandLogo, InitialsBadge } from '@/components/BrandLogo';
+import { vendorDomain } from '@/data/vendorLogos';
+import { vendorLogoSrc } from '@/data/vendorLogoFiles';
 import {
   FileSpreadsheet, Search, RefreshCw, AlertTriangle, Maximize2, Minimize2, CheckCircle2, Clock, Flag, Circle,
   Package, History, X, Truck, FileText, MessageSquare, ExternalLink, Layers, Hourglass, PackageCheck,
@@ -1190,25 +1194,25 @@ function matchOrderType(r, k) {
 }
 
 // ── New design: "Needs action" focus view ────────────────────────────────────
-// One short table of only the POs somebody has to act on — each PO once, worst
-// first — with what is wrong and the few numbers needed to act. Healthy POs,
-// history, invoices and the rest stay in the current design and the PO page.
+// Only the POs somebody has to act on — each PO once, as a card — under a hero
+// that sums them up. Healthy POs, history, invoices and the rest stay in the
+// current design and on the PO page. Tones map to the shared HeroStat palette.
 const FOCUS_TONES = {
-  rose:   { chip: 'bg-rose-100 text-rose-700 dark:bg-rose-900/50 dark:text-rose-200',         text: 'text-rose-600 dark:text-rose-300',     bar: 'bg-rose-500' },
-  orange: { chip: 'bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-200', text: 'text-orange-600 dark:text-orange-300', bar: 'bg-orange-500' },
-  violet: { chip: 'bg-violet-100 text-violet-700 dark:bg-violet-900/50 dark:text-violet-200', text: 'text-violet-600 dark:text-violet-300', bar: 'bg-violet-500' },
-  slate:  { chip: 'bg-slate-200 text-slate-700 dark:bg-slate-800 dark:text-slate-200',        text: 'text-slate-500 dark:text-slate-300',   bar: 'bg-slate-400' },
+  rose:   { chip: 'bg-rose-100 text-rose-700 dark:bg-rose-900/50 dark:text-rose-200',         dot: 'bg-rose-500',   on: 'border-rose-500/60 ring-2 ring-rose-400/40' },
+  amber:  { chip: 'bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-200', dot: 'bg-orange-500', on: 'border-orange-500/60 ring-2 ring-orange-400/40' },
+  violet: { chip: 'bg-violet-100 text-violet-700 dark:bg-violet-900/50 dark:text-violet-200', dot: 'bg-violet-500', on: 'border-violet-500/60 ring-2 ring-violet-400/40' },
+  sky:    { chip: 'bg-sky-100 text-sky-700 dark:bg-sky-900/50 dark:text-sky-200',             dot: 'bg-sky-500',    on: 'border-sky-500/60 ring-2 ring-sky-400/40' },
 };
 const isOpenPO = (r) => r.timing !== 'received';
 // The problems, in priority order — a PO sorts by its first matching one.
 const FOCUS_REASONS = [
   { key: 'flag', label: 'Flagged', short: 'Flagged', title: 'Marked red in the sheet', icon: Flag, tone: 'rose',
     test: (r) => r.status === 'flag' },
-  { key: 'followup', label: 'Vendor follow-up', short: 'Follow-up', title: `Open more than ${CALL_VENDOR_DAYS} days — follow up with the vendor`, icon: PhoneCall, tone: 'orange',
+  { key: 'followup', label: 'Vendor follow-up', short: 'Follow-up', title: `Open more than ${CALL_VENDOR_DAYS} days — follow up with the vendor`, icon: PhoneCall, tone: 'amber',
     test: needsVendorCall },
   { key: 'noack', label: 'Awaiting ACK', short: 'No ACK', title: 'The vendor has not acknowledged this PO', icon: Hourglass, tone: 'violet',
     test: (r) => isOpenPO(r) && !r.acks.length },
-  { key: 'noeta', label: 'No ETA', short: 'No ETA', title: 'No expected date anywhere in the sheet', icon: AlertCircle, tone: 'slate',
+  { key: 'noeta', label: 'No ETA', short: 'No ETA', title: 'No expected date anywhere in the sheet', icon: AlertCircle, tone: 'sky',
     test: (r) => r.timing === 'noeta' },
 ];
 const reasonsOf = (r) => FOCUS_REASONS.filter((x) => { try { return x.test(r); } catch { return false; } });
@@ -1232,79 +1236,123 @@ function focusDetail(rec, top) {
     if (note) return { main: note, sub: '' };
   } catch { /* fall through to the default text */ }
   const fallback = { flag: 'Marked red in the sheet', followup: 'No remarks in the sheet yet', noack: 'No acknowledgement from the vendor yet', noeta: 'No expected date in the sheet' };
-  return { main: '', sub: fallback[top?.key] || '' };
+  return { main: fallback[top?.key] || '', sub: '' };
 }
 
-// Shared column template for the table header and its rows.
-const FOCUS_GRID = 'md:grid-cols-[112px_150px_minmax(0,1fr)_84px_96px_118px_14px]';
-
-function FocusRow({ item, showVendor, onOpen }) {
-  const { rec, reasons } = item;
-  const top = reasons[0];
-  const d = focusDetail(rec, top);
-  const sub = [showVendor && rec.vendor, rec.type].filter(Boolean).join(' · ');
-  const open = () => onOpen(rec.key);
+// Vendor logo on a white tile, initials when we have no logo for the vendor.
+function VendorLogo({ vendor, className, initialsClass }) {
+  let src = null;
+  try { src = vendorLogoSrc(vendorDomain(vendor)); } catch { src = null; }
   return (
-    <div role="button" tabIndex={0} onClick={open} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } }}
-      className={cn('group relative grid cursor-pointer grid-cols-1 gap-x-3 gap-y-1 px-4 py-2 transition hover:bg-muted/50 focus:outline-none focus-visible:bg-muted/60 md:items-center',
-        FOCUS_GRID)}>
-      <span className={cn('absolute inset-y-0 left-0 w-[3px]', FOCUS_TONES[top.tone].bar)} />
-      <div className="min-w-0">
-        <div className="text-[13px] font-extrabold tracking-tight text-primary">PO {rec.po}</div>
-        {sub && <div className="truncate text-[11px] uppercase tracking-wide text-muted-fg">{sub}</div>}
-      </div>
+    <span className={cn('grid shrink-0 place-items-center overflow-hidden bg-white ring-1 ring-black/5', className)}>
+      <BrandLogo src={src} name={vendor}
+        fallback={<InitialsBadge name={vendor} className={cn('grid h-full w-full place-items-center font-extrabold text-slate-500', initialsClass)} />} />
+    </span>
+  );
+}
 
-      <div className="flex flex-wrap gap-1">
-        {reasons.map((x) => {
-          const Icon = x.icon;
-          return (
-            <span key={x.key} title={x.title} className={cn('inline-flex items-center gap-1 whitespace-nowrap rounded px-1.5 py-0.5 text-[10px] font-bold', FOCUS_TONES[x.tone].chip)}>
-              <Icon size={10} /> {x.short}
-            </span>
-          );
-        })}
-      </div>
-
-      <div className="min-w-0 text-[12px] leading-snug">
-        {d.main && <div className="truncate font-medium text-fg/90" title={d.main}>{d.main}</div>}
-        {d.sub && <div className="truncate text-[11px] text-muted-fg" title={d.sub}>{d.sub}</div>}
-      </div>
-
-      <div className="text-[12px] tabular-nums md:text-right">
-        {rec.rem != null
-          ? <div><b>{fmtNumber(rec.rem)}</b>{rec.orig != null && <span className="text-muted-fg"> of {fmtNumber(rec.orig)}</span>}</div>
-          : <div className="text-muted-fg">—</div>}
-        {rec.amount?.open > 0 && <div className="text-[11px] text-muted-fg">{money(rec.amount.open)}</div>}
-      </div>
-
-      <div className="text-[12px]">
-        {rec.poDate ? (
+// Order → today → expected, as one bar: the filled part is the time already gone.
+function FocusTimeline({ rec }) {
+  const hasPo = !!rec.poDate, hasEta = !!rec.eta;
+  let pct = null; let passed = false;
+  if (hasPo && hasEta) {
+    const total = daysBetween(rec.eta, rec.poDate);
+    const gone = daysBetween(today0(), rec.poDate);
+    passed = rec.etaDays < 0;
+    pct = total > 0 ? Math.max(3, Math.min(100, (gone / total) * 100)) : 100;
+  }
+  const wks = hasEta ? weeksText(rec, rec.eta) : null;
+  return (
+    <div className="mt-auto pt-3">
+      <div className={cn('relative h-1.5 rounded-full', hasEta
+        ? 'bg-black/[0.08] dark:bg-white/10'
+        : 'bg-[repeating-linear-gradient(90deg,rgba(120,120,120,0.35)_0,rgba(120,120,120,0.35)_6px,transparent_6px,transparent_12px)]')}>
+        {pct != null && (
           <>
-            <div className="font-semibold">{wkShort(rec.ageDays)} ago</div>
-            <div className="text-[11px] text-muted-fg">{fmtD(rec.poDate)}</div>
+            <div className={cn('absolute inset-y-0 left-0 rounded-full', passed ? 'bg-rose-500' : 'bg-primary')} style={{ width: `${pct}%` }} />
+            <span title="Today" className={cn('absolute top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white shadow dark:border-slate-900', passed ? 'bg-rose-500' : 'bg-primary')}
+              style={{ left: `${pct}%` }} />
           </>
-        ) : <span className="text-muted-fg">—</span>}
+        )}
       </div>
-
-      <div className="text-[12px]">
-        {rec.eta ? (
-          <>
-            <div className="font-semibold">{fmtD(rec.eta)}</div>
-            {weeksText(rec, rec.eta) && <div className="text-[11px] text-muted-fg">{weeksText(rec, rec.eta)}</div>}
-          </>
-        ) : <span className="text-muted-fg">No ETA</span>}
+      <div className="mt-1.5 flex items-baseline justify-between gap-3 text-[11px] text-muted-fg">
+        <span className="min-w-0 truncate">
+          {hasPo ? <>Ordered <b className="text-fg/85">{wkShort(rec.ageDays)} ago</b> · {fmtD(rec.poDate)}</> : 'Order date not set'}
+        </span>
+        <span className="shrink-0 text-right">
+          {hasEta
+            ? <>Expected <b className="text-fg/85">{fmtD(rec.eta)}</b>{wks ? ` · ${wks}` : ''}</>
+            : <b className="text-sky-600 dark:text-sky-300">No expected date</b>}
+        </span>
       </div>
-
-      <ChevronRight size={15} className="hidden shrink-0 text-muted-fg transition group-hover:translate-x-0.5 group-hover:text-primary md:block" />
     </div>
   );
 }
 
-const FOCUS_DEFAULT = { reason: 'all', type: 'both', q: '', group: 'priority' };
+// One PO = one card: who, how much, what is wrong, and where it is in time.
+function FocusCard({ item, onOpen }) {
+  const { rec, reasons } = item;
+  const top = reasons[0];
+  const p = STAT_PALETTE[top.tone] || STAT_PALETTE.rose;
+  const TopIcon = top.icon;
+  const d = focusDetail(rec, top);
+  const open = () => onOpen(rec.key);
+  return (
+    <div role="button" tabIndex={0} onClick={open} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } }}
+      className={cn('group relative animate-fade-in cursor-pointer overflow-hidden rounded-2xl border bg-card transition-all duration-200',
+        'hover:-translate-y-0.5 hover:shadow-[0_16px_32px_-16px_rgba(0,0,0,0.35)] focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40', p.border)}>
+      <div className={cn('pointer-events-none absolute inset-0 bg-gradient-to-br opacity-60', p.surface)} />
+      <div className="relative flex h-full flex-col p-3.5">
+        <div className="flex items-start gap-3">
+          <VendorLogo vendor={rec.vendor} className="h-10 w-14 rounded-lg p-1 shadow-sm" initialsClass="text-[12px]" />
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+              <span className="text-[15px] font-extrabold leading-none tracking-tight">PO {rec.po}</span>
+              {reasons.map((x) => {
+                const Icon = x.icon;
+                return (
+                  <span key={x.key} title={x.title} className={cn('inline-flex items-center gap-1 whitespace-nowrap rounded-md px-1.5 py-0.5 text-[10px] font-bold', FOCUS_TONES[x.tone].chip)}>
+                    <Icon size={10} /> {x.short}
+                  </span>
+                );
+              })}
+            </div>
+            <div className="mt-1 truncate text-[11px] font-semibold uppercase tracking-wide text-muted-fg">{rec.vendor}{rec.type ? ` · ${rec.type}` : ''}</div>
+          </div>
+          <div className="shrink-0 text-right">
+            {rec.amount?.open > 0 && <div className="text-base font-extrabold leading-none tabular-nums">{money(rec.amount.open)}</div>}
+            {rec.rem != null && (
+              <div className="mt-1 text-[11px] tabular-nums text-muted-fg">
+                <b className="text-fg/85">{fmtNumber(rec.rem)}</b>{rec.orig != null ? ` of ${fmtNumber(rec.orig)}` : ''} still open
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="mt-3 min-w-0">
+          <div className="flex items-center gap-1.5 text-[12.5px] font-semibold leading-snug">
+            <TopIcon size={13} className={cn('shrink-0', p.text)} />
+            <span className="truncate" title={d.main}>{d.main}</span>
+          </div>
+          {d.sub && <div className="mt-0.5 truncate pl-[19px] text-[11px] text-muted-fg" title={d.sub}>{d.sub}</div>}
+        </div>
+
+        <FocusTimeline rec={rec} />
+      </div>
+    </div>
+  );
+}
+
+const FOCUS_SORTS = {
+  worst:  { label: 'Worst first', fn: () => 0 },   // the list is already built worst-first
+  value:  { label: 'Highest value', fn: (a, b) => (b.rec.amount?.open ?? 0) - (a.rec.amount?.open ?? 0) },
+  oldest: { label: 'Oldest order', fn: (a, b) => (b.rec.ageDays ?? -1) - (a.rec.ageDays ?? -1) },
+  eta:    { label: 'Expected soonest', fn: (a, b) => (a.rec.eta?.getTime() ?? 9e15) - (b.rec.eta?.getTime() ?? 9e15) },
+};
+const FOCUS_DEFAULT = { reason: 'all', vendor: 'all', type: 'both', q: '', sort: 'worst' };
 
 function FocusView({ allRecords, focus, setFocus, loading, error, onOpen, onRefresh, refreshing, fetchedAt }) {
   const set = (patch) => setFocus((f) => ({ ...f, ...patch }));
-  const byVendor = focus.group === 'vendor';
 
   const typed = useMemo(() => allRecords.filter((r) => matchOrderType(r, focus.type)), [allRecords, focus.type]);
   // Every PO with a problem, once, worst first (then biggest value, then oldest).
@@ -1318,20 +1366,22 @@ function FocusView({ allRecords, focus, setFocus, loading, error, onOpen, onRefr
       .sort((a, b) => rank(a) - rank(b) || (b.rec.amount?.open ?? 0) - (a.rec.amount?.open ?? 0) || (b.rec.ageDays ?? 0) - (a.rec.ageDays ?? 0));
   }, [typed, focus.q]);
   const counts = useMemo(() => Object.fromEntries(FOCUS_REASONS.map((x) => [x.key, scoped.filter((s) => hasReason(s, x.key)).length])), [scoped]);
-  const list = useMemo(() => (focus.reason === 'all' ? scoped : scoped.filter((s) => hasReason(s, focus.reason))), [scoped, focus.reason]);
+  const byReason = useMemo(() => (focus.reason === 'all' ? scoped : scoped.filter((s) => hasReason(s, focus.reason))), [scoped, focus.reason]);
+  // Vendors that have something to show, biggest first (for the vendor strip).
+  const vendors = useMemo(() => {
+    const m = new Map();
+    for (const s of byReason) m.set(s.rec.vendor, (m.get(s.rec.vendor) || 0) + 1);
+    return [...m.entries()].map(([name, n]) => ({ name, n })).sort((a, b) => b.n - a.n || a.name.localeCompare(b.name));
+  }, [byReason]);
+  const list = useMemo(() => {
+    const rows = focus.vendor === 'all' ? byReason : byReason.filter((s) => s.rec.vendor === focus.vendor);
+    const sorter = FOCUS_SORTS[focus.sort] || FOCUS_SORTS.worst;
+    return focus.sort === 'worst' ? rows : [...rows].sort(sorter.fn);
+  }, [byReason, focus.vendor, focus.sort]);
   const openPOs = useMemo(() => typed.filter(isOpenPO).length, [typed]);
   const value = scoped.reduce((t, s) => t + (s.rec.amount?.open || 0), 0);
-  // By vendor: same rows, grouped; vendors with the most flagged POs first.
-  const groups = useMemo(() => {
-    if (!byVendor) return [];
-    const m = new Map();
-    for (const s of list) { if (!m.has(s.rec.vendor)) m.set(s.rec.vendor, []); m.get(s.rec.vendor).push(s); }
-    return [...m.entries()].map(([vendor, items]) => ({
-      vendor, items,
-      flagged: items.filter((s) => hasReason(s, 'flag')).length,
-      value: items.reduce((t, s) => t + (s.rec.amount?.open || 0), 0),
-    })).sort((a, b) => b.flagged - a.flagged || b.items.length - a.items.length || a.vendor.localeCompare(b.vendor));
-  }, [byVendor, list]);
+  const activeReason = FOCUS_REASONS.find((x) => x.key === focus.reason);
+  const filtered = focus.reason !== 'all' || focus.vendor !== 'all';
 
   if (loading) {
     return (
@@ -1349,100 +1399,114 @@ function FocusView({ allRecords, focus, setFocus, loading, error, onOpen, onRefr
     );
   }
 
-  const pill = (key, label, n, Icon, tone) => {
-    const on = focus.reason === key;
-    return (
-      <button key={key} type="button" disabled={!n && !on} aria-pressed={on}
-        onClick={() => set({ reason: on ? 'all' : key })}
-        className={cn('inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-2.5 py-1 text-xs font-semibold transition disabled:opacity-40',
-          on ? 'border-primary bg-primary text-primary-fg' : 'border-border bg-card text-fg/80 hover:bg-muted')}>
-        {Icon && <Icon size={12} className={on ? '' : FOCUS_TONES[tone].text} />}
-        {label}
-        <span className={cn('rounded-full px-1.5 tabular-nums', on ? 'bg-white/25' : 'bg-muted')}>{fmtNumber(n)}</span>
-      </button>
-    );
-  };
-  const seg = (on) => cn('rounded-md px-2.5 py-1 text-xs font-semibold whitespace-nowrap transition', on ? 'bg-primary text-primary-fg shadow-sm' : 'text-muted-fg hover:text-fg');
-  const th = 'text-[10px] font-bold uppercase tracking-wider text-muted-fg';
+  const ctl = 'rounded-lg border border-rose-500/20 bg-white/70 text-xs font-semibold text-fg outline-none transition focus:border-rose-500/50 dark:bg-white/5';
   const updated = fetchedAt ? fetchedAt.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '';
 
   return (
     <div className="flex flex-col gap-3">
-      {/* Headline + the few controls */}
-      <div className="rounded-xl border border-border bg-card px-4 py-3 shadow-sm">
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-          <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-            <span className="text-3xl font-extrabold leading-none tabular-nums tracking-tight">{fmtNumber(scoped.length)}</span>
-            <span className="text-sm font-bold">PO{scoped.length === 1 ? '' : 's'} need action</span>
-            <span className="text-[12px] text-muted-fg">
-              out of {fmtNumber(openPOs)} open{value > 0 && <> · <b className="text-fg/80">{money(value)}</b> still to receive on them</>}
-            </span>
+      {/* Hero: the headline, the four problems (click to filter) and the controls */}
+      <HeroBanner icon={AlertTriangle} decorIcon={Flag} accent="rose">
+        <div className="flex flex-wrap items-start justify-between gap-x-6 gap-y-3">
+          <div>
+            <div className="text-[11px] font-bold uppercase tracking-widest text-rose-700 dark:text-rose-300">Needs action</div>
+            <div className="mt-1 flex flex-wrap items-baseline gap-x-2.5">
+              <span className="text-4xl font-extrabold leading-none tabular-nums tracking-tight text-rose-700 dark:text-rose-200">{fmtNumber(scoped.length)}</span>
+              <span className="text-sm font-semibold text-fg/80">PO{scoped.length === 1 ? '' : 's'} need action</span>
+              <span className="text-sm text-muted-fg">out of {fmtNumber(openPOs)} open</span>
+            </div>
           </div>
-          <div className="ml-auto flex items-center gap-2">
-            <div className="relative w-52">
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="relative w-48">
               <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-fg" />
               <input value={focus.q} onChange={(e) => set({ q: e.target.value })} placeholder="Search PO, vendor, remarks…"
-                className="w-full rounded-lg border border-border bg-card py-1.5 pl-8 pr-3 text-xs outline-none focus:border-primary/50" />
+                className={cn(ctl, 'w-full py-1.5 pl-8 pr-3 font-normal')} />
             </div>
+            <select value={focus.type} onChange={(e) => set({ type: e.target.value })} aria-label="Order type" className={cn(ctl, 'px-2 py-1.5')}>
+              {Object.entries(ORDER_TYPES).map(([k, label]) => <option key={k} value={k}>{k === 'both' ? 'All order types' : label}</option>)}
+            </select>
+            <select value={focus.sort} onChange={(e) => set({ sort: e.target.value })} aria-label="Sort" className={cn(ctl, 'px-2 py-1.5')}>
+              {Object.entries(FOCUS_SORTS).map(([k, s]) => <option key={k} value={k}>{s.label}</option>)}
+            </select>
             <button type="button" onClick={onRefresh} disabled={refreshing} aria-label="Reload the sheet"
               title={`Reload the sheet${updated ? ` · updated ${updated}` : ''}`}
-              className="grid h-8 w-8 place-items-center rounded-lg border border-border text-primary transition hover:bg-muted disabled:opacity-50">
+              className={cn(ctl, 'grid h-8 w-8 place-items-center text-rose-600 hover:bg-white disabled:opacity-50 dark:text-rose-300')}>
               <RefreshCw size={13} className={cn(refreshing && 'animate-spin')} />
             </button>
           </div>
         </div>
 
-        <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2">
-          <div className="flex flex-wrap items-center gap-1.5">
-            {pill('all', 'All', scoped.length)}
-            {FOCUS_REASONS.map((x) => pill(x.key, x.label, counts[x.key] || 0, x.icon, x.tone))}
-          </div>
-          <div className="ml-auto flex items-center gap-2">
-            <select value={focus.type} onChange={(e) => set({ type: e.target.value })} aria-label="Order type"
-              className="rounded-lg border border-border bg-card px-2 py-1.5 text-xs font-semibold text-fg outline-none focus:border-primary/50">
-              {Object.entries(ORDER_TYPES).map(([k, label]) => <option key={k} value={k}>{k === 'both' ? 'All order types' : label}</option>)}
-            </select>
-            <div className="inline-flex rounded-lg border border-border bg-muted/40 p-0.5" role="group" aria-label="Arrange">
-              <button type="button" onClick={() => set({ group: 'priority' })} aria-pressed={!byVendor} className={seg(!byVendor)}>Worst first</button>
-              <button type="button" onClick={() => set({ group: 'vendor' })} aria-pressed={byVendor} className={seg(byVendor)}>By vendor</button>
-            </div>
+        <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
+          {FOCUS_REASONS.map((x) => {
+            const t = FOCUS_TONES[x.tone]; const Icon = x.icon; const n = counts[x.key] || 0; const on = focus.reason === x.key;
+            return (
+              <button key={x.key} type="button" disabled={!n && !on} aria-pressed={on} title={x.title}
+                onClick={() => set({ reason: on ? 'all' : x.key, vendor: 'all' })}
+                className={cn('rounded-xl border px-3 py-2 text-left transition disabled:opacity-50',
+                  on ? cn('bg-white shadow-md dark:bg-white/15', t.on) : 'border-rose-500/20 bg-white/60 hover:-translate-y-0.5 hover:bg-white hover:shadow-md dark:bg-white/5 dark:hover:bg-white/10')}>
+                <div className="flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-wider text-muted-fg">
+                  <span className={cn('grid h-4 w-4 place-items-center rounded text-white', t.dot)}><Icon size={9} strokeWidth={2.5} /></span>
+                  <span className="truncate">{x.label}</span>
+                </div>
+                <div className="mt-1.5 text-2xl font-extrabold leading-none tabular-nums">{fmtNumber(n)}</div>
+              </button>
+            );
+          })}
+          <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-2">
+            <div className="text-[9px] font-bold uppercase tracking-wider text-emerald-800/80 dark:text-emerald-200/80">Still to receive</div>
+            <div className="mt-1.5 truncate text-2xl font-extrabold leading-none tabular-nums text-emerald-800 dark:text-emerald-100">{value > 0 ? money(value) : '—'}</div>
           </div>
         </div>
-      </div>
+      </HeroBanner>
 
-      {/* The list */}
+      {/* Vendors with problem POs — click one to see only theirs */}
+      {vendors.length > 1 && (
+        <div className="flex items-center gap-2 overflow-x-auto pb-1">
+          <button type="button" onClick={() => set({ vendor: 'all' })} aria-pressed={focus.vendor === 'all'}
+            className={cn('inline-flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-bold transition',
+              focus.vendor === 'all' ? 'border-primary bg-primary text-primary-fg shadow-sm' : 'border-border bg-card text-fg/80 hover:border-primary/40')}>
+            <Store size={12} /> All vendors
+            <span className={cn('rounded-full px-1.5 tabular-nums', focus.vendor === 'all' ? 'bg-white/25' : 'bg-muted')}>{fmtNumber(byReason.length)}</span>
+          </button>
+          {vendors.map((v) => {
+            const on = focus.vendor === v.name;
+            return (
+              <button key={v.name} type="button" onClick={() => set({ vendor: on ? 'all' : v.name })} aria-pressed={on}
+                className={cn('inline-flex shrink-0 items-center gap-2 rounded-full border py-1 pl-1 pr-2.5 text-xs font-semibold transition',
+                  on ? 'border-primary bg-primary text-primary-fg shadow-sm' : 'border-border bg-card text-fg/80 hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-sm')}>
+                <VendorLogo vendor={v.name} className="h-6 w-10 rounded-full px-1" initialsClass="text-[9px]" />
+                {v.name}
+                <span className={cn('rounded-full px-1.5 tabular-nums', on ? 'bg-white/25' : 'bg-muted')}>{fmtNumber(v.n)}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {filtered && (
+        <div className="flex flex-wrap items-center gap-2 px-1 text-[12px] text-muted-fg">
+          <span>
+            Showing <b className="text-fg/85">{fmtNumber(list.length)}</b> PO{list.length === 1 ? '' : 's'}
+            {activeReason && <> · {activeReason.label}</>}
+            {focus.vendor !== 'all' && <> · {focus.vendor}</>}
+          </span>
+          <button type="button" onClick={() => set({ reason: 'all', vendor: 'all' })} className="inline-flex items-center gap-1 font-semibold text-primary hover:underline">
+            <X size={11} /> Clear
+          </button>
+        </div>
+      )}
+
+      {/* The POs */}
       {list.length === 0 ? (
-        <div className="flex flex-col items-center gap-2 rounded-xl border border-border bg-card py-14 text-center">
+        <div className="flex flex-col items-center gap-2 rounded-2xl border border-border bg-card py-14 text-center">
           <PackageCheck size={28} className="text-emerald-500" />
           <div className="text-sm font-semibold">Nothing needs action here</div>
-          {(focus.reason !== 'all' || focus.type !== 'both' || focus.q) && (
-            <button type="button" onClick={() => setFocus((f) => ({ ...FOCUS_DEFAULT, group: f.group }))} className="text-xs font-semibold text-primary hover:underline">Clear filters</button>
+          {(filtered || focus.type !== 'both' || focus.q) && (
+            <button type="button" onClick={() => setFocus((f) => ({ ...FOCUS_DEFAULT, sort: f.sort }))} className="text-xs font-semibold text-primary hover:underline">Clear filters</button>
           )}
         </div>
       ) : (
-        <div className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
-          <div className={cn('hidden gap-x-3 border-b border-border bg-muted/50 px-4 py-2 md:grid', FOCUS_GRID)}>
-            <span className={th}>PO</span>
-            <span className={th}>Problem</span>
-            <span className={th}>Details</span>
-            <span className={cn(th, 'text-right')}>Still open</span>
-            <span className={th}>Ordered</span>
-            <span className={th}>Expected</span>
-            <span />
-          </div>
-          <div className="divide-y divide-border/60">
-            {!byVendor
-              ? list.map((s) => <FocusRow key={s.rec.key} item={s} showVendor onOpen={onOpen} />)
-              : groups.flatMap((g) => [
-                <div key={`v:${g.vendor}`} className="flex items-center gap-2 bg-muted/50 px-4 py-1.5">
-                  <Store size={13} className="shrink-0 text-muted-fg" />
-                  <span className="text-[12px] font-extrabold uppercase tracking-wide">{g.vendor}</span>
-                  <span className="text-[11px] text-muted-fg">{g.items.length} PO{g.items.length === 1 ? '' : 's'}</span>
-                  {g.value > 0 && <span className="ml-auto text-[11px] tabular-nums text-muted-fg"><b className="text-fg/80">{money(g.value)}</b> still to receive</span>}
-                </div>,
-                ...g.items.map((s) => <FocusRow key={s.rec.key} item={s} showVendor={false} onOpen={onOpen} />),
-              ])}
-          </div>
+        <div className="grid gap-3 grid-cols-[repeat(auto-fill,minmax(min(400px,100%),1fr))]">
+          {list.map((s) => <FocusCard key={s.rec.key} item={s} onOpen={onOpen} />)}
         </div>
       )}
     </div>
