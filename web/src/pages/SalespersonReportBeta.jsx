@@ -755,9 +755,13 @@ function useFloorData(store, fromDate, toDate, year) {
   const totUps   = singleDay ? (numF(sm?.ups)         ?? 0) : (numF(rangeTot?.num_opps)    ?? rows.reduce((s, r) => s + (r.ups || 0), 0));
   const tickets  = singleDay ? (numF(sm?.tickets)     ?? 0) : (numF(rangeTot?.num_sales)   ?? rows.reduce((s, r) => s + (r.tickets || 0), 0));
   const avgSale  = tickets ? sumSales / tickets : null;
+  // Conversion = tickets ÷ ups, from the same board numbers shown beside it (and
+  // the same rule as each salesperson's Closing). sb/executive's conversionRate
+  // counts tickets differently (phone orders included), so it didn't match.
+  const conversion = totUps > 0 && tickets != null ? (tickets / totUps) * 100 : null;
   const leader   = rows[0] || null;                    // rows already sorted by sales desc
   return {
-    rows, cur, dlt, sumSales, totUps, tickets, avgSale, leader,
+    rows, cur, dlt, sumSales, totUps, tickets, avgSale, conversion, leader,
     hasExec: !!execQ.data,
     loading: singleDay ? dayQ.isLoading : (sumQ.isLoading || execQ.isLoading),
     error:   singleDay ? dayQ.error : (sumQ.error || execQ.error),
@@ -794,7 +798,7 @@ function FloorHero({ store, fromDate, toDate, year, label, weekday, periodLabel 
       <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
         <HeroChip label="Tickets"    value={fmtNumber(f.tickets)} />
         <HeroChip label="UPS"        value={fmtNumber(f.totUps)} />
-        <HeroChip label="Conversion" value={pctF(f.cur.conversionRate)} />
+        <HeroChip label="Conversion" value={pctF(f.conversion)} />
         <HeroChip label="Avg Sale"   value={f.avgSale == null ? '—' : fmtCurrency(f.avgSale)} />
         <HeroChip label="Care-Plan"  value={pctF(f.cur.carePlanAttachRate)} />
         <HeroChip label="Leader"     value={f.leader ? `${firstName} · ${fmtCompactCurrency(f.leader.sales || 0)}` : '—'} highlight />
