@@ -538,6 +538,7 @@ function aggregatePoLines(rows) {
     L.ordered = Math.max(L.ordered, Number(r.QtyOrd) || 0);
     L.cost = Math.max(L.cost, Number(r.ItemCost) || 0);   // unit cost (vendor)
     if (!L.customer && r.Customer) L.customer = cell(r.Customer);
+    if (!L.so && Number(r.SONo) > 0) L.so = Number(r.SONo);
     const q = Number(r.QtyRecd) || 0;
     if (q > 0) {
       L.received += q;
@@ -553,12 +554,17 @@ function aggregatePoLines(rows) {
 // value caps at the ordered qty. Lines with no cost are counted so the UI can
 // say an amount is incomplete instead of showing a misleading total.
 const PO_AMOUNTS_SQL = `
-WITH l AS (SELECT PONo, Seq, MAX(QtyOrd) AS qo, SUM(ISNULL(QtyRecd, 0)) AS qr, MAX(ISNULL(ItemCost, 0)) AS cost
+WITH l AS (SELECT PONo, Seq, MAX(QtyOrd) AS qo, SUM(ISNULL(QtyRecd, 0)) AS qr, MAX(ISNULL(ItemCost, 0)) AS cost,
+                  MAX(ISNULL(SONo, 0)) AS so
            FROM PORecvDtls GROUP BY PONo, Seq)
 SELECT PONo, SUM(qo * cost) AS OrdAmt, SUM((CASE WHEN qr > qo THEN qo ELSE qr END) * cost) AS RecvAmt,
        SUM(CASE WHEN cost = 0 THEN 1 ELSE 0 END) AS NoCostLines, COUNT(*) AS Lines,
-       SUM(qo) AS QtyOrd, SUM(CASE WHEN qr > qo THEN qo ELSE qr END) AS QtyRecv
+       SUM(qo) AS QtyOrd, SUM(CASE WHEN qr > qo THEN qo ELSE qr END) AS QtyRecv,
+       SUM(CASE WHEN so > 0 THEN qo - (CASE WHEN qr > qo THEN qo ELSE qr END) ELSE 0 END) AS OpenSO,
+       SUM(CASE WHEN so > 0 THEN 0 ELSE qo - (CASE WHEN qr > qo THEN qo ELSE qr END) END) AS OpenStock
 FROM l GROUP BY PONo`;
+// A PO line tied to a customer sale (SONo) is a Special Order line; the rest is
+// stock. OpenSO / OpenStock split the PO's open units that way.
 
 // The system's receiving data is the truth for quantities — the sheet is
 // updated by hand and often lags. When the system has the PO, its ordered /
@@ -573,6 +579,9 @@ function applySystemQty(rec, sys) {
     : rec.eta == null ? 'noeta' : rec.etaDays < 0 ? 'passed' : rec.etaDays <= 14 ? 'soon' : 'ontrack';
   return {
     ...rec, orig, receivedQty, rem, timing, sheetQty, qtySrc: 'system',
+    // Open units by kind of line — only when the system gave a split that adds up.
+    openSplit: sys.openSo != null && sys.openStock != null && sys.openSo + sys.openStock === rem
+      ? { so: sys.openSo, stock: sys.openStock } : null,
     sheetDiffers: sheetQty.orig !== orig || sheetQty.rem !== rem,
     lateVsTarget: rec.eta && rec.target && rem > 0 ? daysBetween(rec.eta, rec.target) : null,
     etaDays: rec.eta ? daysBetween(rec.eta, t0) : null,
@@ -1325,10 +1334,21 @@ function FocusCard({ item, onOpen, onItems }) {
               // Looks and works like a button: opens the list of open items.
               <button type="button" title="See which items are still open"
                 onClick={(e) => { e.stopPropagation(); onItems(rec.key); }} onKeyDown={(e) => e.stopPropagation()}
-                className="mt-1.5 inline-flex items-center gap-1 whitespace-nowrap rounded-full border border-amber-400/80 bg-amber-50 py-0.5 pl-2 pr-1 text-[11px] font-semibold tabular-nums text-amber-800 shadow-sm transition hover:border-amber-500 hover:bg-amber-100 hover:shadow focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60 dark:border-amber-500/50 dark:bg-amber-950/60 dark:text-amber-200 dark:hover:bg-amber-900/60">
-                <Package size={11} />
-                <span><b>{fmtNumber(rec.rem)}</b>{rec.orig != null ? ` of ${fmtNumber(rec.orig)}` : ''} still open</span>
-                <span className="grid h-4 w-4 place-items-center rounded-full bg-amber-500 text-white"><ChevronRight size={11} strokeWidth={3} /></span>
+                className="mt-1.5 inline-flex items-center gap-2 whitespace-nowrap rounded-xl border border-amber-400/80 bg-amber-50 py-1 pl-2 pr-1.5 text-left text-[11px] font-semibold tabular-nums text-amber-800 shadow-sm transition hover:border-amber-500 hover:bg-amber-100 hover:shadow focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60 dark:border-amber-500/50 dark:bg-amber-950/60 dark:text-amber-200 dark:hover:bg-amber-900/60">
+                <span>
+                  <span className="flex items-center gap-1">
+                    <Package size={11} />
+                    <span><b>{fmtNumber(rec.rem)}</b>{rec.orig != null ? ` of ${fmtNumber(rec.orig)}` : ''} still open</span>
+                  </span>
+                  {/* How the open units split: Special Order lines vs stock lines */}
+                  {rec.openSplit && (
+                    <span className="mt-0.5 flex items-center gap-2 text-[10px] font-bold">
+                      <span className="inline-flex items-center gap-1"><i className="h-1.5 w-1.5 rounded-full bg-violet-500" />SO {fmtNumber(rec.openSplit.so)}</span>
+                      <span className="inline-flex items-center gap-1"><i className="h-1.5 w-1.5 rounded-full bg-slate-400" />Stock {fmtNumber(rec.openSplit.stock)}</span>
+                    </span>
+                  )}
+                </span>
+                <span className="grid h-4 w-4 shrink-0 place-items-center rounded-full bg-amber-500 text-white"><ChevronRight size={11} strokeWidth={3} /></span>
               </button>
             ) : rec.rem != null && (
               <div className="mt-1 text-[11px] tabular-nums text-muted-fg">
@@ -1366,12 +1386,21 @@ function OpenItemsModal({ rec, onClose, onOpen }) {
   const lines = useMemo(() => aggregatePoLines(q.data?.rows).filter((l) => l.open > 0), [q.data]);
   const totalOpen = lines.reduce((t, l) => t + l.open, 0);
   const totalValue = lines.reduce((t, l) => t + l.open * (l.cost || 0), 0);
+  // Special Order lines (tied to a customer sale) first, then stock lines.
+  const groups = useMemo(() => [
+    { key: 'so', label: 'Special Order', dot: 'bg-violet-500', lines: lines.filter((l) => l.so > 0) },
+    { key: 'stock', label: 'Stock', dot: 'bg-slate-400', lines: lines.filter((l) => !(l.so > 0)) },
+  ].map((g) => ({
+    ...g,
+    units: g.lines.reduce((t, l) => t + l.open, 0),
+    value: g.lines.reduce((t, l) => t + l.open * (l.cost || 0), 0),
+  })), [lines]);
   useEffect(() => {
     const onKey = (e) => { if (e.key === 'Escape') onClose(); };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
   }, [onClose]);
-  const pill = 'rounded-full px-2 py-0.5 text-[11px] font-bold tabular-nums';
+  const pill = 'inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-bold tabular-nums';
   return (
     <div role="dialog" aria-modal="true" aria-label={`Items still open on PO ${rec.po}`}
       className="fixed inset-0 z-[60] flex animate-fade-in items-start justify-center overflow-y-auto bg-black/50 p-4 backdrop-blur-[2px] sm:items-center"
@@ -1395,6 +1424,11 @@ function OpenItemsModal({ rec, onClose, onOpen }) {
           {lines.length > 0 && (
             <div className="relative mt-3 flex flex-wrap items-center gap-2">
               <span className={cn(pill, 'bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-200')}>{fmtNumber(totalOpen)} unit{totalOpen === 1 ? '' : 's'} still open</span>
+              {groups.map((g) => (
+                <span key={g.key} className={cn(pill, 'bg-card text-fg/85 ring-1 ring-border', !g.units && 'opacity-60')}>
+                  <i className={cn('h-2 w-2 rounded-full', g.dot)} />{g.label} {fmtNumber(g.units)}
+                </span>
+              ))}
               <span className={cn(pill, 'bg-muted text-fg/80')}>{lines.length} item{lines.length === 1 ? '' : 's'}</span>
               {totalValue > 0 && <span className={cn(pill, 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/50 dark:text-emerald-200')}>{money(totalValue)} to receive</span>}
               <LiveBadge />
@@ -1416,9 +1450,18 @@ function OpenItemsModal({ rec, onClose, onOpen }) {
             <div className="py-8 text-center text-[13px] text-muted-fg">
               The system shows nothing still open on this PO — it may already be received or closed there (the sheet may be behind).
             </div>
-          ) : (
-            <ul className="divide-y divide-border/60">
-              {lines.map((l) => {
+          ) : groups.filter((g) => g.lines.length > 0).map((g) => (
+            <div key={g.key}>
+              <div className="sticky top-0 z-10 -mx-5 flex items-center gap-2 border-b border-border bg-card px-5 py-2">
+                <i className={cn('h-2 w-2 rounded-full', g.dot)} />
+                <span className="text-[11px] font-extrabold uppercase tracking-wider">{g.label}</span>
+                <span className="text-[11px] text-muted-fg">
+                  {fmtNumber(g.units)} unit{g.units === 1 ? '' : 's'} · {g.lines.length} item{g.lines.length === 1 ? '' : 's'}
+                </span>
+                {g.value > 0 && <span className="ml-auto text-[11px] font-bold tabular-nums text-fg/80">{money(g.value)}</span>}
+              </div>
+              <ul className="divide-y divide-border/60">
+              {g.lines.map((l) => {
                 const due = ymdDate(l.due);
                 const lineValue = l.open * (l.cost || 0);
                 return (
@@ -1442,8 +1485,9 @@ function OpenItemsModal({ rec, onClose, onOpen }) {
                   </li>
                 );
               })}
-            </ul>
-          )}
+              </ul>
+            </div>
+          ))}
         </div>
 
         <div className="flex shrink-0 items-center justify-end gap-2 border-t border-border bg-muted/30 px-5 py-3">
@@ -1693,7 +1737,11 @@ export default function POScrubReport() {
       const ord = Number(r.OrdAmt) || 0, recv = Number(r.RecvAmt) || 0;
       m.set(String(r.PONo), {
         ord, recv, open: Math.max(0, ord - recv), partial: Number(r.NoCostLines) > 0, lines: Number(r.Lines) || 0,
-        qty: { ord: Number(r.QtyOrd) || 0, recv: Number(r.QtyRecv) || 0 },
+        qty: {
+          ord: Number(r.QtyOrd) || 0, recv: Number(r.QtyRecv) || 0,
+          openSo: r.OpenSO == null ? null : Number(r.OpenSO) || 0,
+          openStock: r.OpenStock == null ? null : Number(r.OpenStock) || 0,
+        },
       });
     }
     return m;
