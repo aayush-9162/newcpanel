@@ -798,7 +798,7 @@ function FloorHero({ store, fromDate, toDate, year, label, weekday, periodLabel 
       <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
         <HeroChip label="Tickets"    value={fmtNumber(f.tickets)} />
         <HeroChip label="UPS"        value={fmtNumber(f.totUps)} />
-        <HeroChip label="Conversion" value={pctF(f.conversion)} />
+        <HeroChip label="Closing"    value={pctF(f.conversion)} />
         <HeroChip label="Avg Sale"   value={f.avgSale == null ? '—' : fmtCurrency(f.avgSale)} />
         <HeroChip label="Care-Plan"  value={pctF(f.cur.carePlanAttachRate)} />
         <HeroChip label="Leader"     value={f.leader ? `${firstName} · ${fmtCompactCurrency(f.leader.sales || 0)}` : '—'} highlight />
