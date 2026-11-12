@@ -1189,272 +1189,149 @@ function matchOrderType(r, k) {
   return k === 'stock' ? toks.includes('STOCK') : toks.includes('SO');
 }
 
-// ── New design: "Needs attention" focus view ─────────────────────────────────
-// Only the POs somebody has to act on, as short worklists — one per kind of
-// action, or one per vendor. POs with nothing wrong are not shown at all.
-// The first four reasons are problems to act on; the `fyi` ones are heads-ups.
+// ── New design: "Needs action" focus view ────────────────────────────────────
+// One short table of only the POs somebody has to act on — each PO once, worst
+// first — with what is wrong and the few numbers needed to act. Healthy POs,
+// history, invoices and the rest stay in the current design and the PO page.
 const FOCUS_TONES = {
-  rose:   { chip: 'bg-rose-100 text-rose-700 dark:bg-rose-900/50 dark:text-rose-200',         icon: 'bg-rose-500 text-white',   head: 'bg-rose-50/70 dark:bg-rose-950/30',     stripe: 'border-l-rose-500',   on: 'border-rose-400 bg-rose-50 ring-2 ring-rose-400/30 dark:bg-rose-950/50' },
-  orange: { chip: 'bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-200', icon: 'bg-orange-500 text-white', head: 'bg-orange-50/70 dark:bg-orange-950/30', stripe: 'border-l-orange-500', on: 'border-orange-400 bg-orange-50 ring-2 ring-orange-400/30 dark:bg-orange-950/40' },
-  violet: { chip: 'bg-violet-100 text-violet-700 dark:bg-violet-900/50 dark:text-violet-200', icon: 'bg-violet-500 text-white', head: 'bg-violet-50/70 dark:bg-violet-950/30', stripe: 'border-l-violet-500', on: 'border-violet-400 bg-violet-50 ring-2 ring-violet-400/30 dark:bg-violet-950/40' },
-  slate:  { chip: 'bg-slate-200 text-slate-700 dark:bg-slate-800 dark:text-slate-200',        icon: 'bg-slate-500 text-white',  head: 'bg-slate-100/80 dark:bg-slate-800/40',  stripe: 'border-l-slate-400',  on: 'border-slate-400 bg-slate-100 ring-2 ring-slate-400/30 dark:bg-slate-800/60' },
-  sky:    { chip: 'bg-sky-100 text-sky-700 dark:bg-sky-900/50 dark:text-sky-200',             icon: 'bg-sky-500 text-white',    head: 'bg-sky-50/70 dark:bg-sky-950/30',       stripe: 'border-l-sky-500',    on: 'border-sky-400 bg-sky-50 ring-2 ring-sky-400/30 dark:bg-sky-950/40' },
-  indigo: { chip: 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/50 dark:text-indigo-200', icon: 'bg-indigo-500 text-white', head: 'bg-indigo-50/70 dark:bg-indigo-950/30', stripe: 'border-l-indigo-500', on: 'border-indigo-400 bg-indigo-50 ring-2 ring-indigo-400/30 dark:bg-indigo-950/40' },
+  rose:   { chip: 'bg-rose-100 text-rose-700 dark:bg-rose-900/50 dark:text-rose-200',         text: 'text-rose-600 dark:text-rose-300',     bar: 'bg-rose-500' },
+  orange: { chip: 'bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-200', text: 'text-orange-600 dark:text-orange-300', bar: 'bg-orange-500' },
+  violet: { chip: 'bg-violet-100 text-violet-700 dark:bg-violet-900/50 dark:text-violet-200', text: 'text-violet-600 dark:text-violet-300', bar: 'bg-violet-500' },
+  slate:  { chip: 'bg-slate-200 text-slate-700 dark:bg-slate-800 dark:text-slate-200',        text: 'text-slate-500 dark:text-slate-300',   bar: 'bg-slate-400' },
 };
 const isOpenPO = (r) => r.timing !== 'received';
-const oldestFirst = (a, b) => (b.ageDays ?? -1) - (a.ageDays ?? -1);
-// Priority order — also the order of the worklists on the page.
+// The problems, in priority order — a PO sorts by its first matching one.
 const FOCUS_REASONS = [
-  { key: 'flag', label: 'Flagged', hint: 'marked red in the sheet', action: 'Marked red in the sheet — look at these first', icon: Flag, tone: 'rose',
-    test: (r) => r.status === 'flag',
-    sort: (a, b) => (b.amount?.open ?? 0) - (a.amount?.open ?? 0) || oldestFirst(a, b) },
-  { key: 'followup', label: 'Vendor follow-up', hint: `open over ${CALL_VENDOR_DAYS} days`, action: `Open more than ${CALL_VENDOR_DAYS} days — call or email the vendor`, icon: PhoneCall, tone: 'orange',
-    test: needsVendorCall, sort: oldestFirst },
-  { key: 'noack', label: 'Awaiting ACK', hint: 'not acknowledged yet', action: 'The vendor has not acknowledged these POs', icon: Hourglass, tone: 'violet',
-    test: (r) => isOpenPO(r) && !r.acks.length, sort: oldestFirst },
-  { key: 'noeta', label: 'No ETA', hint: 'no expected date', action: 'No expected date anywhere in the sheet — ask the vendor', icon: AlertCircle, tone: 'slate',
-    test: (r) => r.timing === 'noeta', sort: oldestFirst },
-  { key: 'soon', label: 'Arriving ≤ 2 wks', hint: 'heads-up · plan receiving', action: 'Arriving in the next 2 weeks — plan receiving', icon: Truck, tone: 'sky', fyi: true,
-    test: (r) => r.timing === 'soon', sort: (a, b) => (a.etaDays ?? 1e9) - (b.etaDays ?? 1e9) },
-  { key: 'sheet', label: 'Sheet behind', hint: 'heads-up · update the sheet', action: "The sheet's quantities differ from the system — update the sheet", icon: FileSpreadsheet, tone: 'indigo', fyi: true,
-    test: (r) => !!r.sheetDiffers, sort: oldestFirst },
+  { key: 'flag', label: 'Flagged', short: 'Flagged', title: 'Marked red in the sheet', icon: Flag, tone: 'rose',
+    test: (r) => r.status === 'flag' },
+  { key: 'followup', label: 'Vendor follow-up', short: 'Follow-up', title: `Open more than ${CALL_VENDOR_DAYS} days — follow up with the vendor`, icon: PhoneCall, tone: 'orange',
+    test: needsVendorCall },
+  { key: 'noack', label: 'Awaiting ACK', short: 'No ACK', title: 'The vendor has not acknowledged this PO', icon: Hourglass, tone: 'violet',
+    test: (r) => isOpenPO(r) && !r.acks.length },
+  { key: 'noeta', label: 'No ETA', short: 'No ETA', title: 'No expected date anywhere in the sheet', icon: AlertCircle, tone: 'slate',
+    test: (r) => r.timing === 'noeta' },
 ];
 const reasonsOf = (r) => FOCUS_REASONS.filter((x) => { try { return x.test(r); } catch { return false; } });
 const hasReason = (item, key) => item.reasons.some((x) => x.key === key);
+// Whole weeks are enough here: 93 days → "13 wks".
+const wkShort = (days) => { const a = Math.abs(Math.round(Number(days) || 0)); return a < 7 ? `${a} day${a === 1 ? '' : 's'}` : `${Math.round(a / 7)} wks`; };
+// Sheet column names are upper case — soften them for running text.
+const sentenceCase = (s) => { const t = cell(s).toLowerCase(); return t.charAt(0).toUpperCase() + t.slice(1); };
 
-// One line saying exactly what is wrong, for a given reason.
-function focusWhy(rec, key) {
+// What to tell the reader about a PO: the flagged value if there is one, then
+// the latest remark (or scrub note) from the sheet.
+function focusDetail(rec, top) {
   try {
-    const n = (v) => (v != null ? fmtNumber(v) : '—');
-    if (key === 'flag') {
-      const f = rec.flagged.filter((x) => x.label !== 'PO#');
-      if (!f.length || f.length > 3) return 'Whole PO row is marked red in the sheet';
-      return f.map((x, i) => (
-        <span key={i} className="mr-2 inline-block">
-          <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-fg">{x.label}</span> <b>{x.value}</b>
-        </span>
-      ));
-    }
-    if (key === 'followup') return <>Open <b>{spanText(rec.ageDays)}</b> · ordered {fmtD(rec.poDate)}</>;
-    if (key === 'noack') return rec.poDate ? <>Not acknowledged · <b>{spanText(rec.ageDays)}</b> since the order</> : 'No ACK number in the sheet';
-    if (key === 'noeta') return rec.poDate ? <>No expected date · ordered <b>{spanText(rec.ageDays)}</b> ago</> : 'No expected date in the sheet';
-    if (key === 'soon') return <>Arrives <b>{rec.etaDays === 0 ? 'today' : `in ${spanText(rec.etaDays)}`}</b> · {fmtD(rec.eta)}</>;
-    if (key === 'sheet') return <>Sheet says <b>{n(rec.sheetQty?.rem)}</b> open · system shows <b>{n(rec.rem)}</b></>;
-  } catch { /* fall through */ }
-  return '';
-}
-// Latest remark (or scrub note) — the context for whoever acts on the PO.
-function focusNote(rec, skipFlagged) {
-  const skip = new Set(skipFlagged ? rec.flagged.map((f) => f.value) : []);
-  const cands = [...rec.remarks, ...(rec.latest && !/^ok$/i.test(rec.latest.value) ? [rec.latest.value] : [])];
-  return cands.find((t) => t && !skip.has(t)) || '';
+    const cells = (rec.flagged || []).filter((x) => x.label !== 'PO#' && x.value);
+    const flagged = cells.length && cells.length <= 3
+      ? cells.map((x) => (/^REMARK/i.test(x.label) ? x.value : `${sentenceCase(x.label)}: ${x.value}`)).join(' · ') : '';
+    const flaggedVals = new Set(cells.map((x) => x.value));
+    const notes = [...(rec.remarks || []), ...(rec.latest && !/^ok$/i.test(rec.latest.value) ? [rec.latest.value] : [])];
+    const note = notes.find((t) => t && !flaggedVals.has(t)) || '';
+    if (flagged) return { main: flagged, sub: note };
+    if (note) return { main: note, sub: '' };
+  } catch { /* fall through to the default text */ }
+  const fallback = { flag: 'Marked red in the sheet', followup: 'No remarks in the sheet yet', noack: 'No acknowledgement from the vendor yet', noeta: 'No expected date in the sheet' };
+  return { main: '', sub: fallback[top?.key] || '' };
 }
 
-function IssueBadge({ reason }) {
-  const Icon = reason.icon;
-  return (
-    <span className={cn('inline-flex items-center gap-1 whitespace-nowrap rounded px-1.5 py-px text-[10px] font-bold', FOCUS_TONES[reason.tone].chip)}>
-      <Icon size={10} /> {reason.label}
-    </span>
-  );
-}
+// Shared column template for the table header and its rows.
+const FOCUS_GRID = 'md:grid-cols-[112px_150px_minmax(0,1fr)_84px_96px_118px_14px]';
 
-// Shared column template for the worklist header and its rows.
-const FOCUS_GRID = 'md:grid-cols-[150px_minmax(0,1.25fr)_minmax(0,1fr)_104px_150px_16px]';
-
-// One PO = one compact row. Inside an issue worklist (`sectionKey`) it explains
-// that issue and tags any others; inside a vendor worklist it tags them all.
-function FocusRow({ item, sectionKey, showVendor, onOpen }) {
+function FocusRow({ item, showVendor, onOpen }) {
   const { rec, reasons } = item;
-  const main = reasons.find((x) => x.key === sectionKey) || reasons[0];
-  const others = reasons.filter((x) => x.key !== main.key);
-  const note = focusNote(rec, main.key === 'flag');
+  const top = reasons[0];
+  const d = focusDetail(rec, top);
+  const sub = [showVendor && rec.vendor, rec.type].filter(Boolean).join(' · ');
   const open = () => onOpen(rec.key);
   return (
     <div role="button" tabIndex={0} onClick={open} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } }}
-      className={cn('group grid cursor-pointer grid-cols-1 gap-x-3 gap-y-1.5 px-4 py-2.5 transition hover:bg-muted/50 focus:outline-none focus-visible:bg-muted/60 md:items-start', FOCUS_GRID)}>
-      {/* PO */}
+      className={cn('group relative grid cursor-pointer grid-cols-1 gap-x-3 gap-y-1 px-4 py-2 transition hover:bg-muted/50 focus:outline-none focus-visible:bg-muted/60 md:items-center',
+        FOCUS_GRID)}>
+      <span className={cn('absolute inset-y-0 left-0 w-[3px]', FOCUS_TONES[top.tone].bar)} />
       <div className="min-w-0">
-        <div className="flex flex-wrap items-center gap-1.5">
-          <span className="text-sm font-extrabold tracking-tight text-primary">PO {rec.po}</span>
-          {rec.type && <span className="rounded bg-muted px-1 py-px text-[9px] font-bold uppercase text-fg/70">{rec.type}</span>}
-        </div>
-        <div className="truncate text-[11px] text-muted-fg">
-          {showVendor
-            ? <span className="font-semibold uppercase tracking-wide">{rec.vendor}</span>
-            : rec.acks.length ? <>ACK {rec.acks[0]}</> : 'No ACK'}
-        </div>
+        <div className="text-[13px] font-extrabold tracking-tight text-primary">PO {rec.po}</div>
+        {sub && <div className="truncate text-[11px] uppercase tracking-wide text-muted-fg">{sub}</div>}
       </div>
 
-      {/* What is wrong */}
+      <div className="flex flex-wrap gap-1">
+        {reasons.map((x) => {
+          const Icon = x.icon;
+          return (
+            <span key={x.key} title={x.title} className={cn('inline-flex items-center gap-1 whitespace-nowrap rounded px-1.5 py-0.5 text-[10px] font-bold', FOCUS_TONES[x.tone].chip)}>
+              <Icon size={10} /> {x.short}
+            </span>
+          );
+        })}
+      </div>
+
       <div className="min-w-0 text-[12px] leading-snug">
-        {!sectionKey && <div className="mb-1 flex flex-wrap gap-1">{reasons.map((x) => <IssueBadge key={x.key} reason={x} />)}</div>}
-        <div className="text-fg/90">{focusWhy(rec, main.key)}</div>
-        {sectionKey && others.length > 0 && (
-          <div className="mt-1 flex flex-wrap items-center gap-1">
-            <span className="text-[10px] text-muted-fg">also</span>
-            {others.map((x) => <IssueBadge key={x.key} reason={x} />)}
-          </div>
-        )}
+        {d.main && <div className="truncate font-medium text-fg/90" title={d.main}>{d.main}</div>}
+        {d.sub && <div className="truncate text-[11px] text-muted-fg" title={d.sub}>{d.sub}</div>}
       </div>
 
-      {/* Latest note */}
-      <div className="min-w-0 text-[12px] leading-snug text-fg/75">
-        {note ? <span className="line-clamp-2" title={note}>{note}</span> : <span className="text-muted-fg">—</span>}
+      <div className="text-[12px] tabular-nums md:text-right">
+        {rec.rem != null
+          ? <div><b>{fmtNumber(rec.rem)}</b>{rec.orig != null && <span className="text-muted-fg"> of {fmtNumber(rec.orig)}</span>}</div>
+          : <div className="text-muted-fg">—</div>}
+        {rec.amount?.open > 0 && <div className="text-[11px] text-muted-fg">{money(rec.amount.open)}</div>}
       </div>
 
-      {/* Still open */}
-      <div className="text-[12px] md:text-right">
-        {rec.rem != null ? (
-          <div className="tabular-nums">
-            <b className="text-sm">{fmtNumber(rec.rem)}</b>
-            {rec.orig != null && <span className="text-muted-fg"> of {fmtNumber(rec.orig)}</span>}
-          </div>
+      <div className="text-[12px]">
+        {rec.poDate ? (
+          <>
+            <div className="font-semibold">{wkShort(rec.ageDays)} ago</div>
+            <div className="text-[11px] text-muted-fg">{fmtD(rec.poDate)}</div>
+          </>
         ) : <span className="text-muted-fg">—</span>}
-        {rec.amount?.open > 0 && <div className="text-[11px] font-semibold tabular-nums text-fg/70">{money(rec.amount.open)}</div>}
       </div>
 
-      {/* Expected */}
       <div className="text-[12px]">
         {rec.eta ? (
           <>
-            <div className="font-bold">{fmtD(rec.eta)}</div>
-            <div className="text-[11px] text-muted-fg">{weeksText(rec, rec.eta) || rel(rec.etaDays)}</div>
-            {rec.lateVsTarget > 0 && <div className="text-[11px] font-semibold text-rose-600 dark:text-rose-300">{spanText(rec.lateVsTarget)} past target</div>}
+            <div className="font-semibold">{fmtD(rec.eta)}</div>
+            {weeksText(rec, rec.eta) && <div className="text-[11px] text-muted-fg">{weeksText(rec, rec.eta)}</div>}
           </>
         ) : <span className="text-muted-fg">No ETA</span>}
       </div>
 
-      <ChevronRight size={16} className="mt-0.5 hidden shrink-0 text-muted-fg transition group-hover:translate-x-0.5 group-hover:text-primary md:block" />
+      <ChevronRight size={15} className="hidden shrink-0 text-muted-fg transition group-hover:translate-x-0.5 group-hover:text-primary md:block" />
     </div>
   );
 }
 
-// A titled, collapsible worklist. Shows the first `preview` rows, rest on demand.
-function FocusSection({ sec, open, showAll, preview, showVendor, onToggle, onShowAll, onOpen }) {
-  const t = FOCUS_TONES[sec.tone] || FOCUS_TONES.slate;
-  const Icon = sec.icon;
-  const rows = showAll ? sec.items : sec.items.slice(0, preview);
-  const hidden = sec.items.length - rows.length;
-  const value = sec.items.reduce((s, x) => s + (x.rec.amount?.open || 0), 0);
-  const th = 'text-[10px] font-bold uppercase tracking-wider text-muted-fg';
-  return (
-    <section className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
-      <button type="button" onClick={onToggle} aria-expanded={open}
-        className={cn('flex w-full items-center gap-3 border-l-4 px-4 py-2.5 text-left transition hover:brightness-[0.98]', t.stripe, t.head)}>
-        <span className={cn('grid h-8 w-8 shrink-0 place-items-center rounded-lg', t.icon)}><Icon size={15} /></span>
-        <span className="min-w-0 flex-1">
-          <span className="flex flex-wrap items-center gap-2">
-            <span className="text-sm font-extrabold tracking-tight">{sec.title}</span>
-            <span className="rounded-full bg-card px-2 py-px text-[11px] font-bold tabular-nums ring-1 ring-border">{fmtNumber(sec.items.length)} PO{sec.items.length === 1 ? '' : 's'}</span>
-            {sec.tags}
-          </span>
-          {sec.desc && <span className="mt-0.5 block truncate text-[11px] text-muted-fg">{sec.desc}</span>}
-        </span>
-        {value > 0 && (
-          <span className="hidden shrink-0 text-right sm:block">
-            <span className="block text-sm font-bold tabular-nums">{money(value)}</span>
-            <span className="block text-[10px] text-muted-fg">still to receive</span>
-          </span>
-        )}
-        <ChevronDown size={16} className={cn('shrink-0 text-muted-fg transition-transform', open && 'rotate-180')} />
-      </button>
+const FOCUS_DEFAULT = { reason: 'all', type: 'both', q: '', group: 'priority' };
 
-      {open && (
-        <>
-          <div className={cn('hidden gap-x-3 border-b border-t border-border bg-muted/40 px-4 py-1.5 md:grid', FOCUS_GRID)}>
-            <span className={th}>PO</span>
-            <span className={th}>What is wrong</span>
-            <span className={th}>Latest note</span>
-            <span className={cn(th, 'text-right')}>Still open</span>
-            <span className={th}>Expected</span>
-            <span />
-          </div>
-          <div className="divide-y divide-border/60">
-            {rows.map((x) => <FocusRow key={x.rec.key} item={x} sectionKey={sec.sectionKey} showVendor={showVendor} onOpen={onOpen} />)}
-          </div>
-          {sec.items.length > preview && (
-            <button type="button" onClick={onShowAll}
-              className="flex w-full items-center justify-center gap-1 border-t border-border bg-muted/30 px-4 py-2 text-xs font-semibold text-primary transition hover:bg-muted">
-              {showAll ? 'Show fewer' : `Show ${fmtNumber(hidden)} more`}
-              <ChevronDown size={13} className={cn('transition-transform', showAll && 'rotate-180')} />
-            </button>
-          )}
-        </>
-      )}
-    </section>
-  );
-}
-
-const FOCUS_DEFAULT = { reason: 'all', vendor: 'all', type: 'both', q: '', group: 'issue', ui: {} };
-
-function FocusView({ allRecords, vendors, focus, setFocus, loading, error, onOpen, onRefresh, refreshing, fetchedAt }) {
+function FocusView({ allRecords, focus, setFocus, loading, error, onOpen, onRefresh, refreshing, fetchedAt }) {
   const set = (patch) => setFocus((f) => ({ ...f, ...patch }));
-  // Which worklists are open / fully expanded lives with the filters, so it
-  // survives opening a PO and coming back.
-  const setUi = (id, patch) => setFocus((f) => ({ ...f, ui: { ...(f.ui || {}), [id]: { ...(f.ui?.[id] || {}), ...patch } } }));
   const byVendor = focus.group === 'vendor';
 
-  // Scope = order type + vendor (+ search); reasons are worked out once per PO.
-  const inScope = useMemo(() => (r) => matchOrderType(r, focus.type) && (focus.vendor === 'all' || r.vendor === focus.vendor), [focus.type, focus.vendor]);
+  const typed = useMemo(() => allRecords.filter((r) => matchOrderType(r, focus.type)), [allRecords, focus.type]);
+  // Every PO with a problem, once, worst first (then biggest value, then oldest).
   const scoped = useMemo(() => {
     const needle = focus.q.trim().toLowerCase();
-    return allRecords
-      .filter((r) => inScope(r) && (!needle || r.search.includes(needle)))
-      .map((rec) => ({ rec, reasons: reasonsOf(rec) }))
-      .filter((x) => x.reasons.length > 0);
-  }, [allRecords, inScope, focus.q]);
-  const counts = useMemo(() => Object.fromEntries(FOCUS_REASONS.map((x) => [x.key, scoped.filter((s) => hasReason(s, x.key)).length])), [scoped]);
-  // Headline: POs with a real problem (heads-ups alone don't count).
-  const action = useMemo(() => scoped.filter((s) => s.reasons.some((x) => !x.fyi)), [scoped]);
-  const actionUnits = action.reduce((t, s) => t + (s.rec.rem > 0 ? s.rec.rem : 0), 0);
-  const actionValue = action.reduce((t, s) => t + (s.rec.amount?.open || 0), 0);
-  const openPOs = useMemo(() => allRecords.filter((r) => isOpenPO(r) && inScope(r)).length, [allRecords, inScope]);
-  // Vendors that have something to show (for the vendor picker).
-  const vendorCounts = useMemo(() => {
-    const m = new Map();
-    for (const r of allRecords) {
-      if (!matchOrderType(r, focus.type) || !reasonsOf(r).length) continue;
-      m.set(r.vendor, (m.get(r.vendor) || 0) + 1);
-    }
-    return m;
-  }, [allRecords, focus.type]);
-
-  const sections = useMemo(() => {
-    if (!byVendor) {
-      // Every worklist is complete, but POs already listed in a worklist above
-      // go to the end — so the first rows of each list are ones not seen yet.
-      const seen = new Set();
-      return FOCUS_REASONS
-        .filter((x) => (focus.reason === 'all' || focus.reason === x.key) && counts[x.key] > 0)
-        .map((x) => {
-          const above = new Set(seen);
-          const items = scoped.filter((s) => hasReason(s, x.key))
-            .sort((a, b) => (above.has(a.rec.key) - above.has(b.rec.key)) || x.sort(a.rec, b.rec));
-          items.forEach((s) => seen.add(s.rec.key));
-          return { id: `issue:${x.key}`, sectionKey: x.key, title: x.label, desc: x.action, tone: x.tone, icon: x.icon, fyi: !!x.fyi, items };
-        });
-    }
-    const pool = focus.reason === 'all' ? scoped : scoped.filter((s) => hasReason(s, focus.reason));
     const rank = (s) => FOCUS_REASONS.indexOf(s.reasons[0]);
-    const groups = new Map();
-    for (const s of pool) { if (!groups.has(s.rec.vendor)) groups.set(s.rec.vendor, []); groups.get(s.rec.vendor).push(s); }
-    return [...groups.entries()].map(([vendor, items]) => {
-      items.sort((a, b) => rank(a) - rank(b) || b.reasons.length - a.reasons.length);
-      const parts = FOCUS_REASONS.map((x) => ({ x, n: items.filter((s) => hasReason(s, x.key)).length })).filter((p) => p.n > 0);
-      return {
-        id: `vendor:${vendor}`, sectionKey: null, title: vendor, tone: items[0].reasons[0].tone, icon: Store, worst: rank(items[0]), items,
-        tags: parts.map((p) => (
-          <span key={p.x.key} className={cn('inline-flex items-center gap-1 whitespace-nowrap rounded px-1.5 py-px text-[10px] font-bold', FOCUS_TONES[p.x.tone].chip)}>
-            {p.n} {p.x.label}
-          </span>
-        )),
-      };
-    }).sort((a, b) => a.worst - b.worst || b.items.length - a.items.length || a.title.localeCompare(b.title));
-  }, [byVendor, scoped, counts, focus.reason]);
-
-  const activeReason = FOCUS_REASONS.find((x) => x.key === focus.reason);
-  const filtered = focus.reason !== 'all' || focus.vendor !== 'all' || focus.type !== 'both' || !!focus.q;
+    return typed
+      .filter((r) => !needle || r.search.includes(needle))
+      .map((rec) => ({ rec, reasons: reasonsOf(rec) }))
+      .filter((x) => x.reasons.length > 0)
+      .sort((a, b) => rank(a) - rank(b) || (b.rec.amount?.open ?? 0) - (a.rec.amount?.open ?? 0) || (b.rec.ageDays ?? 0) - (a.rec.ageDays ?? 0));
+  }, [typed, focus.q]);
+  const counts = useMemo(() => Object.fromEntries(FOCUS_REASONS.map((x) => [x.key, scoped.filter((s) => hasReason(s, x.key)).length])), [scoped]);
+  const list = useMemo(() => (focus.reason === 'all' ? scoped : scoped.filter((s) => hasReason(s, focus.reason))), [scoped, focus.reason]);
+  const openPOs = useMemo(() => typed.filter(isOpenPO).length, [typed]);
+  const value = scoped.reduce((t, s) => t + (s.rec.amount?.open || 0), 0);
+  // By vendor: same rows, grouped; vendors with the most flagged POs first.
+  const groups = useMemo(() => {
+    if (!byVendor) return [];
+    const m = new Map();
+    for (const s of list) { if (!m.has(s.rec.vendor)) m.set(s.rec.vendor, []); m.get(s.rec.vendor).push(s); }
+    return [...m.entries()].map(([vendor, items]) => ({
+      vendor, items,
+      flagged: items.filter((s) => hasReason(s, 'flag')).length,
+      value: items.reduce((t, s) => t + (s.rec.amount?.open || 0), 0),
+    })).sort((a, b) => b.flagged - a.flagged || b.items.length - a.items.length || a.vendor.localeCompare(b.vendor));
+  }, [byVendor, list]);
 
   if (loading) {
     return (
@@ -1472,114 +1349,102 @@ function FocusView({ allRecords, vendors, focus, setFocus, loading, error, onOpe
     );
   }
 
-  const seg = (on) => cn('rounded-md px-3 py-1 text-xs font-semibold whitespace-nowrap transition', on ? 'bg-primary text-primary-fg shadow-sm' : 'text-muted-fg hover:text-fg');
-  let fyiLabelShown = false;
+  const pill = (key, label, n, Icon, tone) => {
+    const on = focus.reason === key;
+    return (
+      <button key={key} type="button" disabled={!n && !on} aria-pressed={on}
+        onClick={() => set({ reason: on ? 'all' : key })}
+        className={cn('inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-2.5 py-1 text-xs font-semibold transition disabled:opacity-40',
+          on ? 'border-primary bg-primary text-primary-fg' : 'border-border bg-card text-fg/80 hover:bg-muted')}>
+        {Icon && <Icon size={12} className={on ? '' : FOCUS_TONES[tone].text} />}
+        {label}
+        <span className={cn('rounded-full px-1.5 tabular-nums', on ? 'bg-white/25' : 'bg-muted')}>{fmtNumber(n)}</span>
+      </button>
+    );
+  };
+  const seg = (on) => cn('rounded-md px-2.5 py-1 text-xs font-semibold whitespace-nowrap transition', on ? 'bg-primary text-primary-fg shadow-sm' : 'text-muted-fg hover:text-fg');
+  const th = 'text-[10px] font-bold uppercase tracking-wider text-muted-fg';
+  const updated = fetchedAt ? fetchedAt.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '';
 
   return (
     <div className="flex flex-col gap-3">
-      {/* Summary + filters */}
-      <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
-        <div className="flex flex-wrap items-start justify-between gap-x-6 gap-y-3">
-          <div>
-            <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-widest text-muted-fg">
-              <AlertTriangle size={12} className="text-rose-500" /> Needs action
-            </div>
-            <div className="mt-1 flex flex-wrap items-baseline gap-x-2.5">
-              <span className="text-4xl font-extrabold leading-none tabular-nums tracking-tight">{fmtNumber(action.length)}</span>
-              <span className="text-sm font-semibold text-fg/80">of {fmtNumber(openPOs)} open PO{openPOs === 1 ? '' : 's'}</span>
-            </div>
-            <div className="mt-1 text-[12px] text-muted-fg">
-              <b className="text-fg/80">{fmtNumber(actionUnits)}</b> units{actionValue > 0 && <> · <b className="text-fg/80">{money(actionValue)}</b></>} still to receive on them
-            </div>
+      {/* Headline + the few controls */}
+      <div className="rounded-xl border border-border bg-card px-4 py-3 shadow-sm">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+          <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+            <span className="text-3xl font-extrabold leading-none tabular-nums tracking-tight">{fmtNumber(scoped.length)}</span>
+            <span className="text-sm font-bold">PO{scoped.length === 1 ? '' : 's'} need action</span>
+            <span className="text-[12px] text-muted-fg">
+              out of {fmtNumber(openPOs)} open{value > 0 && <> · <b className="text-fg/80">{money(value)}</b> still to receive on them</>}
+            </span>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
-            {fetchedAt && <span className="hidden text-[11px] text-muted-fg sm:inline">Updated {fetchedAt.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</span>}
-            <button type="button" onClick={onRefresh} disabled={refreshing}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1 text-xs font-semibold text-primary transition hover:bg-muted disabled:opacity-50">
-              <RefreshCw size={13} className={cn(refreshing && 'animate-spin')} /> Refresh
+          <div className="ml-auto flex items-center gap-2">
+            <div className="relative w-52">
+              <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-fg" />
+              <input value={focus.q} onChange={(e) => set({ q: e.target.value })} placeholder="Search PO, vendor, remarks…"
+                className="w-full rounded-lg border border-border bg-card py-1.5 pl-8 pr-3 text-xs outline-none focus:border-primary/50" />
+            </div>
+            <button type="button" onClick={onRefresh} disabled={refreshing} aria-label="Reload the sheet"
+              title={`Reload the sheet${updated ? ` · updated ${updated}` : ''}`}
+              className="grid h-8 w-8 place-items-center rounded-lg border border-border text-primary transition hover:bg-muted disabled:opacity-50">
+              <RefreshCw size={13} className={cn(refreshing && 'animate-spin')} />
             </button>
           </div>
         </div>
 
-        {/* One tile per reason — click to see only that one */}
-        <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
-          {FOCUS_REASONS.map((x) => {
-            const t = FOCUS_TONES[x.tone]; const Icon = x.icon; const n = counts[x.key] || 0; const on = focus.reason === x.key;
-            return (
-              <button key={x.key} type="button" disabled={!n && !on} aria-pressed={on}
-                onClick={() => set({ reason: on ? 'all' : x.key })}
-                className={cn('rounded-xl border p-2.5 text-left transition disabled:opacity-40',
-                  on ? t.on : cn('bg-card hover:border-primary/40 hover:shadow-sm', x.fyi ? 'border-dashed border-border' : 'border-border'))}>
-                <div className="flex items-center gap-1.5">
-                  <span className={cn('grid h-5 w-5 shrink-0 place-items-center rounded-md', t.icon)}><Icon size={11} /></span>
-                  <span className="truncate text-[11px] font-bold">{x.label}</span>
-                </div>
-                <div className="mt-1.5 text-2xl font-extrabold leading-none tabular-nums">{fmtNumber(n)}</div>
-                <div className="mt-1 truncate text-[10px] text-muted-fg">{x.hint}</div>
-              </button>
-            );
-          })}
-        </div>
-
-        <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-border pt-3">
-          <span className="text-[11px] font-semibold text-muted-fg">Group by</span>
-          <div className="inline-flex rounded-lg border border-border bg-muted/40 p-0.5" role="group" aria-label="Group by">
-            <button type="button" onClick={() => set({ group: 'issue' })} aria-pressed={!byVendor} className={seg(!byVendor)}>Issue</button>
-            <button type="button" onClick={() => set({ group: 'vendor' })} aria-pressed={byVendor} className={seg(byVendor)}>Vendor</button>
+        <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2">
+          <div className="flex flex-wrap items-center gap-1.5">
+            {pill('all', 'All', scoped.length)}
+            {FOCUS_REASONS.map((x) => pill(x.key, x.label, counts[x.key] || 0, x.icon, x.tone))}
           </div>
-          <span className="mx-1 hidden h-5 w-px bg-border sm:block" />
-          <div className="inline-flex rounded-lg border border-border bg-muted/40 p-0.5" role="group" aria-label="Order type">
-            {Object.entries(ORDER_TYPES).map(([k, label]) => (
-              <button key={k} type="button" onClick={() => set({ type: k })} aria-pressed={focus.type === k} className={seg(focus.type === k)}>{label}</button>
-            ))}
+          <div className="ml-auto flex items-center gap-2">
+            <select value={focus.type} onChange={(e) => set({ type: e.target.value })} aria-label="Order type"
+              className="rounded-lg border border-border bg-card px-2 py-1.5 text-xs font-semibold text-fg outline-none focus:border-primary/50">
+              {Object.entries(ORDER_TYPES).map(([k, label]) => <option key={k} value={k}>{k === 'both' ? 'All order types' : label}</option>)}
+            </select>
+            <div className="inline-flex rounded-lg border border-border bg-muted/40 p-0.5" role="group" aria-label="Arrange">
+              <button type="button" onClick={() => set({ group: 'priority' })} aria-pressed={!byVendor} className={seg(!byVendor)}>Worst first</button>
+              <button type="button" onClick={() => set({ group: 'vendor' })} aria-pressed={byVendor} className={seg(byVendor)}>By vendor</button>
+            </div>
           </div>
-          <select value={focus.vendor} onChange={(e) => set({ vendor: e.target.value })} aria-label="Vendor"
-            className="rounded-lg border border-border bg-card px-2 py-1.5 text-xs font-semibold text-fg outline-none focus:border-primary/50">
-            <option value="all">All vendors</option>
-            {vendors.filter((v) => vendorCounts.has(v) || v === focus.vendor).map((v) => (
-              <option key={v} value={v}>{v} ({vendorCounts.get(v) || 0})</option>
-            ))}
-          </select>
-          <div className="relative min-w-[180px] flex-1 sm:max-w-[240px]">
-            <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-fg" />
-            <input value={focus.q} onChange={(e) => set({ q: e.target.value })} placeholder="Search PO, ACK, remarks…"
-              className="w-full rounded-lg border border-border bg-card py-1.5 pl-8 pr-3 text-xs outline-none focus:border-primary/50" />
-          </div>
-          {filtered && (
-            <button type="button" onClick={() => setFocus((f) => ({ ...FOCUS_DEFAULT, group: f.group }))}
-              className="ml-auto inline-flex items-center gap-1 rounded-lg border border-border px-2.5 py-1 text-xs font-semibold text-fg/80 transition hover:bg-muted">
-              <X size={12} /> Clear filters
-            </button>
-          )}
         </div>
       </div>
 
-      {/* Worklists */}
-      {sections.length === 0 ? (
+      {/* The list */}
+      {list.length === 0 ? (
         <div className="flex flex-col items-center gap-2 rounded-xl border border-border bg-card py-14 text-center">
           <PackageCheck size={28} className="text-emerald-500" />
-          <div className="text-sm font-semibold">Nothing needs attention here</div>
-          <div className="text-[12px] text-muted-fg">No POs match{activeReason ? ` “${activeReason.label}”` : ''} for these filters.</div>
+          <div className="text-sm font-semibold">Nothing needs action here</div>
+          {(focus.reason !== 'all' || focus.type !== 'both' || focus.q) && (
+            <button type="button" onClick={() => setFocus((f) => ({ ...FOCUS_DEFAULT, group: f.group }))} className="text-xs font-semibold text-primary hover:underline">Clear filters</button>
+          )}
         </div>
-      ) : sections.map((sec) => {
-        const ui = focus.ui?.[sec.id] || {};
-        const only = sections.length === 1;                       // a single worklist is shown in full
-        const open = ui.open ?? (only || !sec.fyi);                // heads-ups start closed
-        const showAll = ui.all ?? only;
-        const label = sec.fyi && !only && !fyiLabelShown;
-        if (label) fyiLabelShown = true;
-        return (
-          <div key={sec.id} className="flex flex-col gap-3">
-            {label && (
-              <div className="mt-1 flex items-center gap-3 px-1 text-[11px] font-bold uppercase tracking-wider text-muted-fg">
-                Heads-up <span className="h-px flex-1 bg-border" />
-              </div>
-            )}
-            <FocusSection sec={sec} open={open} showAll={showAll} preview={sec.sectionKey === 'flag' ? 8 : 5} showVendor={!byVendor && focus.vendor === 'all'}
-              onToggle={() => setUi(sec.id, { open: !open })} onShowAll={() => setUi(sec.id, { all: !showAll })} onOpen={onOpen} />
+      ) : (
+        <div className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
+          <div className={cn('hidden gap-x-3 border-b border-border bg-muted/50 px-4 py-2 md:grid', FOCUS_GRID)}>
+            <span className={th}>PO</span>
+            <span className={th}>Problem</span>
+            <span className={th}>Details</span>
+            <span className={cn(th, 'text-right')}>Still open</span>
+            <span className={th}>Ordered</span>
+            <span className={th}>Expected</span>
+            <span />
           </div>
-        );
-      })}
+          <div className="divide-y divide-border/60">
+            {!byVendor
+              ? list.map((s) => <FocusRow key={s.rec.key} item={s} showVendor onOpen={onOpen} />)
+              : groups.flatMap((g) => [
+                <div key={`v:${g.vendor}`} className="flex items-center gap-2 bg-muted/50 px-4 py-1.5">
+                  <Store size={13} className="shrink-0 text-muted-fg" />
+                  <span className="text-[12px] font-extrabold uppercase tracking-wide">{g.vendor}</span>
+                  <span className="text-[11px] text-muted-fg">{g.items.length} PO{g.items.length === 1 ? '' : 's'}</span>
+                  {g.value > 0 && <span className="ml-auto text-[11px] tabular-nums text-muted-fg"><b className="text-fg/80">{money(g.value)}</b> still to receive</span>}
+                </div>,
+                ...g.items.map((s) => <FocusRow key={s.rec.key} item={s} showVendor={false} onOpen={onOpen} />),
+              ])}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1762,7 +1627,7 @@ export default function POScrubReport() {
         {selected ? (
           <PODrawer rec={selected} sheetUrl={data?.url} onClose={closePO} />
         ) : design === 'new' ? (
-          <FocusView allRecords={allRecords} vendors={sheets.map((s) => cell(s?.name) || 'Vendor')}
+          <FocusView allRecords={allRecords}
             focus={focus} setFocus={setFocus} loading={isLoading} error={error} onOpen={openPO}
             onRefresh={hardRefresh} refreshing={refreshing || isFetching} fetchedAt={fetchedAt} />
         ) : (<>
