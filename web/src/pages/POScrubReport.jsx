@@ -1190,129 +1190,227 @@ function matchOrderType(r, k) {
 }
 
 // ── New design: "Needs attention" focus view ─────────────────────────────────
-// Only POs that need someone to act, in one priority-ordered list. Each PO is
-// listed once with every reason it needs attention; the tiles filter by reason.
+// Only the POs somebody has to act on, as short worklists — one per kind of
+// action, or one per vendor. POs with nothing wrong are not shown at all.
+// The first four reasons are problems to act on; the `fyi` ones are heads-ups.
 const FOCUS_TONES = {
-  rose:   { chip: 'bg-rose-100 text-rose-700 dark:bg-rose-900/50 dark:text-rose-200',             stripe: 'border-l-rose-500',   num: 'text-rose-600 dark:text-rose-300',     on: 'border-rose-400 bg-rose-50 ring-2 ring-rose-400/30 dark:bg-rose-950/50' },
-  orange: { chip: 'bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-200',      stripe: 'border-l-orange-500', num: 'text-orange-600 dark:text-orange-300', on: 'border-orange-400 bg-orange-50 ring-2 ring-orange-400/30 dark:bg-orange-950/40' },
-  amber:  { chip: 'bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-200',          stripe: 'border-l-amber-500',  num: 'text-amber-600 dark:text-amber-300',   on: 'border-amber-400 bg-amber-50 ring-2 ring-amber-400/30 dark:bg-amber-950/40' },
-  violet: { chip: 'bg-violet-100 text-violet-700 dark:bg-violet-900/50 dark:text-violet-200',      stripe: 'border-l-violet-500', num: 'text-violet-600 dark:text-violet-300', on: 'border-violet-400 bg-violet-50 ring-2 ring-violet-400/30 dark:bg-violet-950/40' },
-  slate:  { chip: 'bg-slate-200 text-slate-700 dark:bg-slate-800 dark:text-slate-200',             stripe: 'border-l-slate-400',  num: 'text-slate-600 dark:text-slate-300',   on: 'border-slate-400 bg-slate-100 ring-2 ring-slate-400/30 dark:bg-slate-800/60' },
-  indigo: { chip: 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/50 dark:text-indigo-200',      stripe: 'border-l-indigo-500', num: 'text-indigo-600 dark:text-indigo-300', on: 'border-indigo-400 bg-indigo-50 ring-2 ring-indigo-400/30 dark:bg-indigo-950/40' },
-  sky:    { chip: 'bg-sky-100 text-sky-700 dark:bg-sky-900/50 dark:text-sky-200',                  stripe: 'border-l-sky-500',    num: 'text-sky-600 dark:text-sky-300',       on: 'border-sky-400 bg-sky-50 ring-2 ring-sky-400/30 dark:bg-sky-950/40' },
+  rose:   { chip: 'bg-rose-100 text-rose-700 dark:bg-rose-900/50 dark:text-rose-200',         icon: 'bg-rose-500 text-white',   head: 'bg-rose-50/70 dark:bg-rose-950/30',     stripe: 'border-l-rose-500',   on: 'border-rose-400 bg-rose-50 ring-2 ring-rose-400/30 dark:bg-rose-950/50' },
+  orange: { chip: 'bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-200', icon: 'bg-orange-500 text-white', head: 'bg-orange-50/70 dark:bg-orange-950/30', stripe: 'border-l-orange-500', on: 'border-orange-400 bg-orange-50 ring-2 ring-orange-400/30 dark:bg-orange-950/40' },
+  violet: { chip: 'bg-violet-100 text-violet-700 dark:bg-violet-900/50 dark:text-violet-200', icon: 'bg-violet-500 text-white', head: 'bg-violet-50/70 dark:bg-violet-950/30', stripe: 'border-l-violet-500', on: 'border-violet-400 bg-violet-50 ring-2 ring-violet-400/30 dark:bg-violet-950/40' },
+  slate:  { chip: 'bg-slate-200 text-slate-700 dark:bg-slate-800 dark:text-slate-200',        icon: 'bg-slate-500 text-white',  head: 'bg-slate-100/80 dark:bg-slate-800/40',  stripe: 'border-l-slate-400',  on: 'border-slate-400 bg-slate-100 ring-2 ring-slate-400/30 dark:bg-slate-800/60' },
+  sky:    { chip: 'bg-sky-100 text-sky-700 dark:bg-sky-900/50 dark:text-sky-200',             icon: 'bg-sky-500 text-white',    head: 'bg-sky-50/70 dark:bg-sky-950/30',       stripe: 'border-l-sky-500',    on: 'border-sky-400 bg-sky-50 ring-2 ring-sky-400/30 dark:bg-sky-950/40' },
+  indigo: { chip: 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/50 dark:text-indigo-200', icon: 'bg-indigo-500 text-white', head: 'bg-indigo-50/70 dark:bg-indigo-950/30', stripe: 'border-l-indigo-500', on: 'border-indigo-400 bg-indigo-50 ring-2 ring-indigo-400/30 dark:bg-indigo-950/40' },
 };
 const isOpenPO = (r) => r.timing !== 'received';
-// Priority order — a PO's first matching reason decides where it sorts.
+const oldestFirst = (a, b) => (b.ageDays ?? -1) - (a.ageDays ?? -1);
+// Priority order — also the order of the worklists on the page.
 const FOCUS_REASONS = [
-  { key: 'flag', label: 'Flagged', hint: 'marked red in the sheet', icon: Flag, tone: 'rose',
+  { key: 'flag', label: 'Flagged', hint: 'marked red in the sheet', action: 'Marked red in the sheet — look at these first', icon: Flag, tone: 'rose',
     test: (r) => r.status === 'flag',
-    detail: (r) => {
-      const f = r.flagged.filter((x) => x.label !== 'PO#');
-      if (!f.length) return 'PO marked red in the sheet';
-      const shown = f.slice(0, 2).map((x) => `${x.label}: ${x.value}`).join(' · ');
-      return f.length > 2 ? `${shown} · +${f.length - 2} more` : shown;
-    } },
-  { key: 'followup', label: 'Vendor follow-up', hint: `open over ${CALL_VENDOR_DAYS} days`, icon: PhoneCall, tone: 'orange',
-    test: needsVendorCall,
-    detail: (r) => `Open ${spanText(r.ageDays)} since the order (${fmtD(r.poDate)}) — call the vendor` },
-  { key: 'late', label: 'Behind target', hint: 'expected after the target date', icon: CalendarClock, tone: 'amber',
-    test: (r) => isOpenPO(r) && r.lateVsTarget > 0,
-    detail: (r) => `Expected ${fmtD(r.eta)} — ${spanText(r.lateVsTarget)} after the target (${fmtD(r.target)})` },
-  { key: 'noack', label: 'Awaiting ACK', hint: 'no vendor acknowledgement', icon: Hourglass, tone: 'violet',
-    test: (r) => isOpenPO(r) && !r.acks.length,
-    detail: () => 'The vendor has not acknowledged this PO yet' },
-  { key: 'noeta', label: 'No ETA', hint: 'no expected date', icon: AlertCircle, tone: 'slate',
-    test: (r) => r.timing === 'noeta',
-    detail: () => 'No expected or arrival date anywhere in the sheet' },
-  { key: 'sheet', label: 'Sheet behind', hint: 'sheet qty ≠ system', icon: FileSpreadsheet, tone: 'indigo',
-    test: (r) => !!r.sheetDiffers,
-    detail: (r) => `Sheet says ${r.sheetQty?.rem ?? '—'} open, the system shows ${r.rem ?? '—'} — update the sheet` },
-  { key: 'soon', label: 'Arriving ≤ 2 wks', hint: 'get ready to receive', icon: Truck, tone: 'sky',
-    test: (r) => r.timing === 'soon',
-    detail: (r) => `Arrives ${fmtD(r.eta)} (${rel(r.etaDays)}) — plan receiving` },
+    sort: (a, b) => (b.amount?.open ?? 0) - (a.amount?.open ?? 0) || oldestFirst(a, b) },
+  { key: 'followup', label: 'Vendor follow-up', hint: `open over ${CALL_VENDOR_DAYS} days`, action: `Open more than ${CALL_VENDOR_DAYS} days — call or email the vendor`, icon: PhoneCall, tone: 'orange',
+    test: needsVendorCall, sort: oldestFirst },
+  { key: 'noack', label: 'Awaiting ACK', hint: 'not acknowledged yet', action: 'The vendor has not acknowledged these POs', icon: Hourglass, tone: 'violet',
+    test: (r) => isOpenPO(r) && !r.acks.length, sort: oldestFirst },
+  { key: 'noeta', label: 'No ETA', hint: 'no expected date', action: 'No expected date anywhere in the sheet — ask the vendor', icon: AlertCircle, tone: 'slate',
+    test: (r) => r.timing === 'noeta', sort: oldestFirst },
+  { key: 'soon', label: 'Arriving ≤ 2 wks', hint: 'heads-up · plan receiving', action: 'Arriving in the next 2 weeks — plan receiving', icon: Truck, tone: 'sky', fyi: true,
+    test: (r) => r.timing === 'soon', sort: (a, b) => (a.etaDays ?? 1e9) - (b.etaDays ?? 1e9) },
+  { key: 'sheet', label: 'Sheet behind', hint: 'heads-up · update the sheet', action: "The sheet's quantities differ from the system — update the sheet", icon: FileSpreadsheet, tone: 'indigo', fyi: true,
+    test: (r) => !!r.sheetDiffers, sort: oldestFirst },
 ];
 const reasonsOf = (r) => FOCUS_REASONS.filter((x) => { try { return x.test(r); } catch { return false; } });
+const hasReason = (item, key) => item.reasons.some((x) => x.key === key);
 
-function FocusRow({ item, onOpen, showVendor }) {
+// One line saying exactly what is wrong, for a given reason.
+function focusWhy(rec, key) {
+  try {
+    const n = (v) => (v != null ? fmtNumber(v) : '—');
+    if (key === 'flag') {
+      const f = rec.flagged.filter((x) => x.label !== 'PO#');
+      if (!f.length || f.length > 3) return 'Whole PO row is marked red in the sheet';
+      return f.map((x, i) => (
+        <span key={i} className="mr-2 inline-block">
+          <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-fg">{x.label}</span> <b>{x.value}</b>
+        </span>
+      ));
+    }
+    if (key === 'followup') return <>Open <b>{spanText(rec.ageDays)}</b> · ordered {fmtD(rec.poDate)}</>;
+    if (key === 'noack') return rec.poDate ? <>Not acknowledged · <b>{spanText(rec.ageDays)}</b> since the order</> : 'No ACK number in the sheet';
+    if (key === 'noeta') return rec.poDate ? <>No expected date · ordered <b>{spanText(rec.ageDays)}</b> ago</> : 'No expected date in the sheet';
+    if (key === 'soon') return <>Arrives <b>{rec.etaDays === 0 ? 'today' : `in ${spanText(rec.etaDays)}`}</b> · {fmtD(rec.eta)}</>;
+    if (key === 'sheet') return <>Sheet says <b>{n(rec.sheetQty?.rem)}</b> open · system shows <b>{n(rec.rem)}</b></>;
+  } catch { /* fall through */ }
+  return '';
+}
+// Latest remark (or scrub note) — the context for whoever acts on the PO.
+function focusNote(rec, skipFlagged) {
+  const skip = new Set(skipFlagged ? rec.flagged.map((f) => f.value) : []);
+  const cands = [...rec.remarks, ...(rec.latest && !/^ok$/i.test(rec.latest.value) ? [rec.latest.value] : [])];
+  return cands.find((t) => t && !skip.has(t)) || '';
+}
+
+function IssueBadge({ reason }) {
+  const Icon = reason.icon;
+  return (
+    <span className={cn('inline-flex items-center gap-1 whitespace-nowrap rounded px-1.5 py-px text-[10px] font-bold', FOCUS_TONES[reason.tone].chip)}>
+      <Icon size={10} /> {reason.label}
+    </span>
+  );
+}
+
+// Shared column template for the worklist header and its rows.
+const FOCUS_GRID = 'md:grid-cols-[150px_minmax(0,1.25fr)_minmax(0,1fr)_104px_150px_16px]';
+
+// One PO = one compact row. Inside an issue worklist (`sectionKey`) it explains
+// that issue and tags any others; inside a vendor worklist it tags them all.
+function FocusRow({ item, sectionKey, showVendor, onOpen }) {
   const { rec, reasons } = item;
-  const top = FOCUS_TONES[reasons[0].tone];
+  const main = reasons.find((x) => x.key === sectionKey) || reasons[0];
+  const others = reasons.filter((x) => x.key !== main.key);
+  const note = focusNote(rec, main.key === 'flag');
   const open = () => onOpen(rec.key);
   return (
     <div role="button" tabIndex={0} onClick={open} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } }}
-      className={cn('group grid cursor-pointer grid-cols-1 gap-3 rounded-xl border border-l-4 border-border bg-card px-4 py-3 transition hover:border-primary/40 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-primary/30 md:grid-cols-12 md:items-center', top.stripe)}>
-      {/* Who */}
-      <div className="min-w-0 md:col-span-3">
+      className={cn('group grid cursor-pointer grid-cols-1 gap-x-3 gap-y-1.5 px-4 py-2.5 transition hover:bg-muted/50 focus:outline-none focus-visible:bg-muted/60 md:items-start', FOCUS_GRID)}>
+      {/* PO */}
+      <div className="min-w-0">
         <div className="flex flex-wrap items-center gap-1.5">
-          <span className="text-base font-extrabold tracking-tight text-primary">PO {rec.po}</span>
-          {rec.type && <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-bold uppercase text-fg/80">{rec.type}</span>}
+          <span className="text-sm font-extrabold tracking-tight text-primary">PO {rec.po}</span>
+          {rec.type && <span className="rounded bg-muted px-1 py-px text-[9px] font-bold uppercase text-fg/70">{rec.type}</span>}
         </div>
-        {showVendor && <div className="mt-0.5 truncate text-[12px] font-bold uppercase tracking-wide text-fg/70">{rec.vendor}</div>}
-        <div className="mt-0.5 text-[11px] text-muted-fg">
-          {rec.acks.length ? <>ACK <b className="text-fg/80">{rec.acks[0]}</b></> : <span className="font-semibold text-violet-600 dark:text-violet-300">No ACK</span>}
-          {rec.poDate && <> · ordered {fmtD(rec.poDate)}</>}
+        <div className="truncate text-[11px] text-muted-fg">
+          {showVendor
+            ? <span className="font-semibold uppercase tracking-wide">{rec.vendor}</span>
+            : rec.acks.length ? <>ACK {rec.acks[0]}</> : 'No ACK'}
         </div>
       </div>
 
-      {/* Why it needs attention */}
-      <div className="min-w-0 space-y-1.5 md:col-span-6">
-        {reasons.map((x) => {
-          const t = FOCUS_TONES[x.tone]; const Icon = x.icon;
-          let text = '';
-          try { text = x.detail(rec); } catch { text = x.hint; }
-          return (
-            <div key={x.key} className="flex items-start gap-2">
-              <span className={cn('inline-flex w-[132px] shrink-0 items-center gap-1 whitespace-nowrap rounded-md px-1.5 py-0.5 text-[10px] font-bold', t.chip)}>
-                <Icon size={11} /> {x.label}
-              </span>
-              <span className="min-w-0 text-[12px] leading-snug text-fg/85">{text}</span>
-            </div>
-          );
-        })}
+      {/* What is wrong */}
+      <div className="min-w-0 text-[12px] leading-snug">
+        {!sectionKey && <div className="mb-1 flex flex-wrap gap-1">{reasons.map((x) => <IssueBadge key={x.key} reason={x} />)}</div>}
+        <div className="text-fg/90">{focusWhy(rec, main.key)}</div>
+        {sectionKey && others.length > 0 && (
+          <div className="mt-1 flex flex-wrap items-center gap-1">
+            <span className="text-[10px] text-muted-fg">also</span>
+            {others.map((x) => <IssueBadge key={x.key} reason={x} />)}
+          </div>
+        )}
       </div>
 
-      {/* Numbers */}
-      <div className="flex items-center justify-between gap-3 md:col-span-3 md:justify-end md:text-right">
-        <div className="min-w-0">
-          {rec.rem != null && rec.orig != null ? (
-            <div className="text-[12px]">
-              <b className={cn('text-lg font-extrabold tabular-nums', rec.rem > 0 ? 'text-amber-600 dark:text-amber-300' : 'text-emerald-600 dark:text-emerald-300')}>{fmtNumber(rec.rem)}</b>
-              <span className="text-muted-fg"> of {fmtNumber(rec.orig)} open</span>
-            </div>
-          ) : <div className="text-[11px] text-muted-fg">No quantities</div>}
-          {rec.amount?.open > 0 && <div className="text-[11px] font-bold tabular-nums text-emerald-700 dark:text-emerald-300">{money(rec.amount.open)} to receive</div>}
-          {rec.eta && (
-            <div className="text-[11px] text-muted-fg">
-              ETA <b className="text-fg/80">{fmtD(rec.eta)}</b>{weeksText(rec, rec.eta) ? ` · ${weeksText(rec, rec.eta)}` : ''}
-            </div>
-          )}
-        </div>
-        <ChevronRight size={18} className="shrink-0 text-muted-fg transition group-hover:translate-x-0.5 group-hover:text-primary" />
+      {/* Latest note */}
+      <div className="min-w-0 text-[12px] leading-snug text-fg/75">
+        {note ? <span className="line-clamp-2" title={note}>{note}</span> : <span className="text-muted-fg">—</span>}
       </div>
+
+      {/* Still open */}
+      <div className="text-[12px] md:text-right">
+        {rec.rem != null ? (
+          <div className="tabular-nums">
+            <b className="text-sm">{fmtNumber(rec.rem)}</b>
+            {rec.orig != null && <span className="text-muted-fg"> of {fmtNumber(rec.orig)}</span>}
+          </div>
+        ) : <span className="text-muted-fg">—</span>}
+        {rec.amount?.open > 0 && <div className="text-[11px] font-semibold tabular-nums text-fg/70">{money(rec.amount.open)}</div>}
+      </div>
+
+      {/* Expected */}
+      <div className="text-[12px]">
+        {rec.eta ? (
+          <>
+            <div className="font-bold">{fmtD(rec.eta)}</div>
+            <div className="text-[11px] text-muted-fg">{weeksText(rec, rec.eta) || rel(rec.etaDays)}</div>
+            {rec.lateVsTarget > 0 && <div className="text-[11px] font-semibold text-rose-600 dark:text-rose-300">{spanText(rec.lateVsTarget)} past target</div>}
+          </>
+        ) : <span className="text-muted-fg">No ETA</span>}
+      </div>
+
+      <ChevronRight size={16} className="mt-0.5 hidden shrink-0 text-muted-fg transition group-hover:translate-x-0.5 group-hover:text-primary md:block" />
     </div>
   );
 }
 
+// A titled, collapsible worklist. Shows the first `preview` rows, rest on demand.
+function FocusSection({ sec, open, showAll, preview, showVendor, onToggle, onShowAll, onOpen }) {
+  const t = FOCUS_TONES[sec.tone] || FOCUS_TONES.slate;
+  const Icon = sec.icon;
+  const rows = showAll ? sec.items : sec.items.slice(0, preview);
+  const hidden = sec.items.length - rows.length;
+  const value = sec.items.reduce((s, x) => s + (x.rec.amount?.open || 0), 0);
+  const th = 'text-[10px] font-bold uppercase tracking-wider text-muted-fg';
+  return (
+    <section className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
+      <button type="button" onClick={onToggle} aria-expanded={open}
+        className={cn('flex w-full items-center gap-3 border-l-4 px-4 py-2.5 text-left transition hover:brightness-[0.98]', t.stripe, t.head)}>
+        <span className={cn('grid h-8 w-8 shrink-0 place-items-center rounded-lg', t.icon)}><Icon size={15} /></span>
+        <span className="min-w-0 flex-1">
+          <span className="flex flex-wrap items-center gap-2">
+            <span className="text-sm font-extrabold tracking-tight">{sec.title}</span>
+            <span className="rounded-full bg-card px-2 py-px text-[11px] font-bold tabular-nums ring-1 ring-border">{fmtNumber(sec.items.length)} PO{sec.items.length === 1 ? '' : 's'}</span>
+            {sec.tags}
+          </span>
+          {sec.desc && <span className="mt-0.5 block truncate text-[11px] text-muted-fg">{sec.desc}</span>}
+        </span>
+        {value > 0 && (
+          <span className="hidden shrink-0 text-right sm:block">
+            <span className="block text-sm font-bold tabular-nums">{money(value)}</span>
+            <span className="block text-[10px] text-muted-fg">still to receive</span>
+          </span>
+        )}
+        <ChevronDown size={16} className={cn('shrink-0 text-muted-fg transition-transform', open && 'rotate-180')} />
+      </button>
+
+      {open && (
+        <>
+          <div className={cn('hidden gap-x-3 border-b border-t border-border bg-muted/40 px-4 py-1.5 md:grid', FOCUS_GRID)}>
+            <span className={th}>PO</span>
+            <span className={th}>What is wrong</span>
+            <span className={th}>Latest note</span>
+            <span className={cn(th, 'text-right')}>Still open</span>
+            <span className={th}>Expected</span>
+            <span />
+          </div>
+          <div className="divide-y divide-border/60">
+            {rows.map((x) => <FocusRow key={x.rec.key} item={x} sectionKey={sec.sectionKey} showVendor={showVendor} onOpen={onOpen} />)}
+          </div>
+          {sec.items.length > preview && (
+            <button type="button" onClick={onShowAll}
+              className="flex w-full items-center justify-center gap-1 border-t border-border bg-muted/30 px-4 py-2 text-xs font-semibold text-primary transition hover:bg-muted">
+              {showAll ? 'Show fewer' : `Show ${fmtNumber(hidden)} more`}
+              <ChevronDown size={13} className={cn('transition-transform', showAll && 'rotate-180')} />
+            </button>
+          )}
+        </>
+      )}
+    </section>
+  );
+}
+
+const FOCUS_DEFAULT = { reason: 'all', vendor: 'all', type: 'both', q: '', group: 'issue', ui: {} };
+
 function FocusView({ allRecords, vendors, focus, setFocus, loading, error, onOpen, onRefresh, refreshing, fetchedAt }) {
   const set = (patch) => setFocus((f) => ({ ...f, ...patch }));
-  // Scope = order type + vendor + search; reasons are worked out once per PO.
+  // Which worklists are open / fully expanded lives with the filters, so it
+  // survives opening a PO and coming back.
+  const setUi = (id, patch) => setFocus((f) => ({ ...f, ui: { ...(f.ui || {}), [id]: { ...(f.ui?.[id] || {}), ...patch } } }));
+  const byVendor = focus.group === 'vendor';
+
+  // Scope = order type + vendor (+ search); reasons are worked out once per PO.
+  const inScope = useMemo(() => (r) => matchOrderType(r, focus.type) && (focus.vendor === 'all' || r.vendor === focus.vendor), [focus.type, focus.vendor]);
   const scoped = useMemo(() => {
     const needle = focus.q.trim().toLowerCase();
     return allRecords
-      .filter((r) => matchOrderType(r, focus.type) && (focus.vendor === 'all' || r.vendor === focus.vendor) && (!needle || r.search.includes(needle)))
+      .filter((r) => inScope(r) && (!needle || r.search.includes(needle)))
       .map((rec) => ({ rec, reasons: reasonsOf(rec) }))
       .filter((x) => x.reasons.length > 0);
-  }, [allRecords, focus.type, focus.vendor, focus.q]);
-  const counts = useMemo(() => Object.fromEntries(FOCUS_REASONS.map((x) => [x.key, scoped.filter((s) => s.reasons.some((y) => y.key === x.key)).length])), [scoped]);
-  const list = useMemo(() => {
-    const rank = (s) => FOCUS_REASONS.findIndex((x) => x.key === s.reasons[0].key);
-    return scoped
-      .filter((s) => focus.reason === 'all' || s.reasons.some((x) => x.key === focus.reason))
-      .sort((a, b) => rank(a) - rank(b) || b.reasons.length - a.reasons.length || (b.rec.amount?.open ?? 0) - (a.rec.amount?.open ?? 0));
-  }, [scoped, focus.reason]);
-  const openUnits = list.reduce((t, s) => t + (s.rec.rem > 0 ? s.rec.rem : 0), 0);
-  const openValue = list.reduce((t, s) => t + (s.rec.amount?.open || 0), 0);
-  const openPOs = allRecords.filter((r) => isOpenPO(r) && matchOrderType(r, focus.type) && (focus.vendor === 'all' || r.vendor === focus.vendor)).length;
-  // Vendors that have something needing attention (for the vendor picker).
+  }, [allRecords, inScope, focus.q]);
+  const counts = useMemo(() => Object.fromEntries(FOCUS_REASONS.map((x) => [x.key, scoped.filter((s) => hasReason(s, x.key)).length])), [scoped]);
+  // Headline: POs with a real problem (heads-ups alone don't count).
+  const action = useMemo(() => scoped.filter((s) => s.reasons.some((x) => !x.fyi)), [scoped]);
+  const actionUnits = action.reduce((t, s) => t + (s.rec.rem > 0 ? s.rec.rem : 0), 0);
+  const actionValue = action.reduce((t, s) => t + (s.rec.amount?.open || 0), 0);
+  const openPOs = useMemo(() => allRecords.filter((r) => isOpenPO(r) && inScope(r)).length, [allRecords, inScope]);
+  // Vendors that have something to show (for the vendor picker).
   const vendorCounts = useMemo(() => {
     const m = new Map();
     for (const r of allRecords) {
@@ -1321,7 +1419,42 @@ function FocusView({ allRecords, vendors, focus, setFocus, loading, error, onOpe
     }
     return m;
   }, [allRecords, focus.type]);
+
+  const sections = useMemo(() => {
+    if (!byVendor) {
+      // Every worklist is complete, but POs already listed in a worklist above
+      // go to the end — so the first rows of each list are ones not seen yet.
+      const seen = new Set();
+      return FOCUS_REASONS
+        .filter((x) => (focus.reason === 'all' || focus.reason === x.key) && counts[x.key] > 0)
+        .map((x) => {
+          const above = new Set(seen);
+          const items = scoped.filter((s) => hasReason(s, x.key))
+            .sort((a, b) => (above.has(a.rec.key) - above.has(b.rec.key)) || x.sort(a.rec, b.rec));
+          items.forEach((s) => seen.add(s.rec.key));
+          return { id: `issue:${x.key}`, sectionKey: x.key, title: x.label, desc: x.action, tone: x.tone, icon: x.icon, fyi: !!x.fyi, items };
+        });
+    }
+    const pool = focus.reason === 'all' ? scoped : scoped.filter((s) => hasReason(s, focus.reason));
+    const rank = (s) => FOCUS_REASONS.indexOf(s.reasons[0]);
+    const groups = new Map();
+    for (const s of pool) { if (!groups.has(s.rec.vendor)) groups.set(s.rec.vendor, []); groups.get(s.rec.vendor).push(s); }
+    return [...groups.entries()].map(([vendor, items]) => {
+      items.sort((a, b) => rank(a) - rank(b) || b.reasons.length - a.reasons.length);
+      const parts = FOCUS_REASONS.map((x) => ({ x, n: items.filter((s) => hasReason(s, x.key)).length })).filter((p) => p.n > 0);
+      return {
+        id: `vendor:${vendor}`, sectionKey: null, title: vendor, tone: items[0].reasons[0].tone, icon: Store, worst: rank(items[0]), items,
+        tags: parts.map((p) => (
+          <span key={p.x.key} className={cn('inline-flex items-center gap-1 whitespace-nowrap rounded px-1.5 py-px text-[10px] font-bold', FOCUS_TONES[p.x.tone].chip)}>
+            {p.n} {p.x.label}
+          </span>
+        )),
+      };
+    }).sort((a, b) => a.worst - b.worst || b.items.length - a.items.length || a.title.localeCompare(b.title));
+  }, [byVendor, scoped, counts, focus.reason]);
+
   const activeReason = FOCUS_REASONS.find((x) => x.key === focus.reason);
+  const filtered = focus.reason !== 'all' || focus.vendor !== 'all' || focus.type !== 'both' || !!focus.q;
 
   if (loading) {
     return (
@@ -1339,20 +1472,24 @@ function FocusView({ allRecords, vendors, focus, setFocus, loading, error, onOpe
     );
   }
 
+  const seg = (on) => cn('rounded-md px-3 py-1 text-xs font-semibold whitespace-nowrap transition', on ? 'bg-primary text-primary-fg shadow-sm' : 'text-muted-fg hover:text-fg');
+  let fyiLabelShown = false;
+
   return (
     <div className="flex flex-col gap-3">
-      {/* Headline + controls */}
+      {/* Summary + filters */}
       <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
-        <div className="flex flex-wrap items-end justify-between gap-4">
+        <div className="flex flex-wrap items-start justify-between gap-x-6 gap-y-3">
           <div>
-            <div className="text-[11px] font-bold uppercase tracking-widest text-rose-600 dark:text-rose-300">Needs attention</div>
-            <div className="mt-0.5 flex flex-wrap items-baseline gap-x-3 gap-y-1">
-              <span className="text-4xl font-extrabold tabular-nums tracking-tight">{fmtNumber(list.length)}</span>
-              <span className="text-sm font-semibold text-fg/80">PO{list.length === 1 ? '' : 's'}{activeReason ? ` · ${activeReason.label}` : ''}</span>
-              <span className="text-[12px] text-muted-fg">
-                {fmtNumber(openUnits)} units{openValue > 0 && <> · <b className="text-emerald-700 dark:text-emerald-300">{money(openValue)}</b></>} still to receive
-                {' '}· {fmtNumber(openPOs)} open POs in total
-              </span>
+            <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-widest text-muted-fg">
+              <AlertTriangle size={12} className="text-rose-500" /> Needs action
+            </div>
+            <div className="mt-1 flex flex-wrap items-baseline gap-x-2.5">
+              <span className="text-4xl font-extrabold leading-none tabular-nums tracking-tight">{fmtNumber(action.length)}</span>
+              <span className="text-sm font-semibold text-fg/80">of {fmtNumber(openPOs)} open PO{openPOs === 1 ? '' : 's'}</span>
+            </div>
+            <div className="mt-1 text-[12px] text-muted-fg">
+              <b className="text-fg/80">{fmtNumber(actionUnits)}</b> units{actionValue > 0 && <> · <b className="text-fg/80">{money(actionValue)}</b></>} still to receive on them
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -1364,45 +1501,52 @@ function FocusView({ allRecords, vendors, focus, setFocus, loading, error, onOpe
           </div>
         </div>
 
-        {/* Reason tiles — click to show only that reason */}
-        <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4 xl:grid-cols-7">
+        {/* One tile per reason — click to see only that one */}
+        <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
           {FOCUS_REASONS.map((x) => {
             const t = FOCUS_TONES[x.tone]; const Icon = x.icon; const n = counts[x.key] || 0; const on = focus.reason === x.key;
             return (
-              <button key={x.key} type="button" disabled={!n && !on}
+              <button key={x.key} type="button" disabled={!n && !on} aria-pressed={on}
                 onClick={() => set({ reason: on ? 'all' : x.key })}
                 className={cn('rounded-xl border p-2.5 text-left transition disabled:opacity-40',
-                  on ? t.on : 'border-border bg-card hover:border-primary/40 hover:shadow-sm')}>
-                <div className={cn('flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider', t.num)}><Icon size={12} /> {x.label}</div>
-                <div className="mt-0.5 text-2xl font-extrabold tabular-nums">{fmtNumber(n)}</div>
-                <div className="truncate text-[10px] text-muted-fg">{x.hint}</div>
+                  on ? t.on : cn('bg-card hover:border-primary/40 hover:shadow-sm', x.fyi ? 'border-dashed border-border' : 'border-border'))}>
+                <div className="flex items-center gap-1.5">
+                  <span className={cn('grid h-5 w-5 shrink-0 place-items-center rounded-md', t.icon)}><Icon size={11} /></span>
+                  <span className="truncate text-[11px] font-bold">{x.label}</span>
+                </div>
+                <div className="mt-1.5 text-2xl font-extrabold leading-none tabular-nums">{fmtNumber(n)}</div>
+                <div className="mt-1 truncate text-[10px] text-muted-fg">{x.hint}</div>
               </button>
             );
           })}
         </div>
 
         <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-border pt-3">
+          <span className="text-[11px] font-semibold text-muted-fg">Group by</span>
+          <div className="inline-flex rounded-lg border border-border bg-muted/40 p-0.5" role="group" aria-label="Group by">
+            <button type="button" onClick={() => set({ group: 'issue' })} aria-pressed={!byVendor} className={seg(!byVendor)}>Issue</button>
+            <button type="button" onClick={() => set({ group: 'vendor' })} aria-pressed={byVendor} className={seg(byVendor)}>Vendor</button>
+          </div>
+          <span className="mx-1 hidden h-5 w-px bg-border sm:block" />
           <div className="inline-flex rounded-lg border border-border bg-muted/40 p-0.5" role="group" aria-label="Order type">
             {Object.entries(ORDER_TYPES).map(([k, label]) => (
-              <button key={k} type="button" onClick={() => set({ type: k })}
-                className={cn('rounded-md px-3 py-1 text-xs font-semibold transition',
-                  focus.type === k ? 'bg-primary text-primary-fg shadow-sm' : 'text-muted-fg hover:text-fg')}>{label}</button>
+              <button key={k} type="button" onClick={() => set({ type: k })} aria-pressed={focus.type === k} className={seg(focus.type === k)}>{label}</button>
             ))}
           </div>
-          <select value={focus.vendor} onChange={(e) => set({ vendor: e.target.value })}
+          <select value={focus.vendor} onChange={(e) => set({ vendor: e.target.value })} aria-label="Vendor"
             className="rounded-lg border border-border bg-card px-2 py-1.5 text-xs font-semibold text-fg outline-none focus:border-primary/50">
             <option value="all">All vendors</option>
             {vendors.filter((v) => vendorCounts.has(v) || v === focus.vendor).map((v) => (
               <option key={v} value={v}>{v} ({vendorCounts.get(v) || 0})</option>
             ))}
           </select>
-          <div className="relative min-w-[200px] flex-1 sm:max-w-xs">
+          <div className="relative min-w-[180px] flex-1 sm:max-w-[240px]">
             <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-fg" />
             <input value={focus.q} onChange={(e) => set({ q: e.target.value })} placeholder="Search PO, ACK, remarks…"
-              className="w-full rounded-lg border border-border bg-card py-1.5 pl-8 pr-3 text-sm outline-none focus:border-primary/50" />
+              className="w-full rounded-lg border border-border bg-card py-1.5 pl-8 pr-3 text-xs outline-none focus:border-primary/50" />
           </div>
-          {(focus.reason !== 'all' || focus.vendor !== 'all' || focus.type !== 'both' || focus.q) && (
-            <button type="button" onClick={() => setFocus(FOCUS_DEFAULT)}
+          {filtered && (
+            <button type="button" onClick={() => setFocus((f) => ({ ...FOCUS_DEFAULT, group: f.group }))}
               className="ml-auto inline-flex items-center gap-1 rounded-lg border border-border px-2.5 py-1 text-xs font-semibold text-fg/80 transition hover:bg-muted">
               <X size={12} /> Clear filters
             </button>
@@ -1410,28 +1554,35 @@ function FocusView({ allRecords, vendors, focus, setFocus, loading, error, onOpe
         </div>
       </div>
 
-      {/* The list */}
-      {list.length === 0 ? (
+      {/* Worklists */}
+      {sections.length === 0 ? (
         <div className="flex flex-col items-center gap-2 rounded-xl border border-border bg-card py-14 text-center">
           <PackageCheck size={28} className="text-emerald-500" />
           <div className="text-sm font-semibold">Nothing needs attention here</div>
           <div className="text-[12px] text-muted-fg">No POs match{activeReason ? ` “${activeReason.label}”` : ''} for these filters.</div>
         </div>
-      ) : (
-        <>
-          <div className="flex items-center justify-between px-1 text-[11px] text-muted-fg">
-            <span>Most urgent first · each PO shows every reason it needs attention</span>
-            <span className="hidden items-center gap-1 sm:inline-flex">Click a PO for full details <ChevronRight size={12} /></span>
+      ) : sections.map((sec) => {
+        const ui = focus.ui?.[sec.id] || {};
+        const only = sections.length === 1;                       // a single worklist is shown in full
+        const open = ui.open ?? (only || !sec.fyi);                // heads-ups start closed
+        const showAll = ui.all ?? only;
+        const label = sec.fyi && !only && !fyiLabelShown;
+        if (label) fyiLabelShown = true;
+        return (
+          <div key={sec.id} className="flex flex-col gap-3">
+            {label && (
+              <div className="mt-1 flex items-center gap-3 px-1 text-[11px] font-bold uppercase tracking-wider text-muted-fg">
+                Heads-up <span className="h-px flex-1 bg-border" />
+              </div>
+            )}
+            <FocusSection sec={sec} open={open} showAll={showAll} preview={sec.sectionKey === 'flag' ? 8 : 5} showVendor={!byVendor && focus.vendor === 'all'}
+              onToggle={() => setUi(sec.id, { open: !open })} onShowAll={() => setUi(sec.id, { all: !showAll })} onOpen={onOpen} />
           </div>
-          <div className="flex flex-col gap-2">
-            {list.map((s) => <FocusRow key={s.rec.key} item={s} onOpen={onOpen} showVendor={focus.vendor === 'all'} />)}
-          </div>
-        </>
-      )}
+        );
+      })}
     </div>
   );
 }
-const FOCUS_DEFAULT = { reason: 'all', vendor: 'all', type: 'both', q: '' };
 
 // Current / New design switch (top right). Defaults to the current design; the
 // choice is remembered per browser.
