@@ -22,7 +22,7 @@ import { vendorLogoSrc } from '@/data/vendorLogoFiles';
 import {
   FileSpreadsheet, Search, RefreshCw, AlertTriangle, Maximize2, Minimize2, CheckCircle2, Clock, Flag, Circle,
   Package, History, X, Truck, FileText, MessageSquare, ExternalLink, Layers, Hourglass, PackageCheck,
-  AlertCircle, CalendarClock, ChevronRight, ChevronDown, Store, ArrowLeft, PhoneCall,
+  AlertCircle, CalendarClock, ChevronRight, ChevronDown, Store, ArrowLeft, PhoneCall, User,
 } from 'lucide-react';
 
 const cell = (c) => String(c ?? '').trim();
@@ -1203,27 +1203,29 @@ function matchOrderType(r, k) {
 }
 
 // ── New design: "Needs action" focus view ────────────────────────────────────
-// Only the POs somebody has to act on — each PO once, as a card — under a hero
-// that sums them up. Healthy POs, history, invoices and the rest stay in the
-// current design and on the PO page. Tones map to the shared HeroStat palette.
+// The POs somebody has to act on — each PO once, as a card — under a hero that
+// sums them up. "All open POs" widens the list to every open PO, and the search
+// also finds a customer's items on any open PO. History, invoices and the rest
+// stay on the PO page. Tones map to the shared HeroStat palette.
 const FOCUS_TONES = {
-  rose:   { chip: 'bg-rose-100 text-rose-700 dark:bg-rose-900/50 dark:text-rose-200',         dot: 'bg-rose-500',   on: 'border-rose-500/60 ring-2 ring-rose-400/40' },
-  amber:  { chip: 'bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-200', dot: 'bg-orange-500', on: 'border-orange-500/60 ring-2 ring-orange-400/40' },
-  violet: { chip: 'bg-violet-100 text-violet-700 dark:bg-violet-900/50 dark:text-violet-200', dot: 'bg-violet-500', on: 'border-violet-500/60 ring-2 ring-violet-400/40' },
-  sky:    { chip: 'bg-sky-100 text-sky-700 dark:bg-sky-900/50 dark:text-sky-200',             dot: 'bg-sky-500',    on: 'border-sky-500/60 ring-2 ring-sky-400/40' },
+  rose:    { chip: 'bg-rose-100 text-rose-700 dark:bg-rose-900/50 dark:text-rose-200',             dot: 'bg-rose-500',    on: 'border-rose-500/60 ring-2 ring-rose-400/40' },
+  violet:  { chip: 'bg-violet-100 text-violet-700 dark:bg-violet-900/50 dark:text-violet-200',     dot: 'bg-violet-500',  on: 'border-violet-500/60 ring-2 ring-violet-400/40' },
+  sky:     { chip: 'bg-sky-100 text-sky-700 dark:bg-sky-900/50 dark:text-sky-200',                 dot: 'bg-sky-500',     on: 'border-sky-500/60 ring-2 ring-sky-400/40' },
+  emerald: { chip: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-200', dot: 'bg-emerald-500', on: 'border-emerald-500/60 ring-2 ring-emerald-400/40' },
+  slate:   { chip: 'bg-slate-200 text-slate-700 dark:bg-slate-800 dark:text-slate-200',             dot: 'bg-slate-500',   on: 'border-slate-500/60 ring-2 ring-slate-400/40' },
 };
 const isOpenPO = (r) => r.timing !== 'received';
 // The problems, in priority order — a PO sorts by its first matching one.
 const FOCUS_REASONS = [
   { key: 'flag', label: 'Flagged', short: 'Flagged', title: 'Marked red in the sheet', icon: Flag, tone: 'rose',
     test: (r) => r.status === 'flag' },
-  { key: 'followup', label: 'Vendor follow-up', short: 'Follow-up', title: `Open more than ${CALL_VENDOR_DAYS} days — follow up with the vendor`, icon: PhoneCall, tone: 'amber',
-    test: needsVendorCall },
   { key: 'noack', label: 'Awaiting ACK', short: 'No ACK', title: 'The vendor has not acknowledged this PO', icon: Hourglass, tone: 'violet',
     test: (r) => isOpenPO(r) && !r.acks.length },
   { key: 'noeta', label: 'No ETA', short: 'No ETA', title: 'No expected date anywhere in the sheet', icon: AlertCircle, tone: 'sky',
     test: (r) => r.timing === 'noeta' },
 ];
+// How an open PO with none of those problems is shown (in "All open POs" / search).
+const FOCUS_OK = { key: 'ok', label: 'No issues', short: 'No issues', title: 'Nothing flagged on this PO', icon: CheckCircle2, tone: 'emerald' };
 const reasonsOf = (r) => FOCUS_REASONS.filter((x) => { try { return x.test(r); } catch { return false; } });
 const hasReason = (item, key) => item.reasons.some((x) => x.key === key);
 // Whole weeks are enough here: 93 days → "13 wks".
@@ -1244,7 +1246,7 @@ function focusDetail(rec, top) {
     if (flagged) return { main: flagged, sub: note };
     if (note) return { main: note, sub: '' };
   } catch { /* fall through to the default text */ }
-  const fallback = { flag: 'Marked red in the sheet', followup: 'No remarks in the sheet yet', noack: 'No acknowledgement from the vendor yet', noeta: 'No expected date in the sheet' };
+  const fallback = { flag: 'Marked red in the sheet', noack: 'No acknowledgement from the vendor yet', noeta: 'No expected date in the sheet', ok: 'No remarks in the sheet' };
   return { main: fallback[top?.key] || '', sub: '' };
 }
 
@@ -1261,7 +1263,7 @@ function VendorLogo({ vendor, className, initialsClass }) {
 }
 
 // Order → today → expected, as one bar: the filled part is the time already gone.
-function FocusTimeline({ rec }) {
+function FocusTimeline({ rec, className = 'mt-auto pt-3' }) {
   const hasPo = !!rec.poDate, hasEta = !!rec.eta;
   let pct = null; let passed = false;
   if (hasPo && hasEta) {
@@ -1272,7 +1274,7 @@ function FocusTimeline({ rec }) {
   }
   const wks = hasEta ? weeksText(rec, rec.eta) : null;
   return (
-    <div className="mt-auto pt-3">
+    <div className={className}>
       <div className={cn('relative h-1.5 rounded-full', hasEta
         ? 'bg-black/[0.08] dark:bg-white/10'
         : 'bg-[repeating-linear-gradient(90deg,rgba(120,120,120,0.35)_0,rgba(120,120,120,0.35)_6px,transparent_6px,transparent_12px)]')}>
@@ -1300,7 +1302,9 @@ function FocusTimeline({ rec }) {
 
 // One PO = one card: who, how much, what is wrong, and where it is in time.
 function FocusCard({ item, onOpen, onItems }) {
-  const { rec, reasons } = item;
+  const { rec } = item;
+  // An open PO with no problem (only seen in "All open POs" / search) shows as "No issues".
+  const reasons = item.reasons.length ? item.reasons : [FOCUS_OK];
   const top = reasons[0];
   const p = STAT_PALETTE[top.tone] || STAT_PALETTE.rose;
   const TopIcon = top.icon;
@@ -1503,6 +1507,138 @@ function OpenItemsModal({ rec, onClose, onOpen }) {
   );
 }
 
+// ── Customer search: every open customer (Special Order) line on any open PO ─
+// One row per PO line that is still open and tied to a sale: the customer, the
+// item, when the PO was ordered and when the line is due. It covers every open
+// PO in the system, including ones that are not on the scrub sheet.
+const PO_CUSTOMER_LINES_SQL = `
+WITH l AS (SELECT r.PONo, r.Seq, MAX(RTRIM(r.ItemId)) AS ItemId, MAX(RTRIM(r.ItemDesc1)) AS Desc1, MAX(RTRIM(r.ItemDesc2)) AS Desc2,
+                  MAX(r.QtyOrd) AS qo, SUM(ISNULL(r.QtyRecd, 0)) AS qr, MAX(ISNULL(r.SONo, 0)) AS SONo, MAX(r.DueDate) AS DueDate,
+                  MAX(ISNULL(r.ItemCost, 0)) AS Cost, MAX(RTRIM(r.Vendor)) AS Vendor
+           FROM PORecvDtls r GROUP BY r.PONo, r.Seq)
+SELECT l.PONo, l.Seq, l.ItemId, l.Desc1, l.Desc2, l.qo AS QtyOrd, l.qr AS QtyRecd, l.SONo, l.DueDate, l.Cost, l.Vendor,
+       p.po_ord_bdat AS OrdDate,
+       COALESCE(NULLIF(RTRIM(d.po_dtl_cust_nam), ''), c.CustomerName) AS Customer
+FROM l
+LEFT JOIN PORV p ON p.po_no = l.PONo
+LEFT JOIN PO_dtlRV d ON d.po_dtl_no = l.PONo AND d.po_dtl_seq = l.Seq
+OUTER APPLY (SELECT TOP 1 LTRIM(RTRIM(sd.CustomerName)) AS CustomerName FROM SalespersonDaily sd WHERE sd.SalesNo = l.SONo) c
+WHERE l.SONo > 0 AND l.qo > l.qr`;
+
+function shapeCustomerLines(rows) {
+  const out = [];
+  for (const r of Array.isArray(rows) ? rows : []) {
+    const customer = cell(r?.Customer);
+    if (!customer) continue;
+    const ordered = Number(r.QtyOrd) || 0, received = Number(r.QtyRecd) || 0;
+    out.push({
+      key: `${r.PONo}:${r.Seq}`, po: cell(r.PONo), so: Number(r.SONo) || 0, customer, customerLc: customer.toLowerCase(),
+      itemId: cell(r.ItemId).replace(/^0+(?=\d)/, ''), desc1: cell(r.Desc1), desc2: cell(r.Desc2),
+      ordered, open: Math.max(0, ordered - received), cost: Number(r.Cost) || 0,
+      vendorCode: cell(r.Vendor), ordDate: ymdDate(r.OrdDate), due: ymdDate(r.DueDate),
+    });
+  }
+  return out;
+}
+
+// Search results by customer: their items still open on any open PO, with when
+// each was ordered and when it is expected.
+const CUSTOMER_GROUPS_SHOWN = 20;
+function CustomerItems({ hits, recByPo, onOpen }) {
+  const t0 = today0();
+  const groups = useMemo(() => {
+    const m = new Map();
+    for (const h of hits) {
+      const k = `${h.customer}|${h.so}`;
+      if (!m.has(k)) m.set(k, { key: k, customer: h.customer, so: h.so, items: [] });
+      m.get(k).items.push(h);
+    }
+    return [...m.values()].sort((a, b) => a.customer.localeCompare(b.customer) || a.so - b.so);
+  }, [hits]);
+  const shown = groups.slice(0, CUSTOMER_GROUPS_SHOWN);
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="flex items-center gap-2 px-1 text-[11px] font-bold uppercase tracking-wider text-sky-700 dark:text-sky-300">
+        <User size={13} /> Customer items on open POs
+        <span className="rounded-full bg-sky-100 px-1.5 normal-case tracking-normal tabular-nums text-sky-800 dark:bg-sky-900/50 dark:text-sky-200">
+          {fmtNumber(hits.length)} item{hits.length === 1 ? '' : 's'} · {fmtNumber(groups.length)} sale{groups.length === 1 ? '' : 's'}
+        </span>
+        <LiveBadge />
+      </div>
+      {shown.map((g) => {
+        const units = g.items.reduce((t, h) => t + h.open, 0);
+        const value = g.items.reduce((t, h) => t + h.open * h.cost, 0);
+        return (
+          <section key={g.key} className="relative animate-fade-in overflow-hidden rounded-2xl border border-sky-500/40 bg-card">
+            <div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-sky-500/15 via-sky-500/5 to-transparent" />
+            <div className="relative">
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-sky-500/20 px-4 py-2.5">
+                <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-gradient-to-br from-sky-500 to-cyan-500 text-white shadow-sm"><User size={16} /></span>
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-[15px] font-extrabold leading-tight tracking-tight">{g.customer}</div>
+                  <div className="text-[11px] font-semibold text-muted-fg">Sale {g.so}</div>
+                </div>
+                <div className="text-right">
+                  {value > 0 && <div className="text-base font-extrabold leading-none tabular-nums">{money(value)}</div>}
+                  <div className="mt-1 text-[11px] tabular-nums text-muted-fg">
+                    <b className="text-fg/85">{fmtNumber(units)}</b> unit{units === 1 ? '' : 's'} still to come · {g.items.length} item{g.items.length === 1 ? '' : 's'}
+                  </div>
+                </div>
+              </div>
+              <ul className="divide-y divide-border/60">
+                {g.items.map((h) => {
+                  const rec = recByPo.get(h.po);          // the PO on the scrub sheet, when it is there
+                  const poDate = h.ordDate || rec?.poDate || null;
+                  const eta = rec?.eta || h.due || null;  // the sheet's latest date wins over the system due date
+                  const timeline = { poDate, eta, ageDays: poDate ? daysBetween(t0, poDate) : null, etaDays: eta ? daysBetween(eta, t0) : null };
+                  const vendor = rec?.vendor || h.vendorCode;
+                  const lineValue = h.open * h.cost;
+                  return (
+                    <li key={h.key} className="flex gap-3 px-4 py-3">
+                      <div className="flex h-12 w-12 shrink-0 flex-col items-center justify-center rounded-xl bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-200"
+                        title={`${h.open} still open of ${h.ordered} ordered`}>
+                        <span className="text-lg font-extrabold leading-none tabular-nums">{fmtNumber(h.open)}</span>
+                        <span className="mt-0.5 text-[9px] font-semibold">of {fmtNumber(h.ordered)}</span>
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-1.5">
+                          <div className="min-w-0">
+                            <div className="text-[13px] font-semibold leading-snug">{h.desc2 || h.desc1 || h.itemId}</div>
+                            <div className="text-[11px] text-muted-fg">{h.desc2 ? h.desc1 : ''}{h.itemId && <>{h.desc2 && h.desc1 ? ' · ' : ''}<span className="font-mono">#{h.itemId}</span></>}</div>
+                          </div>
+                          <div className="flex shrink-0 items-center gap-2">
+                            <VendorLogo vendor={vendor} className="h-7 w-11 rounded-md p-0.5" initialsClass="text-[9px]" />
+                            <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-fg">{vendor}</span>
+                            {rec ? (
+                              <button type="button" onClick={() => onOpen(rec.key)} title="Open this PO"
+                                className="inline-flex items-center gap-0.5 whitespace-nowrap rounded-full border border-primary/40 bg-primary/10 py-0.5 pl-2 pr-1 text-[11px] font-bold text-primary transition hover:bg-primary/20">
+                                PO {h.po} <ChevronRight size={12} />
+                              </button>
+                            ) : (
+                              <span title="This PO is not on the PO Scrub sheet" className="whitespace-nowrap rounded-full bg-muted px-2 py-0.5 text-[11px] font-bold text-fg/80">PO {h.po}</span>
+                            )}
+                            {lineValue > 0 && <span className="min-w-[56px] text-right text-sm font-extrabold tabular-nums">{money(lineValue)}</span>}
+                          </div>
+                        </div>
+                        <FocusTimeline rec={timeline} className="pt-2.5" />
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          </section>
+        );
+      })}
+      {groups.length > shown.length && (
+        <div className="px-1 text-[12px] text-muted-fg">
+          + {fmtNumber(groups.length - shown.length)} more sale{groups.length - shown.length === 1 ? '' : 's'} match — type more of the name to narrow it down.
+        </div>
+      )}
+    </div>
+  );
+}
+
 // Special Order is the default order type for this view.
 const FOCUS_DEFAULT = { reason: 'all', vendor: 'all', type: 'so', q: '', sort: 'worst' };
 
@@ -1511,33 +1647,53 @@ function FocusView({ allRecords, focus, setFocus, loading, error, onOpen, onRefr
   // PO whose still-open items are shown in the popup (null = closed).
   const [itemsKey, setItemsKey] = useState(null);
   const itemsRec = useMemo(() => (itemsKey ? allRecords.find((r) => r.key === itemsKey) || null : null), [allRecords, itemsKey]);
+  const needle = focus.q.trim().toLowerCase();
+
+  // Customer search — open customer lines on every open PO in the system.
+  const custQ = useSqlQuery(PO_CUSTOMER_LINES_SQL, [], { staleTime: 5 * 60 * 1000 });
+  const custLines = useMemo(() => shapeCustomerLines(custQ.data?.rows), [custQ.data]);
+  const custHits = useMemo(() => {
+    if (needle.length < 2) return [];
+    const words = needle.split(/[\s,]+/).filter(Boolean);     // "james hackney" finds "Hackney, James"
+    const digits = /^\d+$/.test(needle);                       // a sale number also works
+    return custLines.filter((l) => (words.length > 0 && words.every((w) => l.customerLc.includes(w))) || (digits && String(l.so).includes(needle)));
+  }, [custLines, needle]);
+  const custPOs = useMemo(() => new Set(custHits.map((l) => l.po)), [custHits]);
+  const recByPo = useMemo(() => new Map(allRecords.map((r) => [cell(r.po), r])), [allRecords]);
 
   const typed = useMemo(() => allRecords.filter((r) => matchOrderType(r, focus.type)), [allRecords, focus.type]);
-  // Every PO with a problem, once, worst first (then biggest value, then oldest).
-  const scoped = useMemo(() => {
-    const needle = focus.q.trim().toLowerCase();
-    const rank = (s) => FOCUS_REASONS.indexOf(s.reasons[0]);
+  // Every PO in scope with its problems — worst first (then biggest value, then
+  // oldest); POs with no problem go last.
+  const items = useMemo(() => {
+    const rank = (s) => (s.reasons.length ? FOCUS_REASONS.indexOf(s.reasons[0]) : 99);
     return typed
-      .filter((r) => !needle || r.search.includes(needle))
       .map((rec) => ({ rec, reasons: reasonsOf(rec) }))
-      .filter((x) => x.reasons.length > 0)
       .sort((a, b) => rank(a) - rank(b) || (b.rec.amount?.open ?? 0) - (a.rec.amount?.open ?? 0) || (b.rec.ageDays ?? 0) - (a.rec.ageDays ?? 0));
-  }, [typed, focus.q]);
-  const counts = useMemo(() => Object.fromEntries(FOCUS_REASONS.map((x) => [x.key, scoped.filter((s) => hasReason(s, x.key)).length])), [scoped]);
-  const byReason = useMemo(() => (focus.reason === 'all' ? scoped : scoped.filter((s) => hasReason(s, focus.reason))), [scoped, focus.reason]);
+  }, [typed]);
+  const problems = useMemo(() => items.filter((s) => s.reasons.length > 0), [items]);
+  const openItems = useMemo(() => items.filter((s) => isOpenPO(s.rec)), [items]);
+  const counts = useMemo(() => Object.fromEntries(FOCUS_REASONS.map((x) => [x.key, problems.filter((s) => hasReason(s, x.key)).length])), [problems]);
+  // What the list shows: the chosen tile's POs, or (no tile) the ones needing
+  // action. A search looks through every open PO, not only the problem ones,
+  // and also finds the POs carrying a matching customer's items.
+  const pool = useMemo(() => {
+    const base = focus.reason === 'open' ? openItems
+      : focus.reason !== 'all' ? problems.filter((s) => hasReason(s, focus.reason))
+      : needle ? items.filter((s) => s.reasons.length > 0 || isOpenPO(s.rec)) : problems;
+    return needle ? base.filter((s) => s.rec.search.includes(needle) || custPOs.has(cell(s.rec.po))) : base;
+  }, [focus.reason, openItems, problems, items, needle, custPOs]);
   // Vendors that have something to show, biggest first (for the vendor strip).
   const vendors = useMemo(() => {
     const m = new Map();
-    for (const s of byReason) m.set(s.rec.vendor, (m.get(s.rec.vendor) || 0) + 1);
+    for (const s of pool) m.set(s.rec.vendor, (m.get(s.rec.vendor) || 0) + 1);
     return [...m.entries()].map(([name, n]) => ({ name, n })).sort((a, b) => b.n - a.n || a.name.localeCompare(b.name));
-  }, [byReason]);
+  }, [pool]);
   const list = useMemo(() => {
-    const rows = focus.vendor === 'all' ? byReason : byReason.filter((s) => s.rec.vendor === focus.vendor);
+    const rows = focus.vendor === 'all' ? pool : pool.filter((s) => s.rec.vendor === focus.vendor);
     const sorter = FOCUS_SORTS[focus.sort] || FOCUS_SORTS.worst;
     return focus.sort === 'worst' ? rows : [...rows].sort(sorter.fn);
-  }, [byReason, focus.vendor, focus.sort]);
-  const openPOs = useMemo(() => typed.filter(isOpenPO).length, [typed]);
-  const value = scoped.reduce((t, s) => t + (s.rec.amount?.open || 0), 0);
+  }, [pool, focus.vendor, focus.sort]);
+  const value = problems.reduce((t, s) => t + (s.rec.amount?.open || 0), 0);
   const activeReason = FOCUS_REASONS.find((x) => x.key === focus.reason);
   const filtered = focus.reason !== 'all' || focus.vendor !== 'all';
 
@@ -1559,25 +1715,38 @@ function FocusView({ allRecords, focus, setFocus, loading, error, onOpen, onRefr
 
   const ctl = 'rounded-lg border border-rose-500/20 bg-white/70 text-xs font-semibold text-fg outline-none transition focus:border-rose-500/50 dark:bg-white/5';
   const updated = fetchedAt ? fetchedAt.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '';
+  // Hero tiles: Flagged, then every open PO, then the other problems.
+  const tiles = [
+    { ...FOCUS_REASONS[0], n: counts[FOCUS_REASONS[0].key] || 0 },
+    { key: 'open', label: 'All open POs', title: 'Every open PO, including the ones with no issues', icon: Package, tone: 'slate', n: openItems.length },
+    ...FOCUS_REASONS.slice(1).map((x) => ({ ...x, n: counts[x.key] || 0 })),
+  ];
 
   return (
     <div className="flex flex-col gap-3">
-      {/* Hero: the headline, the four problems (click to filter) and the controls */}
+      {/* Hero: the headline, the tiles (click to filter) and the controls */}
       <HeroBanner icon={AlertTriangle} decorIcon={Flag} accent="rose">
         <div className="flex flex-wrap items-start justify-between gap-x-6 gap-y-3">
           <div>
             <div className="text-[11px] font-bold uppercase tracking-widest text-rose-700 dark:text-rose-300">Needs action</div>
             <div className="mt-1 flex flex-wrap items-baseline gap-x-2.5">
-              <span className="text-4xl font-extrabold leading-none tabular-nums tracking-tight text-rose-700 dark:text-rose-200">{fmtNumber(scoped.length)}</span>
-              <span className="text-sm font-semibold text-fg/80">PO{scoped.length === 1 ? '' : 's'} need action</span>
-              <span className="text-sm text-muted-fg">out of {fmtNumber(openPOs)} open</span>
+              <span className="text-4xl font-extrabold leading-none tabular-nums tracking-tight text-rose-700 dark:text-rose-200">{fmtNumber(problems.length)}</span>
+              <span className="text-sm font-semibold text-fg/80">PO{problems.length === 1 ? '' : 's'} need action</span>
+              <span className="text-sm text-muted-fg">out of {fmtNumber(openItems.length)} open</span>
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <div className="relative w-48">
+            <div className="relative w-56">
               <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-fg" />
-              <input value={focus.q} onChange={(e) => set({ q: e.target.value })} placeholder="Search PO, vendor, remarks…"
-                className={cn(ctl, 'w-full py-1.5 pl-8 pr-3 font-normal')} />
+              <input value={focus.q} onChange={(e) => set({ q: e.target.value })} placeholder="Search PO, vendor or customer…"
+                title="Search by PO number, vendor, remarks, customer name or sale number"
+                className={cn(ctl, 'w-full py-1.5 pl-8 pr-7 font-normal')} />
+              {focus.q && (
+                <button type="button" onClick={() => set({ q: '' })} aria-label="Clear search" title="Clear search"
+                  className="absolute right-1.5 top-1/2 grid h-5 w-5 -translate-y-1/2 place-items-center rounded-full text-muted-fg hover:bg-muted hover:text-fg">
+                  <X size={12} />
+                </button>
+              )}
             </div>
             <select value={focus.type} onChange={(e) => set({ type: e.target.value })} aria-label="Order type" className={cn(ctl, 'px-2 py-1.5')}>
               {Object.entries(ORDER_TYPES).map(([k, label]) => <option key={k} value={k}>{k === 'both' ? 'All order types' : label}</option>)}
@@ -1594,10 +1763,10 @@ function FocusView({ allRecords, focus, setFocus, loading, error, onOpen, onRefr
         </div>
 
         <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
-          {FOCUS_REASONS.map((x) => {
-            const t = FOCUS_TONES[x.tone]; const Icon = x.icon; const n = counts[x.key] || 0; const on = focus.reason === x.key;
+          {tiles.map((x) => {
+            const t = FOCUS_TONES[x.tone]; const Icon = x.icon; const on = focus.reason === x.key;
             return (
-              <button key={x.key} type="button" disabled={!n && !on} aria-pressed={on} title={x.title}
+              <button key={x.key} type="button" disabled={!x.n && !on} aria-pressed={on} title={x.title}
                 onClick={() => set({ reason: on ? 'all' : x.key, vendor: 'all' })}
                 className={cn('rounded-xl border px-3 py-2 text-left transition disabled:opacity-50',
                   on ? cn('bg-white shadow-md dark:bg-white/15', t.on) : 'border-rose-500/20 bg-white/60 hover:-translate-y-0.5 hover:bg-white hover:shadow-md dark:bg-white/5 dark:hover:bg-white/10')}>
@@ -1605,7 +1774,7 @@ function FocusView({ allRecords, focus, setFocus, loading, error, onOpen, onRefr
                   <span className={cn('grid h-4 w-4 place-items-center rounded text-white', t.dot)}><Icon size={9} strokeWidth={2.5} /></span>
                   <span className="truncate">{x.label}</span>
                 </div>
-                <div className="mt-1.5 text-2xl font-extrabold leading-none tabular-nums">{fmtNumber(n)}</div>
+                <div className="mt-1.5 text-2xl font-extrabold leading-none tabular-nums">{fmtNumber(x.n)}</div>
               </button>
             );
           })}
@@ -1616,14 +1785,25 @@ function FocusView({ allRecords, focus, setFocus, loading, error, onOpen, onRefr
         </div>
       </HeroBanner>
 
-      {/* Vendors with problem POs — click one to see only theirs */}
+      {/* Search by customer: their items on open POs */}
+      {needle.length >= 2 && (custHits.length > 0 ? (
+        <CustomerItems hits={custHits} recByPo={recByPo} onOpen={onOpen} />
+      ) : custQ.isLoading ? (
+        <div className="flex items-center gap-2 px-1 text-[12px] text-muted-fg">
+          <div className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-primary border-t-transparent" /> Looking up customers…
+        </div>
+      ) : custQ.error ? (
+        <div className="px-1 text-[12px] text-amber-700 dark:text-amber-300">Customer search isn't available right now: {custQ.error.message}</div>
+      ) : null)}
+
+      {/* Vendors in the list — click one to see only theirs */}
       {vendors.length > 1 && (
         <div className="flex items-center gap-2 overflow-x-auto pb-1">
           <button type="button" onClick={() => set({ vendor: 'all' })} aria-pressed={focus.vendor === 'all'}
             className={cn('inline-flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-bold transition',
               focus.vendor === 'all' ? 'border-primary bg-primary text-primary-fg shadow-sm' : 'border-border bg-card text-fg/80 hover:border-primary/40')}>
             <Store size={12} /> All vendors
-            <span className={cn('rounded-full px-1.5 tabular-nums', focus.vendor === 'all' ? 'bg-white/25' : 'bg-muted')}>{fmtNumber(byReason.length)}</span>
+            <span className={cn('rounded-full px-1.5 tabular-nums', focus.vendor === 'all' ? 'bg-white/25' : 'bg-muted')}>{fmtNumber(pool.length)}</span>
           </button>
           {vendors.map((v) => {
             const on = focus.vendor === v.name;
@@ -1640,34 +1820,35 @@ function FocusView({ allRecords, focus, setFocus, loading, error, onOpen, onRefr
         </div>
       )}
 
-      {filtered && (
+      {(filtered || needle) && (list.length > 0 || custHits.length === 0) && (
         <div className="flex flex-wrap items-center gap-2 px-1 text-[12px] text-muted-fg">
           <span>
             Showing <b className="text-fg/85">{fmtNumber(list.length)}</b> PO{list.length === 1 ? '' : 's'}
-            {activeReason && <> · {activeReason.label}</>}
+            {focus.reason === 'open' ? <> · all open POs</> : activeReason ? <> · {activeReason.label}</> : null}
             {focus.vendor !== 'all' && <> · {focus.vendor}</>}
+            {needle && <> · matching “{focus.q.trim()}”</>}
           </span>
-          <button type="button" onClick={() => set({ reason: 'all', vendor: 'all' })} className="inline-flex items-center gap-1 font-semibold text-primary hover:underline">
+          <button type="button" onClick={() => set({ reason: 'all', vendor: 'all', q: '' })} className="inline-flex items-center gap-1 font-semibold text-primary hover:underline">
             <X size={11} /> Clear
           </button>
         </div>
       )}
 
       {/* The POs */}
-      {list.length === 0 ? (
-        <div className="flex flex-col items-center gap-2 rounded-2xl border border-border bg-card py-14 text-center">
-          <PackageCheck size={28} className="text-emerald-500" />
-          <div className="text-sm font-semibold">Nothing needs action here</div>
-          {(filtered || focus.q) && (
-            <button type="button" onClick={() => setFocus((f) => ({ ...FOCUS_DEFAULT, type: f.type, sort: f.sort }))} className="text-xs font-semibold text-primary hover:underline">Clear filters</button>
-          )}
-          {focus.type !== 'both' && !filtered && !focus.q && (
-            <button type="button" onClick={() => set({ type: 'both' })} className="text-xs font-semibold text-primary hover:underline">Show all order types</button>
-          )}
-        </div>
-      ) : (
+      {list.length > 0 ? (
         <div className="grid gap-3 grid-cols-[repeat(auto-fill,minmax(min(400px,100%),1fr))]">
           {list.map((s) => <FocusCard key={s.rec.key} item={s} onOpen={onOpen} onItems={setItemsKey} />)}
+        </div>
+      ) : custHits.length === 0 && (
+        <div className="flex flex-col items-center gap-2 rounded-2xl border border-border bg-card py-14 text-center">
+          <PackageCheck size={28} className="text-emerald-500" />
+          <div className="text-sm font-semibold">{needle ? `Nothing matches “${focus.q.trim()}”` : 'Nothing needs action here'}</div>
+          {(filtered || needle) && (
+            <button type="button" onClick={() => setFocus((f) => ({ ...FOCUS_DEFAULT, type: f.type, sort: f.sort }))} className="text-xs font-semibold text-primary hover:underline">Clear filters</button>
+          )}
+          {focus.type !== 'both' && !filtered && !needle && (
+            <button type="button" onClick={() => set({ type: 'both' })} className="text-xs font-semibold text-primary hover:underline">Show all order types</button>
+          )}
         </div>
       )}
 
