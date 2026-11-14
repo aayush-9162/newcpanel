@@ -1263,7 +1263,8 @@ function VendorLogo({ vendor, className, initialsClass }) {
 }
 
 // Order → today → expected, as one bar: the filled part is the time already gone.
-function FocusTimeline({ rec, className = 'mt-auto pt-3' }) {
+// `bare` draws only the bar (the caller writes the two dates itself).
+function FocusTimeline({ rec, className = 'mt-auto pt-3', bare = false }) {
   const hasPo = !!rec.poDate, hasEta = !!rec.eta;
   let pct = null; let passed = false;
   if (hasPo && hasEta) {
@@ -1286,16 +1287,18 @@ function FocusTimeline({ rec, className = 'mt-auto pt-3' }) {
           </>
         )}
       </div>
-      <div className="mt-1.5 flex items-baseline justify-between gap-3 text-[11px] text-muted-fg">
-        <span className="min-w-0 truncate">
-          {hasPo ? <>Ordered <b className="text-fg/85">{wkShort(rec.ageDays)} ago</b> · {fmtD(rec.poDate)}</> : 'Order date not set'}
-        </span>
-        <span className="shrink-0 text-right">
-          {hasEta
-            ? <>Expected <b className="text-fg/85">{fmtD(rec.eta)}</b>{wks ? ` · ${wks}` : ''}</>
-            : <b className="text-sky-600 dark:text-sky-300">No expected date</b>}
-        </span>
-      </div>
+      {!bare && (
+        <div className="mt-1.5 flex items-baseline justify-between gap-3 text-[11px] text-muted-fg">
+          <span className="min-w-0 truncate">
+            {hasPo ? <>Ordered <b className="text-fg/85">{wkShort(rec.ageDays)} ago</b> · {fmtD(rec.poDate)}</> : 'Order date not set'}
+          </span>
+          <span className="shrink-0 text-right">
+            {hasEta
+              ? <>Expected <b className="text-fg/85">{fmtD(rec.eta)}</b>{wks ? ` · ${wks}` : ''}</>
+              : <b className="text-sky-600 dark:text-sky-300">No expected date</b>}
+          </span>
+        </div>
+      )}
     </div>
   );
 }
@@ -1438,6 +1441,22 @@ function OpenItemsModal({ rec, onClose, onOpen }) {
               <LiveBadge />
             </div>
           )}
+          {/* When the PO was ordered and when it is expected (the dates on the card) */}
+          <div className="relative mt-3 rounded-xl border border-border/70 bg-card/80 px-3.5 py-2.5">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <div className="flex items-center gap-1 text-[9px] font-bold uppercase tracking-wider text-muted-fg"><CalendarClock size={10} /> Order date</div>
+                <div className="mt-0.5 text-sm font-extrabold leading-tight">{rec.poDate ? fmtD(rec.poDate) : 'Not set'}</div>
+                {rec.poDate && rec.ageDays != null && <div className="text-[11px] text-muted-fg">{wkShort(rec.ageDays)} ago</div>}
+              </div>
+              <div className="text-right">
+                <div className="flex items-center justify-end gap-1 text-[9px] font-bold uppercase tracking-wider text-muted-fg"><Truck size={10} /> Expected delivery</div>
+                <div className={cn('mt-0.5 text-sm font-extrabold leading-tight', !rec.eta && 'text-sky-600 dark:text-sky-300')}>{rec.eta ? fmtD(rec.eta) : 'No expected date'}</div>
+                {rec.eta && weeksText(rec, rec.eta) && <div className="text-[11px] text-muted-fg">{weeksText(rec, rec.eta)}</div>}
+              </div>
+            </div>
+            <FocusTimeline rec={rec} className="pt-2.5 pb-0.5" bare />
+          </div>
         </div>
 
         {/* The open items */}
@@ -1482,7 +1501,18 @@ function OpenItemsModal({ rec, onClose, onOpen }) {
                         {l.so > 0
                           ? <span><b className="text-fg/85">{l.customer || 'Customer'}</b> <span className="text-muted-fg">· SO {l.so}</span></span>
                           : <span className="rounded bg-muted px-1.5 py-px font-semibold text-muted-fg">Stock</span>}
-                        {due && <span className="text-muted-fg">Due <b className="text-fg/85">{fmtD(due)}</b><WeekTag rec={rec} d={due} /></span>}
+                      </div>
+                      {/* Dates for this item: the sheet's expected date wins; the
+                          system's own due date is shown too when it differs. */}
+                      <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-muted-fg">
+                        <span className="inline-flex items-center gap-1"><CalendarClock size={11} /> Ordered <b className="text-fg/85">{rec.poDate ? fmtD(rec.poDate) : 'not set'}</b></span>
+                        <span className="inline-flex items-center gap-1">
+                          <Truck size={11} /> Delivery <b className="text-fg/85">{rec.eta || due ? fmtD(rec.eta || due) : 'no date'}</b>
+                          {(rec.eta || due) && <WeekTag rec={rec} d={rec.eta || due} />}
+                        </span>
+                        {rec.eta && due && daysBetween(due, rec.eta) !== 0 && (
+                          <span title="The due date this line has in the system — the date above comes from the PO Scrub sheet">System due {fmtD(due)}</span>
+                        )}
                       </div>
                     </div>
                     {lineValue > 0 && <div className="shrink-0 text-right text-sm font-extrabold tabular-nums">{money(lineValue)}</div>}
