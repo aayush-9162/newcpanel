@@ -1230,25 +1230,6 @@ const reasonsOf = (r) => FOCUS_REASONS.filter((x) => { try { return x.test(r); }
 const hasReason = (item, key) => item.reasons.some((x) => x.key === key);
 // Whole weeks are enough here: 93 days → "13 wks".
 const wkShort = (days) => { const a = Math.abs(Math.round(Number(days) || 0)); return a < 7 ? `${a} day${a === 1 ? '' : 's'}` : `${Math.round(a / 7)} wks`; };
-// Sheet column names are upper case — soften them for running text.
-const sentenceCase = (s) => { const t = cell(s).toLowerCase(); return t.charAt(0).toUpperCase() + t.slice(1); };
-
-// What to tell the reader about a PO: the flagged value if there is one, then
-// the latest remark (or scrub note) from the sheet.
-function focusDetail(rec, top) {
-  try {
-    const cells = (rec.flagged || []).filter((x) => x.label !== 'PO#' && x.value);
-    const flagged = cells.length && cells.length <= 3
-      ? cells.map((x) => (/^REMARK/i.test(x.label) ? x.value : `${sentenceCase(x.label)}: ${x.value}`)).join(' · ') : '';
-    const flaggedVals = new Set(cells.map((x) => x.value));
-    const notes = [...(rec.remarks || []), ...(rec.latest && !/^ok$/i.test(rec.latest.value) ? [rec.latest.value] : [])];
-    const note = notes.find((t) => t && !flaggedVals.has(t)) || '';
-    if (flagged) return { main: flagged, sub: note };
-    if (note) return { main: note, sub: '' };
-  } catch { /* fall through to the default text */ }
-  const fallback = { flag: 'Marked red in the sheet', noack: 'No acknowledgement from the vendor yet', noeta: 'No expected date in the sheet', ok: 'No remarks in the sheet' };
-  return { main: fallback[top?.key] || '', sub: '' };
-}
 
 // Vendor logo on a white tile, initials when we have no logo for the vendor.
 function VendorLogo({ vendor, className, initialsClass }) {
@@ -1303,15 +1284,14 @@ function FocusTimeline({ rec, className = 'mt-auto pt-3', bare = false }) {
   );
 }
 
-// One PO = one card: who, how much, what is wrong, and where it is in time.
+// One PO = one card: who, how much, its problem tags, and where it is in time.
+// The sheet's ACK / notes / remarks text is left to the PO page.
 function FocusCard({ item, onOpen, onItems }) {
   const { rec } = item;
   // An open PO with no problem (only seen in "All open POs" / search) shows as "No issues".
   const reasons = item.reasons.length ? item.reasons : [FOCUS_OK];
   const top = reasons[0];
   const p = STAT_PALETTE[top.tone] || STAT_PALETTE.rose;
-  const TopIcon = top.icon;
-  const d = focusDetail(rec, top);
   const open = () => onOpen(rec.key);
   return (
     <div role="button" tabIndex={0} onClick={open} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } }}
@@ -1363,14 +1343,6 @@ function FocusCard({ item, onOpen, onItems }) {
               </div>
             )}
           </div>
-        </div>
-
-        <div className="mt-3 min-w-0">
-          <div className="flex items-center gap-1.5 text-[12.5px] font-semibold leading-snug">
-            <TopIcon size={13} className={cn('shrink-0', p.text)} />
-            <span className="truncate" title={d.main}>{d.main}</span>
-          </div>
-          {d.sub && <div className="mt-0.5 truncate pl-[19px] text-[11px] text-muted-fg" title={d.sub}>{d.sub}</div>}
         </div>
 
         <FocusTimeline rec={rec} />
@@ -1887,10 +1859,11 @@ function FocusView({ allRecords, focus, setFocus, loading, error, onOpen, onRefr
   );
 }
 
-// Current / New design switch (top right). Defaults to the current design; the
-// choice is remembered per browser.
-const DESIGN_KEY = 'poScrub.design';
-const readDesign = () => { try { return localStorage.getItem(DESIGN_KEY) === 'new' ? 'new' : 'current'; } catch { return 'current'; } };
+// Current / New design switch (top right). Defaults to the New design; the
+// choice is remembered per browser. (The key was renamed when the default
+// changed, so choices saved under the old default don't hold anyone back.)
+const DESIGN_KEY = 'poScrub.design.v2';
+const readDesign = () => { try { return localStorage.getItem(DESIGN_KEY) === 'current' ? 'current' : 'new'; } catch { return 'new'; } };
 
 export default function POScrubReport() {
   const { data, isLoading, error, refetch, isFetching } = usePoScrubQuery({
